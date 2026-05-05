@@ -1,0 +1,48 @@
+import { useState } from "preact/hooks";
+import { AddAccountCard } from "../components/accounts/AddAccountCard";
+import { AddAccountModal } from "../components/accounts/AddAccountModal";
+import { AccountCard } from "../components/accounts/AccountCard";
+import type { AccountProfile, AccountKind } from "../types/onedrive";
+
+interface AccountsHomePageProps {
+  accounts: AccountProfile[];
+  onCreateAccount: (displayName: string, kind: AccountKind) => Promise<void>;
+  onOpenAccount: (accountId: string) => void;
+  onSetAccountAgentState: (accountId: string, state: "syncing" | "paused" | "idle") => Promise<void>;
+  onStartAuth: (accountId: string) => Promise<unknown>;
+}
+
+export function AccountsHomePage({
+  accounts,
+  onCreateAccount,
+  onOpenAccount,
+  onSetAccountAgentState,
+  onStartAuth,
+}: AccountsHomePageProps) {
+  const [showAddModal, setShowAddModal] = useState(false);
+
+  return (
+    <section class="page">
+      <h2>Accounts</h2>
+      <div class="accounts-grid">
+        {accounts.map((account) => (
+          <AccountCard
+            key={account.id}
+            account={account}
+            onOpenDetails={onOpenAccount}
+            onSetAgentState={onSetAccountAgentState}
+            onStartAuth={onStartAuth}
+          />
+        ))}
+        <AddAccountCard onClick={() => setShowAddModal(true)} />
+      </div>
+
+      {showAddModal && (
+        <AddAccountModal
+          onClose={() => setShowAddModal(false)}
+          onCreateAccount={onCreateAccount}
+        />
+      )}
+    </section>
+  );
+}

@@ -1,0 +1,85 @@
+export type AccountKind = "personal" | "business";
+
+export type SyncAgentState = "idle" | "syncing" | "paused" | "error";
+
+export interface AccountProfile {
+  id: string;
+  displayName: string;
+  slug: string;
+  kind: AccountKind;
+  syncRoot: string;
+  authConfigured: boolean;
+  agentState: SyncAgentState;
+  lastSyncAt: string | null;
+}
+
+export interface ActivityEvent {
+  id: string;
+  profileId: string;
+  profileName: string;
+  kind: "info" | "success" | "warning" | "error";
+  message: string;
+  timestamp: string;
+}
+
+export interface DeviceAuthSession {
+  profileId: string;
+  userCode: string;
+  verificationUri: string;
+  verificationUriComplete: string | null;
+  expiresIn: number;
+  interval: number;
+  message: string;
+}
+
+export interface DeviceAuthPollResult {
+  status: "pending" | "authorized" | "error";
+  detail: string;
+}
+
+export interface CreateAccountProfileInput {
+  displayName: string;
+  kind: AccountKind;
+}
+
+export interface RenameAccountProfileInput {
+  id: string;
+  displayName: string;
+}
+
+export interface SetAccountAgentStateInput {
+  id: string;
+  agentState: SyncAgentState;
+}
+
+export interface SetAccountSyncRootInput {
+  id: string;
+  syncRoot: string;
+}
+
+export interface AppStatusSnapshot {
+  appVersion: string;
+  platform: string;
+  syncEngineReady: boolean;
+  authConfigured: boolean;
+  activeAccount: string | null;
+  lastSyncAt: string | null;
+  health: "ok" | "degraded" | "error";
+  accounts: AccountProfile[];
+}
+
+export interface UpdateCheckResult {
+  currentVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+  releaseUrl: string;
+}
+
+export type ToastType = "success" | "error" | "info";
+
+export interface ToastMessage {
+  id: number;
+  message: string;
+  type: ToastType;
+  durationMs: number;
+}

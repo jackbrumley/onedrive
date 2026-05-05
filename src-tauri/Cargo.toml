@@ -1,0 +1,26 @@
+[package]
+name = "onedrive-gui"
+version = "0.1.0"
+description = "Linux-first OneDrive GUI client"
+authors = ["OneDrive GUI Team"]
+license = "MIT"
+edition = "2021"
+
+[lib]
+name = "onedrive_gui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+chrono = "0.4"
+dirs = "5.0"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["sync", "time", "macros"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
