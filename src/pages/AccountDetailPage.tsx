@@ -4,13 +4,11 @@ import { AccountOverviewPanel } from "../components/accounts/AccountOverviewPane
 import { AccountSettingsPanel } from "../components/accounts/AccountSettingsPanel";
 import { AccountSyncPanel } from "../components/accounts/AccountSyncPanel";
 import type { AccountDetailTab } from "../routes/appRoutes";
-import type { AccountProfile, ActivityEvent, DeviceAuthSession } from "../types/onedrive";
+import type { AccountProfile, ActivityEvent } from "../types/onedrive";
 
 interface AccountDetailPageProps {
   account: AccountProfile | null;
   activeTab: AccountDetailTab;
-  authSession: DeviceAuthSession | null;
-  authPending: boolean;
   events: ActivityEvent[];
   onBack: () => void;
   onChangeTab: (tab: AccountDetailTab) => void;
@@ -18,7 +16,6 @@ interface AccountDetailPageProps {
   onStartAuth: (accountId: string) => Promise<unknown>;
   onRename: (id: string, name: string) => Promise<void>;
   onSetSyncRoot: (id: string, path: string) => Promise<void>;
-  onPollAuth: (id: string) => Promise<unknown>;
   onClearAuth: (id: string) => Promise<void>;
   onRemoveProfile: (id: string) => Promise<void>;
 }
@@ -26,8 +23,6 @@ interface AccountDetailPageProps {
 export function AccountDetailPage({
   account,
   activeTab,
-  authSession,
-  authPending,
   events,
   onBack,
   onChangeTab,
@@ -35,7 +30,6 @@ export function AccountDetailPage({
   onStartAuth,
   onRename,
   onSetSyncRoot,
-  onPollAuth,
   onClearAuth,
   onRemoveProfile,
 }: AccountDetailPageProps) {
@@ -80,12 +74,9 @@ export function AccountDetailPage({
       {activeTab === "settings" && (
         <AccountSettingsPanel
           account={account}
-          authSession={authSession}
-          authPending={authPending}
           onRename={onRename}
           onSetSyncRoot={onSetSyncRoot}
           onStartAuth={onStartAuth}
-          onPollAuth={onPollAuth}
           onClearAuth={onClearAuth}
           onRemoveProfile={onRemoveProfile}
         />

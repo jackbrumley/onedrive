@@ -7,6 +7,7 @@ interface DebugPageProps {
   onRefreshStatus: () => Promise<void>;
   onFetchSessionLogText: () => Promise<string>;
   onCopySessionLog: () => Promise<void>;
+  onOpenSessionLog: () => Promise<void>;
 }
 
 export function DebugPage({
@@ -15,6 +16,7 @@ export function DebugPage({
   onRefreshStatus,
   onFetchSessionLogText,
   onCopySessionLog,
+  onOpenSessionLog,
 }: DebugPageProps) {
   const [logPreview, setLogPreview] = useState("");
   const [loadingLog, setLoadingLog] = useState(false);
@@ -41,6 +43,7 @@ export function DebugPage({
             {loadingLog ? "Loading..." : "Load Session Log Preview"}
           </button>
           <button onClick={onCopySessionLog}>Copy Session Log</button>
+          <button onClick={onOpenSessionLog}>Open Session Log File</button>
         </div>
       </article>
 

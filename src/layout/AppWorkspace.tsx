@@ -34,8 +34,6 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
         <AccountDetailPage
           account={selectedAccount}
           activeTab={runtime.routeState.accountTab}
-          authSession={selectedAccount ? runtime.authSessions[selectedAccount.id] ?? null : null}
-          authPending={selectedAccount ? Boolean(runtime.authPending[selectedAccount.id]) : false}
           events={selectedAccountEvents}
           onBack={runtime.goHome}
           onChangeTab={(tab) => {
@@ -44,10 +42,9 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
             }
           }}
           onSetAgentState={runtime.setAccountAgentState}
-          onStartAuth={runtime.startDeviceAuth}
+          onStartAuth={runtime.startInteractiveAuth}
           onRename={runtime.renameAccountProfile}
           onSetSyncRoot={runtime.setAccountSyncRoot}
-          onPollAuth={runtime.pollDeviceAuth}
           onClearAuth={runtime.clearAccountAuth}
           onRemoveProfile={runtime.removeAccountProfile}
         />
@@ -59,6 +56,7 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
           onRefreshStatus={runtime.refreshStatus}
           onFetchSessionLogText={runtime.fetchSessionLogText}
           onCopySessionLog={runtime.copySessionLog}
+          onOpenSessionLog={runtime.openSessionLog}
         />
       )}
       renderUiLab={() => <UiLabPage onBack={runtime.goDebug} />}

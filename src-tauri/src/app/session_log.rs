@@ -4,6 +4,7 @@ use std::env::consts::{ARCH, OS};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::OnceLock;
 
 static SESSION_LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
@@ -78,6 +79,44 @@ pub fn resolve_session_log_path() -> Result<PathBuf, String> {
 pub fn get_session_log_text() -> Result<String, String> {
     let log_path = resolve_session_log_path()?;
     std::fs::read_to_string(log_path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn copy_session_log_to_clipboard() -> Result<(), String> {
+    let logs = get_session_log_text()?;
+    let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
+    clipboard.set_text(logs).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn open_session_log() -> Result<(), String> {
+    let log_path = resolve_session_log_path()?;
+
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open")
+            .arg(&log_path)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer")
+            .arg(&log_path)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(&log_path)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+    }
+
+    Ok(())
 }
 
 #[tauri::command]

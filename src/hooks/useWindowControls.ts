@@ -30,8 +30,8 @@ export function useWindowControls() {
   const minimize = async () => {
     try {
       await getCurrentWindow().minimize();
-    } catch {
-      // no-op
+    } catch (error) {
+      console.error("Failed to minimize window:", error);
     }
   };
 
@@ -44,16 +44,16 @@ export function useWindowControls() {
         await appWindow.maximize();
       }
       setIsMaximized(await appWindow.isMaximized());
-    } catch {
-      // no-op
+    } catch (error) {
+      console.error("Failed to toggle maximize:", error);
     }
   };
 
   const close = async () => {
     try {
       await getCurrentWindow().close();
-    } catch {
-      // no-op
+    } catch (error) {
+      console.error("Failed to close window:", error);
     }
   };
 
@@ -66,8 +66,8 @@ export function useWindowControls() {
     if (event.button === 0 && !(event.target as HTMLElement).closest("button, input, select, a")) {
       try {
         await getCurrentWindow().startDragging();
-      } catch {
-        // no-op
+      } catch (error) {
+        console.error("Failed to start dragging:", error);
       }
     }
   };

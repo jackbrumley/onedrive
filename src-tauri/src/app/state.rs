@@ -7,9 +7,19 @@ pub struct DeviceAuthPending {
     pub interval_secs: u64,
 }
 
+pub struct InteractiveAuthPending {
+    pub profile_id: String,
+    pub state: String,
+    pub window_label: String,
+    pub client_id: String,
+    pub redirect_uri: String,
+    pub token_url: String,
+}
+
 pub struct AppState {
     pub profiles_lock: Arc<Mutex<()>>,
     pub auth_pending: Arc<Mutex<HashMap<String, DeviceAuthPending>>>,
+    pub interactive_auth_pending: Arc<Mutex<HashMap<String, InteractiveAuthPending>>>,
     pub sync_worker_stops: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>>,
 }
 
@@ -17,6 +27,7 @@ pub fn create_app_state() -> AppState {
     AppState {
         profiles_lock: Arc::new(Mutex::new(())),
         auth_pending: Arc::new(Mutex::new(HashMap::new())),
+        interactive_auth_pending: Arc::new(Mutex::new(HashMap::new())),
         sync_worker_stops: Arc::new(Mutex::new(HashMap::new())),
     }
 }

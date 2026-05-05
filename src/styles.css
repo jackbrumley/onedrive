@@ -212,7 +212,7 @@ body {
 
 .accounts-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: 1fr;
   gap: 12px;
 }
 
@@ -669,8 +669,8 @@ a {
   }
 
   .shell-actions {
-    justify-content: flex-end;
-    margin-left: auto;
+    justify-content: flex-start;
+    margin-left: 0;
   }
 
   .window-controls {

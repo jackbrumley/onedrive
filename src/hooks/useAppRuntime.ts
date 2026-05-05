@@ -8,11 +8,10 @@ import {
 } from "../routes/appRoutes";
 import type {
   AccountKind,
+  AccountProfile,
   ActivityEvent,
   AppStatusSnapshot,
   CreateAccountProfileInput,
-  DeviceAuthPollResult,
-  DeviceAuthSession,
   RenameAccountProfileInput,
   SetAccountSyncRootInput,
   SetAccountAgentStateInput,
@@ -44,8 +43,6 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
-  const [authSessions, setAuthSessions] = useState<Record<string, DeviceAuthSession>>({});
-  const [authPending, setAuthPending] = useState<Record<string, boolean>>({});
 
   const navigate = (nextState: AppRouteState) => {
     const nextHash = hashFromRouteState(nextState);
@@ -131,11 +128,15 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
   const createAccountProfile = async (displayName: string, kind: AccountKind) => {
     const input: CreateAccountProfileInput = { displayName, kind };
     try {
-      await invoke("create_account_profile", { input });
-      showToast(`Account '${displayName}' added.`, "success", 2500);
+      const profile = await invoke<AccountProfile>("create_account_profile", { input });
+      showToast(`Account '${displayName}' added.`, "success", 2200);
       await Promise.all([refreshStatus(), refreshActivity()]);
+      const authStarted = await startInteractiveAuth(profile.id);
+      openAccount(profile.id, "settings");
+      return authStarted;
     } catch (error) {
       showToast(`Failed to add account: ${error}`, "error", 4200);
+      return false;
     }
   };
 
@@ -182,41 +183,14 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     }
   };
 
-  const startDeviceAuth = async (profileId: string) => {
+  const startInteractiveAuth = async (profileId: string) => {
     try {
-      const session = await invoke<DeviceAuthSession>("start_device_auth", { profileId });
-      setAuthSessions((current) => ({ ...current, [profileId]: session }));
-      showToast("Device sign-in started. Complete approval in your browser.", "info", 3400);
-      return session;
+      await invoke("start_interactive_auth", { profileId });
+      showToast("Microsoft sign-in opened. Complete sign-in in the auth window.", "info", 3600);
+      return true;
     } catch (error) {
       showToast(`Failed to start sign-in: ${error}`, "error", 4200);
-      return null;
-    }
-  };
-
-  const pollDeviceAuth = async (profileId: string) => {
-    setAuthPending((current) => ({ ...current, [profileId]: true }));
-    try {
-      const result = await invoke<DeviceAuthPollResult>("poll_device_auth", { profileId });
-      if (result.status === "authorized") {
-        showToast("Account authentication complete.", "success", 2600);
-        setAuthSessions((current) => {
-          const next = { ...current };
-          delete next[profileId];
-          return next;
-        });
-        await Promise.all([refreshStatus(), refreshActivity()]);
-      } else if (result.status === "pending") {
-        showToast("Still waiting for approval.", "info", 1800);
-      } else {
-        showToast(result.detail, "error", 4200);
-      }
-      return result;
-    } catch (error) {
-      showToast(`Failed to poll sign-in: ${error}`, "error", 4200);
-      return null;
-    } finally {
-      setAuthPending((current) => ({ ...current, [profileId]: false }));
+      return false;
     }
   };
 
@@ -268,31 +242,19 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
   };
 
   const copySessionLog = async () => {
-    const text = await fetchSessionLogText();
-    if (!text) {
-      showToast("Session log is empty.", "info", 2200);
-      return;
-    }
-
     try {
-      await navigator.clipboard.writeText(text);
+      await invoke("copy_session_log_to_clipboard");
       showToast("Session log copied to clipboard.", "success", 2600);
-    } catch {
-      const fallback = document.createElement("textarea");
-      fallback.value = text;
-      fallback.setAttribute("readonly", "true");
-      fallback.style.position = "fixed";
-      fallback.style.opacity = "0";
-      document.body.appendChild(fallback);
-      fallback.select();
-      try {
-        document.execCommand("copy");
-        showToast("Session log copied to clipboard.", "success", 2600);
-      } catch {
-        showToast("Failed to copy session log.", "error", 3000);
-      } finally {
-        document.body.removeChild(fallback);
-      }
+    } catch (error) {
+      showToast(`Failed to copy session log: ${error}`, "error", 4200);
+    }
+  };
+
+  const openSessionLog = async () => {
+    try {
+      await invoke("open_session_log");
+    } catch (error) {
+      showToast(`Failed to open session log: ${error}`, "error", 4200);
     }
   };
 
@@ -312,8 +274,6 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     updateError,
     lastCheckedAt,
     activityEvents,
-    authSessions,
-    authPending,
     syncingCount: status.accounts.filter((account) => account.agentState === "syncing").length,
     pausedCount: status.accounts.filter((account) => account.agentState === "paused").length,
     navigate,
@@ -329,12 +289,12 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     removeAccountProfile,
     setAccountAgentState,
     setAccountSyncRoot,
-    startDeviceAuth,
-    pollDeviceAuth,
+    startInteractiveAuth,
     clearAccountAuth,
     pauseAllAccounts,
     resumeAllAccounts,
     fetchSessionLogText,
     copySessionLog,
+    openSessionLog,
   };
 }

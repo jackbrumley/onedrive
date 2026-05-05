@@ -6,7 +6,7 @@ import type { AccountProfile, AccountKind } from "../types/onedrive";
 
 interface AccountsHomePageProps {
   accounts: AccountProfile[];
-  onCreateAccount: (displayName: string, kind: AccountKind) => Promise<void>;
+  onCreateAccount: (displayName: string, kind: AccountKind) => Promise<boolean>;
   onOpenAccount: (accountId: string) => void;
 }
 

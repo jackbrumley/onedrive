@@ -18,7 +18,7 @@ interface SettingsPageProps {
   accounts: AccountProfile[];
   authSessions: Record<string, DeviceAuthSession>;
   authPending: Record<string, boolean>;
-  onCreateAccountProfile: (displayName: string, kind: AccountKind) => Promise<void>;
+  onCreateAccountProfile: (displayName: string, kind: AccountKind) => Promise<boolean>;
   onRenameAccountProfile: (id: string, displayName: string) => Promise<void>;
   onRemoveAccountProfile: (id: string) => Promise<void>;
   onSetAccountAgentState: (id: string, agentState: SyncAgentState) => Promise<void>;

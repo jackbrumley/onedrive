@@ -5,7 +5,7 @@ import { SelectField, type SelectFieldOption } from "../ui/SelectField";
 
 interface AddAccountModalProps {
   onClose: () => void;
-  onCreateAccount: (displayName: string, kind: AccountKind) => Promise<void>;
+  onCreateAccount: (displayName: string, kind: AccountKind) => Promise<boolean>;
 }
 
 const accountKindOptions: SelectFieldOption[] = [
@@ -25,9 +25,14 @@ export function AddAccountModal({ onClose, onCreateAccount }: AddAccountModalPro
       return;
     }
     setSaving(true);
-    await onCreateAccount(trimmed, kind);
-    setSaving(false);
-    onClose();
+    try {
+      const created = await onCreateAccount(trimmed, kind);
+      if (created) {
+        onClose();
+      }
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (

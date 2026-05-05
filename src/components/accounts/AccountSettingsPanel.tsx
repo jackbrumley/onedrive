@@ -1,28 +1,21 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState } from "preact/hooks";
-import type { AccountProfile, DeviceAuthSession } from "../../types/onedrive";
+import type { AccountProfile } from "../../types/onedrive";
 
 interface AccountSettingsPanelProps {
   account: AccountProfile;
-  authSession: DeviceAuthSession | null;
-  authPending: boolean;
   onRename: (id: string, name: string) => Promise<void>;
   onSetSyncRoot: (id: string, path: string) => Promise<void>;
   onStartAuth: (id: string) => Promise<unknown>;
-  onPollAuth: (id: string) => Promise<unknown>;
   onClearAuth: (id: string) => Promise<void>;
   onRemoveProfile: (id: string) => Promise<void>;
 }
 
 export function AccountSettingsPanel({
   account,
-  authSession,
-  authPending,
   onRename,
   onSetSyncRoot,
   onStartAuth,
-  onPollAuth,
   onClearAuth,
   onRemoveProfile,
 }: AccountSettingsPanelProps) {
@@ -67,23 +60,8 @@ export function AccountSettingsPanel({
       <h4>Authentication</h4>
       <div class="button-row">
         <button onClick={() => onStartAuth(account.id)}>Start Microsoft Sign-In</button>
-        <button onClick={() => onPollAuth(account.id)} disabled={authPending}>
-          {authPending ? "Polling..." : "Check Sign-In"}
-        </button>
         <button onClick={() => onClearAuth(account.id)}>Clear Auth</button>
       </div>
-
-      {authSession && (
-        <section class="auth-card">
-          <p>
-            Sign-in code: <strong>{authSession.userCode}</strong>
-          </p>
-          <p>{authSession.message}</p>
-          <button onClick={() => openUrl(authSession.verificationUriComplete ?? authSession.verificationUri)}>
-            Open Microsoft Verification Page
-          </button>
-        </section>
-      )}
 
       <h4>Danger Zone</h4>
       <div class="button-row">

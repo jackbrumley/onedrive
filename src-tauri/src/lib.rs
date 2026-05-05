@@ -11,6 +11,13 @@ pub fn run() {
         eprintln!("Failed to initialize app logger: {}", error);
     }
 
+    log::info!(
+        "Application launch | version={} platform={}/{}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    );
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -29,10 +36,13 @@ pub fn run() {
             set_account_sync_root,
             list_activity_events,
             start_device_auth,
+            start_interactive_auth,
             poll_device_auth,
             clear_account_auth,
             app::session_log::log_ui_event,
-            app::session_log::get_session_log_text
+            app::session_log::get_session_log_text,
+            app::session_log::copy_session_log_to_clipboard,
+            app::session_log::open_session_log
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
