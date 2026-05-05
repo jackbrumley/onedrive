@@ -1,4 +1,5 @@
 import { useMemo, useState } from "preact/hooks";
+import { SyncStateControl } from "../components/sync/SyncStateControl";
 import type { AccountProfile } from "../types/onedrive";
 
 interface UiLabPageProps {
@@ -41,6 +42,8 @@ const previewAccounts: AccountProfile[] = [
 export function UiLabPage({ onBack }: UiLabPageProps) {
   const [scenario, setScenario] = useState<"empty" | "single" | "mixed">("mixed");
   const [showErrorBanner, setShowErrorBanner] = useState(true);
+  const [demoAccountSyncState, setDemoAccountSyncState] = useState<"syncing" | "paused">("syncing");
+  const [demoGlobalSyncState, setDemoGlobalSyncState] = useState<"syncing" | "paused">("paused");
 
   const accounts = useMemo(() => {
     if (scenario === "empty") {
@@ -66,6 +69,19 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
           <button onClick={() => setShowErrorBanner((current) => !current)}>
             {showErrorBanner ? "Hide" : "Show"} Error Banner
           </button>
+        </div>
+      </article>
+
+      <article class="card">
+        <h3>Pause / Play Control Demo</h3>
+        <p>Click these controls to simulate the sync pause/resume behavior.</p>
+        <div class="button-row" style={{ alignItems: "center" }}>
+          <span class="pill">Account Sync: {demoAccountSyncState}</span>
+          <SyncStateControl state={demoAccountSyncState} onToggle={async (next) => setDemoAccountSyncState(next)} />
+        </div>
+        <div class="button-row" style={{ alignItems: "center" }}>
+          <span class="pill">Global Sync: {demoGlobalSyncState}</span>
+          <SyncStateControl state={demoGlobalSyncState} onToggle={async (next) => setDemoGlobalSyncState(next)} />
         </div>
       </article>
 
