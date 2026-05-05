@@ -1,6 +1,6 @@
-# OneDrive GUI (Linux-first)
+# OneDrive (Linux-first)
 
-OneDrive GUI is a Linux-first desktop client for Microsoft OneDrive built as a single, self-contained Tauri application.
+OneDrive is a Linux-first desktop client for Microsoft OneDrive built as a single, self-contained Tauri application.
 
 This project baseline is intentionally modeled on proven patterns from `voquill` and `rusty-g6`: modular Rust command boundaries, Preact UI pages/components/hooks, clear runtime state ownership, and an in-app update-check workflow.
 
@@ -73,17 +73,17 @@ This baseline does **not** yet implement OneDrive auth or sync logic.
   - `~/OneDrive-OSS/work/`
   - `~/OneDrive-OSS/personal-2/`
 - App metadata (internal):
-  - `~/.config/onedrive-gui/accounts/<profile-id>/`
+  - `~/.config/onedrive/accounts/<profile-id>/`
   - auth/session metadata
   - sync cursors and profile-specific settings
 
 Current baseline implementation stores account profiles in:
 
-- `~/.config/onedrive-gui/accounts/profiles.json`
+- `~/.config/onedrive/accounts/profiles.json`
 
 Current baseline authentication implementation stores per-profile auth sessions in:
 
-- `~/.config/onedrive-gui/accounts/<profile-id>/auth.json`
+- `~/.config/onedrive/accounts/<profile-id>/auth.json`
 
 ### OneDrive Reference Inputs
 

@@ -93,6 +93,46 @@ body {
   border-color: var(--brand-highlight);
 }
 
+.sync-state-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #2f6f4d;
+  border-color: #3c8a62;
+}
+
+.sync-state-btn:hover {
+  background: #2a8457;
+}
+
+.sync-state-btn:disabled {
+  background: #3b4452;
+  border-color: #556273;
+}
+
+.sync-icon-spinning {
+  animation: sync-spin 1.2s linear infinite;
+}
+
+@keyframes sync-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sync-icon-spinning {
+    animation: none;
+  }
+}
+
 .window-controls {
   display: flex;
   gap: 6px;
@@ -234,7 +274,7 @@ button {
   color: #ffffff;
   background: var(--brand-primary);
   border: 1px solid var(--brand-strong);
-  border-radius: 9px;
+  border-radius: 999px;
   padding: 8px 12px;
   cursor: pointer;
 }
@@ -310,6 +350,15 @@ input::placeholder {
 
 .inline-form-row input {
   flex: 1;
+}
+
+.pill-icon-btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .pill {

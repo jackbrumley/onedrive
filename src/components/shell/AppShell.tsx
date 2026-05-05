@@ -1,16 +1,30 @@
 import type { ComponentChildren } from "preact";
 import type { AppPage } from "../../routes/appRoutes";
 import { useWindowControls } from "../../hooks/useWindowControls";
+import { SyncStateControl } from "../sync/SyncStateControl";
 import { WindowControls } from "./WindowControls";
 
 interface AppShellProps {
   page: AppPage;
   onGoHome: () => void;
   onGoDebug: () => void;
+  syncingCount: number;
+  pausedCount: number;
+  onPauseAll: () => Promise<void>;
+  onResumeAll: () => Promise<void>;
   children: ComponentChildren;
 }
 
-export function AppShell({ page, onGoHome, onGoDebug, children }: AppShellProps) {
+export function AppShell({
+  page,
+  onGoHome,
+  onGoDebug,
+  syncingCount,
+  pausedCount,
+  onPauseAll,
+  onResumeAll,
+  children,
+}: AppShellProps) {
   const {
     isMaximized,
     minimize,
@@ -36,6 +50,18 @@ export function AppShell({ page, onGoHome, onGoDebug, children }: AppShellProps)
           <button class={isDebug ? "top-pill active" : "top-pill"} onClick={onGoDebug}>
             Debug
           </button>
+          <SyncStateControl
+            state={syncingCount > 0 ? "syncing" : "paused"}
+            onToggle={async (next) => {
+              if (next === "paused") {
+                await onPauseAll();
+              } else {
+                await onResumeAll();
+              }
+            }}
+            disabled={syncingCount === 0 && pausedCount === 0}
+            size={15}
+          />
         </div>
         <WindowControls
           isMaximized={isMaximized}

@@ -24,11 +24,14 @@ pub fn run() {
             rename_account_profile,
             remove_account_profile,
             set_account_agent_state,
+            pause_all_accounts,
+            resume_all_accounts,
             set_account_sync_root,
             list_activity_events,
             start_device_auth,
             poll_device_auth,
             clear_account_auth,
+            app::session_log::log_ui_event,
             app::session_log::get_session_log_text
         ])
         .run(tauri::generate_context!())

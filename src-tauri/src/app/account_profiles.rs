@@ -150,7 +150,7 @@ pub fn set_agent_state(input: SetAccountAgentStateInput) -> Result<AccountProfil
 
 fn storage_dir_path() -> Result<PathBuf, String> {
     let config_dir = dirs::config_dir().ok_or_else(|| "Could not resolve config directory".to_string())?;
-    Ok(config_dir.join("onedrive-gui").join("accounts"))
+    Ok(config_dir.join("onedrive").join("accounts"))
 }
 
 fn storage_file_path() -> Result<PathBuf, String> {

@@ -8,16 +8,12 @@ interface AccountsHomePageProps {
   accounts: AccountProfile[];
   onCreateAccount: (displayName: string, kind: AccountKind) => Promise<void>;
   onOpenAccount: (accountId: string) => void;
-  onSetAccountAgentState: (accountId: string, state: "syncing" | "paused" | "idle") => Promise<void>;
-  onStartAuth: (accountId: string) => Promise<unknown>;
 }
 
 export function AccountsHomePage({
   accounts,
   onCreateAccount,
   onOpenAccount,
-  onSetAccountAgentState,
-  onStartAuth,
 }: AccountsHomePageProps) {
   const [showAddModal, setShowAddModal] = useState(false);
 
@@ -30,8 +26,6 @@ export function AccountsHomePage({
             key={account.id}
             account={account}
             onOpenDetails={onOpenAccount}
-            onSetAgentState={onSetAccountAgentState}
-            onStartAuth={onStartAuth}
           />
         ))}
         <AddAccountCard onClick={() => setShowAddModal(true)} />

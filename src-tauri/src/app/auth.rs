@@ -257,7 +257,7 @@ pub fn clear_account_auth(state: tauri::State<'_, AppState>, profile_id: String)
 fn auth_session_file_path(profile_id: &str) -> Result<PathBuf, String> {
     let config_dir = dirs::config_dir().ok_or_else(|| "Could not resolve config directory".to_string())?;
     Ok(config_dir
-        .join("onedrive-gui")
+        .join("onedrive")
         .join("accounts")
         .join(profile_id)
         .join("auth.json"))

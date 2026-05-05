@@ -14,7 +14,7 @@ interface AccountDetailPageProps {
   events: ActivityEvent[];
   onBack: () => void;
   onChangeTab: (tab: AccountDetailTab) => void;
-  onSetAgentState: (accountId: string, state: "syncing" | "paused" | "idle") => Promise<void>;
+  onSetAgentState: (accountId: string, state: "syncing" | "paused") => Promise<void>;
   onStartAuth: (accountId: string) => Promise<unknown>;
   onRename: (id: string, name: string) => Promise<void>;
   onSetSyncRoot: (id: string, path: string) => Promise<void>;

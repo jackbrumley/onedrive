@@ -28,8 +28,6 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
           accounts={runtime.status.accounts}
           onCreateAccount={runtime.createAccountProfile}
           onOpenAccount={(accountId) => runtime.openAccount(accountId, "overview")}
-          onSetAccountAgentState={runtime.setAccountAgentState}
-          onStartAuth={runtime.startDeviceAuth}
         />
       )}
       renderAccountDetail={() => (
@@ -60,6 +58,7 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
           onNavigateUiLab={runtime.goUiLab}
           onRefreshStatus={runtime.refreshStatus}
           onFetchSessionLogText={runtime.fetchSessionLogText}
+          onCopySessionLog={runtime.copySessionLog}
         />
       )}
       renderUiLab={() => <UiLabPage onBack={runtime.goDebug} />}

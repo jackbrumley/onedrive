@@ -6,9 +6,16 @@ interface DebugPageProps {
   onNavigateUiLab: () => void;
   onRefreshStatus: () => Promise<void>;
   onFetchSessionLogText: () => Promise<string>;
+  onCopySessionLog: () => Promise<void>;
 }
 
-export function DebugPage({ status, onNavigateUiLab, onRefreshStatus, onFetchSessionLogText }: DebugPageProps) {
+export function DebugPage({
+  status,
+  onNavigateUiLab,
+  onRefreshStatus,
+  onFetchSessionLogText,
+  onCopySessionLog,
+}: DebugPageProps) {
   const [logPreview, setLogPreview] = useState("");
   const [loadingLog, setLoadingLog] = useState(false);
 
@@ -33,6 +40,7 @@ export function DebugPage({ status, onNavigateUiLab, onRefreshStatus, onFetchSes
           <button onClick={loadLog} disabled={loadingLog}>
             {loadingLog ? "Loading..." : "Load Session Log Preview"}
           </button>
+          <button onClick={onCopySessionLog}>Copy Session Log</button>
         </div>
       </article>
 

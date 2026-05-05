@@ -230,12 +230,69 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     }
   };
 
+  const pauseAllAccounts = async () => {
+    try {
+      const pausedCount = await invoke<number>("pause_all_accounts");
+      if (pausedCount > 0) {
+        showToast(`Paused synchronization for ${pausedCount} account${pausedCount === 1 ? "" : "s"}.`, "info", 2600);
+      } else {
+        showToast("No syncing accounts to pause.", "info", 2200);
+      }
+      await Promise.all([refreshStatus(), refreshActivity()]);
+    } catch (error) {
+      showToast(`Failed to pause all accounts: ${error}`, "error", 4200);
+    }
+  };
+
+  const resumeAllAccounts = async () => {
+    try {
+      const resumedCount = await invoke<number>("resume_all_accounts");
+      if (resumedCount > 0) {
+        showToast(`Resumed synchronization for ${resumedCount} account${resumedCount === 1 ? "" : "s"}.`, "success", 2600);
+      } else {
+        showToast("No paused accounts to resume.", "info", 2200);
+      }
+      await Promise.all([refreshStatus(), refreshActivity()]);
+    } catch (error) {
+      showToast(`Failed to resume all accounts: ${error}`, "error", 4200);
+    }
+  };
+
   const fetchSessionLogText = async () => {
     try {
       return await invoke<string>("get_session_log_text");
     } catch (error) {
       showToast(`Failed to read session log: ${error}`, "error", 4200);
       return "";
+    }
+  };
+
+  const copySessionLog = async () => {
+    const text = await fetchSessionLogText();
+    if (!text) {
+      showToast("Session log is empty.", "info", 2200);
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("Session log copied to clipboard.", "success", 2600);
+    } catch {
+      const fallback = document.createElement("textarea");
+      fallback.value = text;
+      fallback.setAttribute("readonly", "true");
+      fallback.style.position = "fixed";
+      fallback.style.opacity = "0";
+      document.body.appendChild(fallback);
+      fallback.select();
+      try {
+        document.execCommand("copy");
+        showToast("Session log copied to clipboard.", "success", 2600);
+      } catch {
+        showToast("Failed to copy session log.", "error", 3000);
+      } finally {
+        document.body.removeChild(fallback);
+      }
     }
   };
 
@@ -257,6 +314,8 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     activityEvents,
     authSessions,
     authPending,
+    syncingCount: status.accounts.filter((account) => account.agentState === "syncing").length,
+    pausedCount: status.accounts.filter((account) => account.agentState === "paused").length,
     navigate,
     goHome,
     openAccount,
@@ -273,6 +332,9 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     startDeviceAuth,
     pollDeviceAuth,
     clearAccountAuth,
+    pauseAllAccounts,
+    resumeAllAccounts,
     fetchSessionLogText,
+    copySessionLog,
   };
 }

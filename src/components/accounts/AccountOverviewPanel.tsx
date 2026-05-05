@@ -1,8 +1,9 @@
 import type { AccountProfile } from "../../types/onedrive";
+import { SyncStateControl } from "../sync/SyncStateControl";
 
 interface AccountOverviewPanelProps {
   account: AccountProfile;
-  onSetAgentState: (accountId: string, state: "syncing" | "paused" | "idle") => Promise<void>;
+  onSetAgentState: (accountId: string, state: "syncing" | "paused") => Promise<void>;
   onStartAuth: (accountId: string) => Promise<unknown>;
 }
 
@@ -19,9 +20,10 @@ export function AccountOverviewPanel({ account, onSetAgentState, onStartAuth }: 
       <p>Sync Root: {account.syncRoot}</p>
       <p>Last Sync: {account.lastSyncAt ? new Date(account.lastSyncAt).toLocaleString() : "Never"}</p>
       <div class="button-row">
-        <button onClick={() => onSetAgentState(account.id, "syncing")}>Sync Now</button>
-        <button onClick={() => onSetAgentState(account.id, "paused")}>Pause</button>
-        <button onClick={() => onSetAgentState(account.id, "idle")}>Stop</button>
+        <SyncStateControl
+          state={account.agentState === "syncing" ? "syncing" : "paused"}
+          onToggle={(next) => onSetAgentState(account.id, next)}
+        />
         {!account.authConfigured && <button onClick={() => onStartAuth(account.id)}>Authenticate</button>}
       </div>
     </article>

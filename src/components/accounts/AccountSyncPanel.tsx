@@ -1,9 +1,10 @@
 import type { ActivityEvent, AccountProfile } from "../../types/onedrive";
+import { SyncStateControl } from "../sync/SyncStateControl";
 
 interface AccountSyncPanelProps {
   account: AccountProfile;
   recentEvents: ActivityEvent[];
-  onSetAgentState: (accountId: string, state: "syncing" | "paused" | "idle") => Promise<void>;
+  onSetAgentState: (accountId: string, state: "syncing" | "paused") => Promise<void>;
 }
 
 export function AccountSyncPanel({ account, recentEvents, onSetAgentState }: AccountSyncPanelProps) {
@@ -14,9 +15,10 @@ export function AccountSyncPanel({ account, recentEvents, onSetAgentState }: Acc
         Current State: <span class="pill">{account.agentState}</span>
       </p>
       <div class="button-row">
-        <button onClick={() => onSetAgentState(account.id, "syncing")}>Start Sync</button>
-        <button onClick={() => onSetAgentState(account.id, "paused")}>Pause Sync</button>
-        <button onClick={() => onSetAgentState(account.id, "idle")}>Stop Sync</button>
+        <SyncStateControl
+          state={account.agentState === "syncing" ? "syncing" : "paused"}
+          onToggle={(next) => onSetAgentState(account.id, next)}
+        />
       </div>
 
       <h4>Recent Sync Activity</h4>

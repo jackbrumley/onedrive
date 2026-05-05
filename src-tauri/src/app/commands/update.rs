@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 const GITHUB_LATEST_RELEASE_API_URL: &str =
-    "https://api.github.com/repos/jackbrumley/onedrive-gui/releases/latest";
+    "https://api.github.com/repos/jackbrumley/onedrive/releases/latest";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,7 +28,7 @@ pub async fn check_for_updates() -> Result<UpdateCheckResult, String> {
 
     let response = client
         .get(GITHUB_LATEST_RELEASE_API_URL)
-        .header(reqwest::header::USER_AGENT, "onedrive-gui-update-checker")
+        .header(reqwest::header::USER_AGENT, "onedrive-update-checker")
         .header(reqwest::header::ACCEPT, "application/vnd.github+json")
         .send()
         .await
