@@ -1,11 +1,17 @@
 import { useState } from "preact/hooks";
 import type { AccountKind } from "../../types/onedrive";
 import { Modal } from "../ui/Modal";
+import { SelectField, type SelectFieldOption } from "../ui/SelectField";
 
 interface AddAccountModalProps {
   onClose: () => void;
   onCreateAccount: (displayName: string, kind: AccountKind) => Promise<void>;
 }
+
+const accountKindOptions: SelectFieldOption[] = [
+  { value: "personal", label: "Personal" },
+  { value: "business", label: "Business" },
+];
 
 export function AddAccountModal({ onClose, onCreateAccount }: AddAccountModalProps) {
   const [name, setName] = useState("");
@@ -41,14 +47,17 @@ export function AddAccountModal({ onClose, onCreateAccount }: AddAccountModalPro
         <label class="field-label" for="new-account-kind">
           Account Type
         </label>
-        <select id="new-account-kind" value={kind} onChange={(event) => setKind(event.currentTarget.value as AccountKind)}>
-          <option value="personal">Personal</option>
-          <option value="business">Business</option>
-        </select>
+        <SelectField
+          id="new-account-kind"
+          name="new-account-kind"
+          value={kind}
+          options={accountKindOptions}
+          onValueChange={(next) => setKind(next as AccountKind)}
+        />
 
         <div class="button-row">
           <button type="submit" disabled={!name.trim() || saving}>
-            {saving ? "Adding..." : "Create Account"}
+            {saving ? "Adding..." : "Add Account"}
           </button>
           <button type="button" class="ghost" onClick={onClose}>
             Cancel

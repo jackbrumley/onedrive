@@ -59,7 +59,7 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
     <section class="page">
       <h2>UI Lab</h2>
       <article class="card">
-        <p>Hidden visual sandbox inspired by Rusty G6 + Yambuck debug preview patterns.</p>
+        <p>Hidden visual sandbox for quickly previewing account states and UI variations.</p>
         <p>Route shortcut: #/ui-lab</p>
         <div class="button-row">
           <button onClick={onBack}>Back to Debug</button>

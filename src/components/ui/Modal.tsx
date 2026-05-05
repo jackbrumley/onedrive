@@ -1,4 +1,5 @@
 import type { ComponentChildren } from "preact";
+import { IconX } from "@tabler/icons-preact";
 
 interface ModalProps {
   title: string;
@@ -13,7 +14,7 @@ export function Modal({ title, onClose, children }: ModalProps) {
         <header class="modal-header">
           <h3>{title}</h3>
           <button class="modal-close" onClick={onClose} aria-label="Close modal">
-            x
+            <IconX size={16} stroke={2.2} />
           </button>
         </header>
         <div class="modal-body">{children}</div>

@@ -1,12 +1,18 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState } from "preact/hooks";
+import { SelectField, type SelectFieldOption } from "../components/ui/SelectField";
 import type {
   AccountKind,
   AccountProfile,
   DeviceAuthSession,
   SyncAgentState,
 } from "../types/onedrive";
+
+const accountKindOptions: SelectFieldOption[] = [
+  { value: "personal", label: "Personal" },
+  { value: "business", label: "Business" },
+];
 
 interface SettingsPageProps {
   accounts: AccountProfile[];
@@ -81,14 +87,13 @@ export function SettingsPage({
           <label class="field-label" for="account-kind-select">
             Account Type
           </label>
-          <select
+          <SelectField
             id="account-kind-select"
+            name="account-kind-select"
             value={newAccountKind}
-            onChange={(event) => setNewAccountKind(event.currentTarget.value as AccountKind)}
-          >
-            <option value="personal">Personal</option>
-            <option value="business">Business</option>
-          </select>
+            options={accountKindOptions}
+            onValueChange={(next) => setNewAccountKind(next as AccountKind)}
+          />
 
           <button type="submit" disabled={!newAccountName.trim()}>
             Add Account Profile

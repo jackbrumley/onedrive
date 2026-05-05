@@ -19,7 +19,6 @@ export function AccountsHomePage({
 
   return (
     <section class="page">
-      <h2>Accounts</h2>
       <div class="accounts-grid">
         {accounts.map((account) => (
           <AccountCard

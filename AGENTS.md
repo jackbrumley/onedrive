@@ -1,10 +1,10 @@
-# Voquill Agent Manifesto & Guidelines
+# OneDrive Agent Manifesto & Guidelines
 
-This document serves as a constitution for all agentic coding entities (and humans) operating within the Voquill repository. Integrity, cleanliness, and architectural soundness are our primary metrics of success.
+This document serves as a constitution for all agentic coding entities (and humans) operating within this repository. Integrity, cleanliness, and architectural soundness are our primary metrics of success.
 
 ---
 
-## 🏛️ The Voquill Philosophy
+## 🏛️ The Project Philosophy
 
 ### 1. Integrity Over Expediency
 We do not value "quick hacks" that work today but create technical debt for tomorrow. If a feature or fix cannot be implemented cleanly, it should not be implemented until a proper architectural solution is found. 
@@ -105,7 +105,7 @@ Managed via **npm** scripts and the Tauri CLI.
 | **Windows** | Desktop | WASAPI | CoreAudio API |
 
 ### Linux Permission Setup
-On Wayland, Voquill triggers standard XDG Portal prompts for microphone, global shortcuts, and remote desktop (input simulation). On X11, equivalent capabilities use native X11 backends and should still surface clear setup/readiness state in the UI.
+On Wayland, the app should trigger standard XDG Portal prompts for microphone, global shortcuts, and remote desktop (input simulation). On X11, equivalent capabilities use native X11 backends and should still surface clear setup/readiness state in the UI.
 
 ---
 
@@ -160,4 +160,4 @@ Any agent working on this repo should prioritize the following cleanups:
 - **Ignoring Warnings:** Treat compiler warnings as errors. Clean code means zero warnings.
 
 ---
-*Voquill: Clean code is a requirement, not a feature.*
+*Clean code is a requirement, not a feature.*

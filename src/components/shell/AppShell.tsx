@@ -36,6 +36,7 @@ export function AppShell({
 
   const isHome = page === "accountsHome";
   const isDebug = page === "debug" || page === "uiLab";
+  const hasSyncAccounts = syncingCount > 0 || pausedCount > 0;
 
   return (
     <div class="app-shell">
@@ -48,27 +49,32 @@ export function AppShell({
             Accounts
           </button>
           <button class={isDebug ? "top-pill active" : "top-pill"} onClick={onGoDebug}>
-            Debug
+            Settings
           </button>
+        </div>
+        <div class="title-right-actions">
           <SyncStateControl
-            state={syncingCount > 0 ? "syncing" : "paused"}
+            state={hasSyncAccounts ? (syncingCount > 0 ? "syncing" : "paused") : "inactive"}
             onToggle={async (next) => {
+              if (!hasSyncAccounts) {
+                return;
+              }
               if (next === "paused") {
                 await onPauseAll();
               } else {
                 await onResumeAll();
               }
             }}
-            disabled={syncingCount === 0 && pausedCount === 0}
+            disabled={!hasSyncAccounts}
             size={15}
           />
-        </div>
         <WindowControls
           isMaximized={isMaximized}
           onMinimize={minimize}
           onToggleMaximize={toggleMaximize}
           onClose={close}
         />
+        </div>
       </header>
 
       <main class="workspace">{children}</main>

@@ -28,7 +28,7 @@ export function routeStateFromHash(hash: string): AppRouteState {
     return defaultState;
   }
 
-  if (segments[0] === "debug") {
+  if (segments[0] === "settings" || segments[0] === "debug") {
     return {
       page: "debug",
       accountId: null,
@@ -55,7 +55,7 @@ export function hashFromRouteState(state: AppRouteState): string {
     return `#/accounts/${encodeURIComponent(state.accountId)}/${state.accountTab}`;
   }
   if (state.page === "debug") {
-    return "#/debug";
+    return "#/settings";
   }
   if (state.page === "uiLab") {
     return "#/ui-lab";

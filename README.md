@@ -2,7 +2,7 @@
 
 OneDrive is a Linux-first desktop client for Microsoft OneDrive built as a single, self-contained Tauri application.
 
-This project baseline is intentionally modeled on proven patterns from `voquill` and `rusty-g6`: modular Rust command boundaries, Preact UI pages/components/hooks, clear runtime state ownership, and an in-app update-check workflow.
+This project baseline uses modular Rust command boundaries, Preact UI pages/components/hooks, clear runtime state ownership, and an in-app update-check workflow.
 
 ## Product Principles
 
@@ -153,6 +153,6 @@ npm run tauri:build
 
 ## Standards Used
 
-- Structural standards inspired by `voquill` and `rusty-g6`.
-- Agent and architecture standards copied from `voquill/AGENTS.md` as requested.
-- Product philosophy aligned with `rusty-g6`: desktop-first, simple UX, no command-line dependency for end users.
+- Structural standards focused on clean module boundaries and maintainability.
+- Agent and architecture standards documented in `AGENTS.md`.
+- Product philosophy: desktop-first, simple UX, no command-line dependency for end users.

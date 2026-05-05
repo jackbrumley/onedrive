@@ -2,7 +2,7 @@ import { useMemo, useState } from "preact/hooks";
 import { IconPlayerPauseFilled, IconPlayerPlayFilled, IconRefresh } from "@tabler/icons-preact";
 
 interface SyncStateControlProps {
-  state: "syncing" | "paused";
+  state: "syncing" | "paused" | "inactive";
   onToggle: (next: "syncing" | "paused") => Promise<void>;
   disabled?: boolean;
   size?: number;
@@ -11,9 +11,12 @@ interface SyncStateControlProps {
 export function SyncStateControl({ state, onToggle, disabled = false, size = 16 }: SyncStateControlProps) {
   const [hovered, setHovered] = useState(false);
 
-  const nextState = state === "syncing" ? "paused" : "syncing";
+  const nextState: "syncing" | "paused" = state === "syncing" ? "paused" : "syncing";
 
   const title = useMemo(() => {
+    if (state === "inactive") {
+      return "No accounts to sync";
+    }
     if (disabled) {
       return "Synchronization unavailable";
     }
@@ -26,14 +29,21 @@ export function SyncStateControl({ state, onToggle, disabled = false, size = 16 
   return (
     <button
       class="sync-state-btn"
-      disabled={disabled}
+      disabled={disabled || state === "inactive"}
       title={title}
       aria-label={title}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onClick={() => onToggle(nextState)}
+      onClick={() => {
+        if (state === "inactive") {
+          return;
+        }
+        onToggle(nextState);
+      }}
     >
-      {state === "syncing" ? (
+      {state === "inactive" ? (
+        <IconPlayerPauseFilled size={size} />
+      ) : state === "syncing" ? (
         hovered ? (
           <IconPlayerPauseFilled size={size} />
         ) : (

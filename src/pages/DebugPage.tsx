@@ -29,7 +29,7 @@ export function DebugPage({
 
   return (
     <section class="page">
-      <h2>Debug</h2>
+      <h2>Settings</h2>
 
       <article class="card">
         <h3>Development Tools</h3>
