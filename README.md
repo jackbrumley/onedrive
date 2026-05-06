@@ -1,158 +1,125 @@
-# OneDrive (Linux-first)
+<p align="center">
+  <img src="src-tauri/icons/128x128.png" alt="SomeDrive Logo" width="96" height="96" />
+</p>
 
-OneDrive is a Linux-first desktop client for Microsoft OneDrive built as a single, self-contained Tauri application.
+<h1 align="center">SomeDrive - Linux-First Desktop Client for Microsoft OneDrive</h1>
 
-This project baseline uses modular Rust command boundaries, Preact UI pages/components/hooks, clear runtime state ownership, and an in-app update-check workflow.
+<p align="center">Simple GUI-first Microsoft OneDrive sync for Linux.</p>
 
-## Product Principles
+<p align="center">
+  <a href="https://opensource.org/license/mit"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License" /></a>
+  <a href="https://github.com/jackbrumley/somedrive"><img src="https://img.shields.io/badge/Platform-Linux-16a34a" alt="Platform" /></a>
+  <a href="https://tauri.app/"><img src="https://img.shields.io/badge/Built%20With-Tauri-14b8a6" alt="Built with Tauri" /></a>
+</p>
 
-- GUI-only product: no terminal commands, no manual config editing, and no required command-line workflow.
-- Setup by button clicks: onboarding, login, sync setup, recovery actions, and diagnostics are all in-app.
-- Single app runtime: one desktop application manages all account profiles.
-- Multi-account from day one: personal, business, and additional accounts in one install.
+<p align="center">
+  <a href="https://github.com/jackbrumley/somedrive/releases/latest"><img src="https://img.shields.io/badge/Download-Latest%20Release-ef4444?style=for-the-badge" alt="Download Latest Release" /></a>
+</p>
 
-## User Experience Goals
+SomeDrive is a Linux-first Microsoft OneDrive desktop client with account-first controls, in-app sign-in, per-account pause/resume, and detailed sync diagnostics.
 
-- Simple installation with package formats users expect.
-- First-run guided setup for non-technical users.
-- Account management in one screen: add, remove, rename, pause, resume.
-- Clear status and actionable errors without asking users to open a terminal.
-- Accounts-first landing screen with one card per account profile.
-- Account detail workspace with local tabs (`overview`, `sync`, `activity`, `settings`).
+It exists because most Linux OneDrive tools are still command-line-heavy or awkward to install across different distributions. I wanted a straightforward desktop experience similar to what people expect on Windows: download it, install it, sign in, and sync.
 
-## Project Goals
+## Install
 
-- Deliver a clean Linux desktop GUI for OneDrive Personal and OneDrive for Business.
-- Keep the entire application in one repository and one app runtime (no external helper services).
-- Prioritize maintainability with explicit module boundaries and incremental milestone delivery.
-- Support multiple account profiles in one app instance with independent sync control per profile.
-- Default sync root convention: `~/OneDrive-OSS/<profile-slug>/`.
+Download the latest release here:
 
-## Scope (Baseline)
+- **[Download Latest Release](https://github.com/jackbrumley/somedrive/releases/latest)**
 
-This baseline includes:
+Planned package options:
 
-- Tauri v2 + Rust backend + Preact frontend structure.
-- App shell with routed pages (`status`, `files`, `activity`, `settings`, `debug`).
-- Shared runtime hook and typed frontend models.
-- Backend command modules with initial status + update-check commands.
-- Session logging foundation.
-- Baseline architecture docs and development guardrails (`AGENTS.md`).
+- Linux (Debian/Ubuntu): `.deb`
+- Linux (Fedora/RHEL): `.rpm`
+- Linux (Portable): `.AppImage`
 
-This baseline does **not** yet implement OneDrive auth or sync logic.
+## Getting Started
 
-## Architecture
+1. **Launch SomeDrive**
+   - Open the app and start from the accounts home screen.
+2. **Add your account**
+   - Click **Add Account**, choose personal or business, and complete Microsoft sign-in.
+3. **Confirm your sync root**
+   - Default per-account sync root is `~/SomeDrive/<profile-slug>/`.
+4. **Start syncing**
+   - Use per-account sync control to start/pause/resume as needed.
+5. **Check activity and logs**
+   - Open account activity and session logs for detailed sync diagnostics.
 
-### Frontend (Preact + TypeScript)
+## Features
 
-- `src/app/` route parsing and app-level wiring.
-- `src/components/` reusable UI shell and feedback components.
-- `src/hooks/` runtime orchestration and UI behavior hooks.
-- `src/pages/` feature pages by domain.
-- `src/types/` strict shared UI types.
+- **Multi-Account by Design** - Manage personal, business, and additional accounts in one app.
+- **In-App Microsoft Sign-In** - Interactive authentication flow without manual token handling.
+- **Per-Account Sync Control** - Start, pause, and resume each account independently.
+- **Persistent Sync State** - Per-account state and sync metadata stored under `~/.config/somedrive/`.
+- **Detailed Diagnostics** - Session logs include cycle-level and file-level sync activity with account prefixes.
+- **Clean Desktop UI** - Account-first navigation with clear status, activity, and settings pages.
 
-### Backend (Rust + Tauri Commands)
+## Why This Project Exists
 
-- `src-tauri/src/app/commands/` command modules by responsibility.
-- `src-tauri/src/app/state.rs` shared app state container.
-- `src-tauri/src/app/session_log.rs` runtime/session logging.
-- `src-tauri/src/lib.rs` orchestration only: plugins/state/command registration.
+I still use Windows for work and wanted that same level of simplicity on Linux for OneDrive: no setup maze, no command memorization, no terminal dependency.
 
-### Multi-Account Architecture Baseline
+SomeDrive is built to do what it says on the tin:
 
-- `AccountProfile`: source-of-truth record for each linked account.
-- Per-profile sync root: `~/OneDrive-OSS/<profile-slug>/`.
-- Per-profile runtime state: auth health, cursor state, last sync, sync mode.
-- Independent sync agents: one worker loop per profile managed by a central orchestrator.
-- Global app shell: unified status/activity view across all profile agents.
+- install quickly,
+- connect your account in-app,
+- sync files reliably,
+- and show clear status in a GUI so you always know what is happening.
 
-### Storage Model (Planned)
+---
 
-- User files:
-  - `~/OneDrive-OSS/personal/`
-  - `~/OneDrive-OSS/work/`
-  - `~/OneDrive-OSS/personal-2/`
-- App metadata (internal):
-  - `~/.config/onedrive/accounts/<profile-id>/`
-  - auth/session metadata
-  - sync cursors and profile-specific settings
+## The Philosophy
 
-Current baseline implementation stores account profiles in:
+SomeDrive is built around a simple idea: sync software should feel clear, predictable, and user-controlled.
 
-- `~/.config/onedrive/accounts/profiles.json`
+- **No Terminal Required** - Everyday account, auth, and sync workflows are in-app.
+- **Clarity First** - Logs and status are explicit so issues are debuggable without guesswork.
+- **Account Ownership** - Each account has independent sync state and controls.
+- **Linux-First Delivery** - Prioritize Linux packaging and behavior while keeping architecture portable.
 
-Current baseline authentication implementation stores per-profile auth sessions in:
+## Screenshots
 
-- `~/.config/onedrive/accounts/<profile-id>/auth.json`
+_Work in progress._
 
-### OneDrive Reference Inputs
+---
 
-Reference systems were reviewed from `reference-systems/` for OneDrive technical constraints such as:
+## How to Build It Yourself
 
-- Delta-based synchronization lifecycle.
-- Local cache/database responsibilities.
-- Monitor mode and remote-change update strategy.
-- Webhook and connectivity edge cases.
+1. **Open terminal in the project folder**
+2. **Install dependencies**
+   - Run: `npm install`
+3. **Run development build**
+   - Run: `npm run tauri:dev`
+4. **Build release packages**
+   - Run: `npm run tauri:build`
+5. **Find output artifacts**
+   - `src-tauri/target/release/bundle/`
 
-## Milestone Plan
+## Known Issues
 
-### M0 - Baseline (this phase)
+- Linux packaging availability depends on host tooling (`rpmbuild`, `appimagetool`) when building bundles locally.
+- Microsoft app registration/auth configuration may need project-owned tenant/app settings for all target account types.
+- Project is in active development, so UX and storage schema may continue to evolve quickly.
 
-- Project scaffold, docs, command boundaries, typed UI foundation.
-- Account profile persistence and local sync root provisioning.
-- Debug UI Lab route for frontend state/screen simulation (`#/ui-lab`).
-- GUI folder picker for per-profile sync root changes.
-- Microsoft device-code sign-in flow scaffolding (in-app initiation + polling).
-- Activity feed persistence and sync-agent heartbeat events.
+---
 
-### M1 - Auth + Account Status
+## Technology
 
-- In-app Microsoft OAuth2 sign-in (popup/webview flow where needed).
-- Multi-account onboarding in one runtime (personal/work/additional).
-- Account/session status panel and token health per profile.
+- **Tauri** - Desktop framework.
+- **Rust** - Backend sync/auth/runtime engine.
+- **Preact + TypeScript** - Frontend UI and typed runtime state.
+- **Vite + npm** - Frontend tooling and scripts.
+- **Microsoft Graph** - OneDrive API integration.
 
-### M2 - File Browser + Sync Preview
+---
 
-- Remote tree listing.
-- Local sync root selection per account profile.
-- Dry-run style planned actions preview.
+## License
 
-### M3 - Controlled Sync Operations
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-- Manual sync actions.
-- Conflict and deletion safety handling.
-- Basic activity timeline.
-- Independent per-profile controls (start, pause, resume, retry).
+---
 
-### M4 - Ongoing Monitor + Live Updates
+<div align="center">
 
-- Local file watch integration.
-- Remote change pull strategy.
-- Optional webhook-assisted remote events.
+[Report Bug](https://github.com/jackbrumley/somedrive/issues) • [Request Feature](https://github.com/jackbrumley/somedrive/issues)
 
-## Development
-
-Prerequisites:
-
-- Node.js + npm
-- Rust + Cargo
-- Tauri v2 build dependencies for Linux
-
-Commands:
-
-```bash
-npm install
-npm run tauri:dev
-```
-
-Build:
-
-```bash
-npm run tauri:build
-```
-
-## Standards Used
-
-- Structural standards focused on clean module boundaries and maintainability.
-- Agent and architecture standards documented in `AGENTS.md`.
-- Product philosophy: desktop-first, simple UX, no command-line dependency for end users.
+</div>

@@ -3,6 +3,7 @@ pub mod activity_log;
 pub mod auth;
 pub mod bootstrap;
 pub mod commands;
+pub mod log_context;
 pub mod session_log;
-pub mod sync_engine;
 pub mod state;
+pub mod sync_engine;

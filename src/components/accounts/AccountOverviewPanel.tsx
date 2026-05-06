@@ -1,4 +1,4 @@
-import type { AccountProfile } from "../../types/onedrive";
+import type { AccountProfile } from "../../types/somedrive";
 import { SyncStateControl } from "../sync/SyncStateControl";
 
 interface AccountOverviewPanelProps {

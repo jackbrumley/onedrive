@@ -7,7 +7,7 @@ import type {
   AccountProfile,
   DeviceAuthSession,
   SyncAgentState,
-} from "../types/onedrive";
+} from "../types/somedrive";
 
 const accountKindOptions: SelectFieldOption[] = [
   { value: "personal", label: "Personal" },

@@ -1,5 +1,5 @@
 import { useState } from "preact/hooks";
-import type { AccountKind } from "../../types/onedrive";
+import type { AccountKind } from "../../types/somedrive";
 import { Modal } from "../ui/Modal";
 import { SelectField, type SelectFieldOption } from "../ui/SelectField";
 

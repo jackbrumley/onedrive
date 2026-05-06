@@ -1,4 +1,4 @@
-import type { ToastMessage } from "../../types/onedrive";
+import type { ToastMessage } from "../../types/somedrive";
 
 interface ToastHostProps {
   toast: ToastMessage | null;

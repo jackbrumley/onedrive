@@ -1,5 +1,6 @@
 use crate::app::account_profiles::{load_profiles, save_profiles};
 use crate::app::activity_log;
+use crate::app::log_context;
 use crate::app::state::{AppState, DeviceAuthPending, InteractiveAuthPending};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -11,9 +12,12 @@ const DEFAULT_INTERACTIVE_CLIENT_ID: &str = "d50ca740-c83f-4d1b-b616-12c519384f0
 const DEFAULT_SCOPE: &str = "offline_access Files.ReadWrite.All User.Read openid profile email";
 const DEVICE_CODE_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/devicecode";
 const TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
-const INTERACTIVE_AUTHORIZE_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
+const INTERACTIVE_AUTHORIZE_URL: &str =
+    "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
 const INTERACTIVE_TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
-const INTERACTIVE_REDIRECT_URI: &str = "https://login.microsoftonline.com/common/oauth2/nativeclient";
+const INTERACTIVE_REDIRECT_URI: &str =
+    "https://login.microsoftonline.com/common/oauth2/nativeclient";
+const GRAPH_ME_URL: &str = "https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,6 +60,13 @@ struct TokenResponse {
     error_description: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphMeResponse {
+    mail: Option<String>,
+    user_principal_name: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StoredAuthSession {
@@ -83,7 +94,8 @@ pub async fn start_device_auth(
     state: tauri::State<'_, AppState>,
     profile_id: String,
 ) -> Result<DeviceAuthSession, String> {
-    log::info!("Starting device auth for profile_id={}", profile_id);
+    let account_prefix = log_context::account_prefix(&profile_id);
+    log::info!("{} Starting device auth", account_prefix);
     {
         let _guard = state
             .profiles_lock
@@ -98,7 +110,10 @@ pub async fn start_device_auth(
     let client = reqwest::Client::new();
     let response = client
         .post(DEVICE_CODE_URL)
-        .form(&[("client_id", DEFAULT_MS_CLIENT_ID), ("scope", DEFAULT_SCOPE)])
+        .form(&[
+            ("client_id", DEFAULT_MS_CLIENT_ID),
+            ("scope", DEFAULT_SCOPE),
+        ])
         .send()
         .await
         .map_err(|error| format!("Failed to request device code: {error}"))?;
@@ -118,14 +133,12 @@ pub async fn start_device_auth(
 
     let payload: DeviceCodeResponse = serde_json::from_str(&body).map_err(|error| {
         let snippet: String = body.chars().take(400).collect();
-        format!(
-            "Failed to decode device code response: {error}. Response snippet: {snippet}"
-        )
+        format!("Failed to decode device code response: {error}. Response snippet: {snippet}")
     })?;
 
     log::info!(
-        "Device auth session created for profile_id={} verification_uri={} expires_in={}s",
-        profile_id,
+        "{} Device auth session created verification_uri={} expires_in={}s",
+        account_prefix,
         payload.verification_uri,
         payload.expires_in
     );
@@ -161,14 +174,21 @@ pub async fn poll_device_auth(
     state: tauri::State<'_, AppState>,
     profile_id: String,
 ) -> Result<DeviceAuthPollResult, String> {
-    log::info!("Polling device auth token for profile_id={}", profile_id);
+    let account_prefix = log_context::account_prefix(&profile_id);
+    log::info!("{} Polling device auth token", account_prefix);
     let pending = {
         let lock = state
             .auth_pending
             .lock()
             .map_err(|_| "Auth pending lock is poisoned".to_string())?;
         lock.get(&profile_id)
-            .map(|entry| (entry.profile_id.clone(), entry.device_code.clone(), entry.interval_secs))
+            .map(|entry| {
+                (
+                    entry.profile_id.clone(),
+                    entry.device_code.clone(),
+                    entry.interval_secs,
+                )
+            })
             .ok_or_else(|| "No active auth session for this profile".to_string())?
     };
 
@@ -196,7 +216,7 @@ pub async fn poll_device_auth(
 
     if let Some(error) = payload.error.clone() {
         if error == "authorization_pending" || error == "slow_down" {
-            log::info!("Device auth pending for profile_id={} status={}", profile_id, error);
+            log::info!("{} Device auth pending status={}", account_prefix, error);
             return Ok(DeviceAuthPollResult {
                 status: "pending".to_string(),
                 detail: payload
@@ -224,6 +244,7 @@ pub async fn poll_device_auth(
     let access_token = payload
         .access_token
         .ok_or_else(|| "Token response missing access token".to_string())?;
+    let account_email = fetch_account_email(&access_token).await?;
     let updated_at = chrono::Local::now().to_rfc3339();
 
     write_auth_session(
@@ -246,6 +267,7 @@ pub async fn poll_device_auth(
         let mut profiles = load_profiles()?;
         if let Some(profile) = profiles.iter_mut().find(|profile| profile.id == profile_id) {
             profile.auth_configured = true;
+            profile.email = account_email.clone();
         }
         save_profiles(&profiles)?;
     }
@@ -260,11 +282,17 @@ pub async fn poll_device_auth(
 
     let _ = activity_log::append_event(
         &profile_id,
-        "account",
+        &account_email,
         "success",
-        "Authentication completed successfully",
+        &format!(
+            "{} Authentication completed successfully",
+            log_context::account_prefix_from_parts(&profile_id, &account_email)
+        ),
     );
-    log::info!("Device auth completed for profile_id={}", profile_id);
+    log::info!(
+        "{} Device auth completed",
+        log_context::account_prefix_from_parts(&profile_id, &account_email)
+    );
 
     Ok(DeviceAuthPollResult {
         status: "authorized".to_string(),
@@ -278,6 +306,7 @@ pub async fn start_interactive_auth(
     app: tauri::AppHandle,
     profile_id: String,
 ) -> Result<(), String> {
+    let account_prefix = log_context::account_prefix(&profile_id);
     let interactive_client_id = resolve_interactive_client_id();
     let account_kind = {
         let _guard = state
@@ -299,8 +328,8 @@ pub async fn start_interactive_auth(
 
     {
         log::info!(
-            "Interactive auth routing for profile_id={} kind={} domain_hint={} client_id={} authorize_url={} token_url={} redirect_uri={}",
-            profile_id,
+            "{} Interactive auth routing kind={} domain_hint={} client_id={} authorize_url={} token_url={} redirect_uri={}",
+            account_prefix,
             account_kind,
             domain_hint,
             interactive_client_id,
@@ -344,7 +373,7 @@ pub async fn start_interactive_auth(
         let _ = existing_window.close();
     }
 
-    log::info!("Opening interactive auth window for profile_id={}", profile_id);
+    log::info!("{} Opening interactive auth window", account_prefix);
 
     let callback_profile_id = profile_id.clone();
     let callback_window_label = window_label.clone();
@@ -375,21 +404,28 @@ pub async fn start_interactive_auth(
         let callback = as_text.to_string();
 
         tauri::async_runtime::spawn(async move {
-            match complete_interactive_auth_from_callback(&app_handle, &profile_id, &callback).await {
+            match complete_interactive_auth_from_callback(&app_handle, &profile_id, &callback).await
+            {
                 Ok(()) => {
-                    log::info!("Interactive auth completed for profile_id={}", profile_id);
+                    log::info!(
+                        "{} Interactive auth completed",
+                        log_context::account_prefix(&profile_id)
+                    );
                 }
                 Err(error) => {
                     log::error!(
-                        "Interactive auth failed for profile_id={}: {}",
-                        profile_id,
+                        "{} Interactive auth failed: {}",
+                        log_context::account_prefix(&profile_id),
                         error
                     );
                     let _ = activity_log::append_event(
                         &profile_id,
-                        "account",
+                        &profile_id,
                         "error",
-                        &format!("Interactive authentication failed: {error}"),
+                        &format!(
+                            "{} Interactive authentication failed: {error}",
+                            log_context::account_prefix(&profile_id)
+                        ),
                     );
                 }
             }
@@ -408,7 +444,10 @@ pub async fn start_interactive_auth(
 }
 
 #[tauri::command]
-pub fn clear_account_auth(state: tauri::State<'_, AppState>, profile_id: String) -> Result<(), String> {
+pub fn clear_account_auth(
+    state: tauri::State<'_, AppState>,
+    profile_id: String,
+) -> Result<(), String> {
     {
         let _guard = state
             .profiles_lock
@@ -420,6 +459,7 @@ pub fn clear_account_auth(state: tauri::State<'_, AppState>, profile_id: String)
             .find(|profile| profile.id == profile_id)
             .ok_or_else(|| "Account profile not found".to_string())?;
         profile.auth_configured = false;
+        profile.email = String::new();
         save_profiles(&profiles)?;
     }
 
@@ -499,7 +539,8 @@ async fn complete_interactive_auth_from_callback(
         return Err("OAuth callback state mismatch".to_string());
     }
 
-    let authorization_code = code.ok_or_else(|| "OAuth callback missing authorization code".to_string())?;
+    let authorization_code =
+        code.ok_or_else(|| "OAuth callback missing authorization code".to_string())?;
 
     let client = reqwest::Client::new();
     let response = client
@@ -536,6 +577,7 @@ async fn complete_interactive_auth_from_callback(
     let access_token = payload
         .access_token
         .ok_or_else(|| "Token response missing access token".to_string())?;
+    let account_email = fetch_account_email(&access_token).await?;
     let updated_at = chrono::Local::now().to_rfc3339();
 
     write_auth_session(
@@ -558,6 +600,7 @@ async fn complete_interactive_auth_from_callback(
         let mut profiles = load_profiles()?;
         if let Some(profile) = profiles.iter_mut().find(|profile| profile.id == profile_id) {
             profile.auth_configured = true;
+            profile.email = account_email.clone();
         }
         save_profiles(&profiles)?;
     }
@@ -566,9 +609,12 @@ async fn complete_interactive_auth_from_callback(
 
     let _ = activity_log::append_event(
         profile_id,
-        "account",
+        &account_email,
         "success",
-        "Interactive authentication completed successfully",
+        &format!(
+            "{} Interactive authentication completed successfully",
+            log_context::account_prefix_from_parts(profile_id, &account_email)
+        ),
     );
 
     Ok(())
@@ -614,9 +660,7 @@ fn sanitize_auth_window_label(profile_id: &str) -> String {
 }
 
 fn generate_state_token() -> String {
-    let now = chrono::Utc::now()
-        .timestamp_nanos_opt()
-        .unwrap_or_default();
+    let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
     let pid = std::process::id();
     format!("s{}{}", now, pid)
 }
@@ -638,10 +682,57 @@ fn url_encode(input: &str) -> String {
     encoded
 }
 
+async fn fetch_account_email(access_token: &str) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get(GRAPH_ME_URL)
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|error| format!("Failed requesting Microsoft profile: {error}"))?;
+
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("Failed reading Microsoft profile response body: {error}"))?;
+
+    if !status.is_success() {
+        let snippet: String = body.chars().take(400).collect();
+        return Err(format!(
+            "Microsoft profile request failed with status {status}. Response: {snippet}"
+        ));
+    }
+
+    let payload: GraphMeResponse = serde_json::from_str(&body).map_err(|error| {
+        let snippet: String = body.chars().take(400).collect();
+        format!("Failed to decode Microsoft profile response: {error}. Response snippet: {snippet}")
+    })?;
+
+    let email = payload
+        .mail
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            payload
+                .user_principal_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+
+    Ok(email)
+}
+
 fn auth_session_file_path(profile_id: &str) -> Result<PathBuf, String> {
-    let config_dir = dirs::config_dir().ok_or_else(|| "Could not resolve config directory".to_string())?;
+    let config_dir =
+        dirs::config_dir().ok_or_else(|| "Could not resolve config directory".to_string())?;
     Ok(config_dir
-        .join("onedrive")
+        .join("somedrive")
         .join("accounts")
         .join(profile_id)
         .join("auth.json"))
@@ -662,7 +753,8 @@ pub fn load_auth_session(profile_id: &str) -> Result<AuthSessionSnapshot, String
         return Err("Account auth session not found".to_string());
     }
     let text = fs::read_to_string(file_path).map_err(|error| error.to_string())?;
-    let session: StoredAuthSession = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    let session: StoredAuthSession =
+        serde_json::from_str(&text).map_err(|error| error.to_string())?;
     Ok(AuthSessionSnapshot {
         access_token: session.access_token,
         refresh_token: session.refresh_token,
@@ -702,9 +794,7 @@ pub async fn refresh_access_token(profile_id: &str) -> Result<AuthSessionSnapsho
 
     let payload: TokenResponse = serde_json::from_str(&body).map_err(|error| {
         let snippet: String = body.chars().take(400).collect();
-        format!(
-            "Failed to decode refresh-token response: {error}. Response snippet: {snippet}"
-        )
+        format!("Failed to decode refresh-token response: {error}. Response snippet: {snippet}")
     })?;
 
     if !status.is_success() || payload.error.is_some() {
@@ -733,7 +823,10 @@ pub async fn refresh_access_token(profile_id: &str) -> Result<AuthSessionSnapsho
         },
     )?;
 
-    log::info!("Access token refreshed for profile_id={}", profile_id);
+    log::info!(
+        "{} Access token refreshed",
+        log_context::account_prefix(profile_id)
+    );
 
     Ok(AuthSessionSnapshot {
         access_token,

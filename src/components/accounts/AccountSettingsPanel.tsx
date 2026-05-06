@@ -1,6 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useState } from "preact/hooks";
-import type { AccountProfile } from "../../types/onedrive";
+import type { AccountProfile } from "../../types/somedrive";
 
 interface AccountSettingsPanelProps {
   account: AccountProfile;
@@ -29,10 +29,10 @@ export function AccountSettingsPanel({
     });
     if (typeof selected === "string" && selected.trim()) {
       const normalizedSelected = selected.replace(/\/+$/, "");
-      if (/\/OneDrive$/i.test(normalizedSelected)) {
-        const confirmed = window.confirm(
-          "This looks like the default folder used by other OneDrive apps. It is safer to use OneDrive-OSS to avoid conflicts. Continue anyway?"
-        );
+        if (/\/OneDrive$/i.test(normalizedSelected)) {
+          const confirmed = window.confirm(
+          "This looks like the default folder used by other OneDrive apps. It is safer to use SomeDrive to avoid conflicts. Continue anyway?"
+          );
         if (!confirmed) {
           return;
         }

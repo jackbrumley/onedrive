@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { ToastMessage, ToastType } from "../types/onedrive";
+import type { ToastMessage, ToastType } from "../types/somedrive";
 
 export function useToastManager() {
   const [toast, setToast] = useState<ToastMessage | null>(null);

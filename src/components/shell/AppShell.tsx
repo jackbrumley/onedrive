@@ -42,7 +42,7 @@ export function AppShell({
     <div class="app-shell">
       <header class="title-bar" onMouseDown={handleTitleBarMouseDown} onDblClick={handleTitleBarDoubleClick}>
         <div class="title-block">
-          <h1>OneDrive</h1>
+          <h1>SomeDrive</h1>
         </div>
         <div class="shell-actions">
           <button class={isHome ? "top-pill active" : "top-pill"} onClick={onGoHome}>

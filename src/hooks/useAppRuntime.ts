@@ -18,7 +18,7 @@ import type {
   SyncAgentState,
   ToastType,
   UpdateCheckResult,
-} from "../types/onedrive";
+} from "../types/somedrive";
 
 interface UseAppRuntimeProps {
   showToast: (message: string, type?: ToastType, durationMs?: number) => void;

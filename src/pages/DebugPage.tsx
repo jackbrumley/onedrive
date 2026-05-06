@@ -1,5 +1,5 @@
 import { useState } from "preact/hooks";
-import type { AppStatusSnapshot } from "../types/onedrive";
+import type { AppStatusSnapshot } from "../types/somedrive";
 
 interface DebugPageProps {
   status: AppStatusSnapshot;

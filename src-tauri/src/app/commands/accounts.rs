@@ -1,16 +1,18 @@
 use crate::app::account_profiles::{
     create_profile, load_profiles, remove_profile, rename_profile, save_profiles, set_agent_state,
-    AccountProfile,
-    CreateAccountProfileInput, RemoveAccountProfileInput, RenameAccountProfileInput,
-    SetAccountAgentStateInput,
+    AccountProfile, CreateAccountProfileInput, RemoveAccountProfileInput,
+    RenameAccountProfileInput, SetAccountAgentStateInput,
 };
 use crate::app::activity_log;
+use crate::app::log_context;
 use crate::app::state::AppState;
 use crate::app::sync_engine;
 use std::fs;
 
 #[tauri::command]
-pub fn list_account_profiles(state: tauri::State<'_, AppState>) -> Result<Vec<AccountProfile>, String> {
+pub fn list_account_profiles(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<AccountProfile>, String> {
     let _guard = state
         .profiles_lock
         .lock()
@@ -30,9 +32,12 @@ pub fn create_account_profile(
     let profile = create_profile(input)?;
     let _ = activity_log::append_event(
         &profile.id,
-        &profile.display_name,
+        &profile.email,
         "success",
-        "Account profile created",
+        &format!(
+            "{} Account profile created",
+            log_context::account_prefix_from_parts(&profile.id, &profile.email)
+        ),
     );
     Ok(profile)
 }
@@ -49,9 +54,12 @@ pub fn rename_account_profile(
     let profile = rename_profile(input)?;
     let _ = activity_log::append_event(
         &profile.id,
-        &profile.display_name,
+        &profile.email,
         "info",
-        "Account profile renamed",
+        &format!(
+            "{} Account profile renamed",
+            log_context::account_prefix_from_parts(&profile.id, &profile.email)
+        ),
     );
     Ok(profile)
 }
@@ -68,7 +76,15 @@ pub fn remove_account_profile(
     let profile_id = input.id.clone();
     remove_profile(input)?;
     sync_engine::on_agent_state_changed(&state, &profile_id, "idle")?;
-    let _ = activity_log::append_event(&profile_id, "account", "warning", "Account profile removed");
+    let _ = activity_log::append_event(
+        &profile_id,
+        &profile_id,
+        "warning",
+        &format!(
+            "{} Account profile removed",
+            log_context::account_prefix(&profile_id)
+        ),
+    );
     Ok(())
 }
 
@@ -82,9 +98,18 @@ pub fn set_account_agent_state(
         .lock()
         .map_err(|_| "Account profile lock is poisoned".to_string())?;
     let profile = set_agent_state(input)?;
+    log::info!(
+        "{} SYNC_AGENT_STATE_SET state={}",
+        log_context::account_prefix_from_parts(&profile.id, &profile.email),
+        profile.agent_state
+    );
     sync_engine::on_agent_state_changed(&state, &profile.id, &profile.agent_state)?;
-    let message = format!("Agent state changed to {}", profile.agent_state);
-    let _ = activity_log::append_event(&profile.id, &profile.display_name, "info", &message);
+    let message = format!(
+        "{} Agent state changed to {}",
+        log_context::account_prefix_from_parts(&profile.id, &profile.email),
+        profile.agent_state
+    );
+    let _ = activity_log::append_event(&profile.id, &profile.email, "info", &message);
     Ok(profile)
 }
 
@@ -124,9 +149,12 @@ pub fn set_account_sync_root(
 
     let _ = activity_log::append_event(
         &updated.id,
-        &updated.display_name,
+        &updated.email,
         "info",
-        "Sync root updated",
+        &format!(
+            "{} Sync root updated",
+            log_context::account_prefix_from_parts(&updated.id, &updated.email)
+        ),
     );
 
     Ok(updated)
@@ -147,7 +175,7 @@ pub fn pause_all_accounts(state: tauri::State<'_, AppState>) -> Result<u32, Stri
         if profile.agent_state == "syncing" {
             profile.agent_state = "paused".to_string();
             changed_ids.push(profile.id.clone());
-            changed_profiles.push((profile.id.clone(), profile.display_name.clone()));
+            changed_profiles.push((profile.id.clone(), profile.email.clone()));
         }
     }
 
@@ -161,8 +189,16 @@ pub fn pause_all_accounts(state: tauri::State<'_, AppState>) -> Result<u32, Stri
         sync_engine::on_agent_state_changed(&state, profile_id, "paused")?;
     }
 
-    for (profile_id, profile_name) in &changed_profiles {
-        let _ = activity_log::append_event(profile_id, profile_name, "warning", "Synchronization paused");
+    for (profile_id, profile_email) in &changed_profiles {
+        let _ = activity_log::append_event(
+            profile_id,
+            profile_email,
+            "warning",
+            &format!(
+                "{} Synchronization paused",
+                log_context::account_prefix_from_parts(profile_id, profile_email)
+            ),
+        );
     }
 
     let _ = activity_log::append_event(
@@ -190,7 +226,7 @@ pub fn resume_all_accounts(state: tauri::State<'_, AppState>) -> Result<u32, Str
         if profile.agent_state == "paused" {
             profile.agent_state = "syncing".to_string();
             changed_ids.push(profile.id.clone());
-            changed_profiles.push((profile.id.clone(), profile.display_name.clone()));
+            changed_profiles.push((profile.id.clone(), profile.email.clone()));
         }
     }
 
@@ -204,8 +240,16 @@ pub fn resume_all_accounts(state: tauri::State<'_, AppState>) -> Result<u32, Str
         sync_engine::on_agent_state_changed(&state, profile_id, "syncing")?;
     }
 
-    for (profile_id, profile_name) in &changed_profiles {
-        let _ = activity_log::append_event(profile_id, profile_name, "info", "Synchronization resumed");
+    for (profile_id, profile_email) in &changed_profiles {
+        let _ = activity_log::append_event(
+            profile_id,
+            profile_email,
+            "info",
+            &format!(
+                "{} Synchronization resumed",
+                log_context::account_prefix_from_parts(profile_id, profile_email)
+            ),
+        );
     }
 
     let _ = activity_log::append_event(

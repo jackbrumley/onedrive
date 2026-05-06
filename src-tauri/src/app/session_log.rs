@@ -49,7 +49,7 @@ pub fn initialize_session_logging() -> Result<(), String> {
 
     writeln!(
         file,
-        "[{}] SESSION START | app=onedrive version={} platform={}/{}",
+        "[{}] SESSION START | app=somedrive version={} platform={}/{}",
         Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
         env!("CARGO_PKG_VERSION"),
         OS,
@@ -140,7 +140,7 @@ fn append_session_log_line(line: &str) {
 fn get_session_log_path() -> Result<PathBuf, String> {
     let debug_dir = dirs::config_dir()
         .ok_or_else(|| "Could not find config directory".to_string())?
-        .join("onedrive")
+        .join("somedrive")
         .join("debug");
     fs::create_dir_all(&debug_dir).map_err(|error| error.to_string())?;
     Ok(debug_dir.join("session.log"))

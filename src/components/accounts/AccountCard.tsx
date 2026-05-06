@@ -6,7 +6,7 @@ import {
   IconFolder,
   IconUser,
 } from "@tabler/icons-preact";
-import type { AccountProfile } from "../../types/onedrive";
+import type { AccountProfile } from "../../types/somedrive";
 
 interface AccountCardProps {
   account: AccountProfile;

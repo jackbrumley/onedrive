@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct AccountProfile {
     pub id: String,
     pub display_name: String,
+    pub email: String,
     pub slug: String,
     pub kind: String,
     pub sync_root: String,
@@ -55,7 +56,8 @@ pub fn load_profiles() -> Result<Vec<AccountProfile>, String> {
     }
 
     let text = fs::read_to_string(storage_path).map_err(|error| error.to_string())?;
-    let store: AccountProfileStore = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    let store: AccountProfileStore =
+        serde_json::from_str(&text).map_err(|error| error.to_string())?;
     Ok(store.profiles)
 }
 
@@ -93,6 +95,7 @@ pub fn create_profile(input: CreateAccountProfileInput) -> Result<AccountProfile
     let profile = AccountProfile {
         id: generate_profile_id(),
         display_name: display_name.to_string(),
+        email: String::new(),
         slug: unique_slug,
         kind,
         sync_root: sync_root.to_string_lossy().to_string(),
@@ -149,8 +152,9 @@ pub fn set_agent_state(input: SetAccountAgentStateInput) -> Result<AccountProfil
 }
 
 fn storage_dir_path() -> Result<PathBuf, String> {
-    let config_dir = dirs::config_dir().ok_or_else(|| "Could not resolve config directory".to_string())?;
-    Ok(config_dir.join("onedrive").join("accounts"))
+    let config_dir =
+        dirs::config_dir().ok_or_else(|| "Could not resolve config directory".to_string())?;
+    Ok(config_dir.join("somedrive").join("accounts"))
 }
 
 fn storage_file_path() -> Result<PathBuf, String> {
@@ -158,8 +162,9 @@ fn storage_file_path() -> Result<PathBuf, String> {
 }
 
 fn default_sync_root(slug: &str) -> Result<PathBuf, String> {
-    let home_dir = dirs::home_dir().ok_or_else(|| "Could not resolve home directory".to_string())?;
-    Ok(home_dir.join("OneDrive-OSS").join(slug))
+    let home_dir =
+        dirs::home_dir().ok_or_else(|| "Could not resolve home directory".to_string())?;
+    Ok(home_dir.join("SomeDrive").join(slug))
 }
 
 fn build_unique_slug(display_name: &str, profiles: &[AccountProfile]) -> String {

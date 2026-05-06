@@ -28,8 +28,13 @@ pub fn get_status_snapshot(state: tauri::State<'_, AppState>) -> Result<AppStatu
     let platform = std::env::consts::OS.to_string();
     let auth_configured = accounts.iter().any(|account| account.auth_configured);
     let active_account = accounts.first().map(|account| account.display_name.clone());
-    let last_sync_at = accounts.iter().find_map(|account| account.last_sync_at.clone());
-    let health = if accounts.iter().any(|account| account.agent_state == "error") {
+    let last_sync_at = accounts
+        .iter()
+        .find_map(|account| account.last_sync_at.clone());
+    let health = if accounts
+        .iter()
+        .any(|account| account.agent_state == "error")
+    {
         "error".to_string()
     } else if accounts.is_empty() {
         "degraded".to_string()

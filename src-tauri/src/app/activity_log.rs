@@ -33,7 +33,12 @@ pub fn list_events(limit: usize) -> Result<Vec<ActivityEvent>, String> {
     Ok(events.into_iter().take(limit).collect())
 }
 
-pub fn append_event(profile_id: &str, profile_name: &str, kind: &str, message: &str) -> Result<(), String> {
+pub fn append_event(
+    profile_id: &str,
+    profile_name: &str,
+    kind: &str,
+    message: &str,
+) -> Result<(), String> {
     let mut events = load_all_events()?;
     events.push(ActivityEvent {
         id: generate_event_id(),
@@ -74,8 +79,9 @@ fn save_all_events(events: &[ActivityEvent]) -> Result<(), String> {
 }
 
 fn events_dir_path() -> Result<PathBuf, String> {
-    let config_dir = dirs::config_dir().ok_or_else(|| "Could not resolve config directory".to_string())?;
-    Ok(config_dir.join("onedrive").join("activity"))
+    let config_dir =
+        dirs::config_dir().ok_or_else(|| "Could not resolve config directory".to_string())?;
+    Ok(config_dir.join("somedrive").join("activity"))
 }
 
 fn events_file_path() -> Result<PathBuf, String> {

@@ -1,4 +1,4 @@
-import type { ActivityEvent, AccountProfile } from "../../types/onedrive";
+import type { ActivityEvent, AccountProfile } from "../../types/somedrive";
 import { SyncStateControl } from "../sync/SyncStateControl";
 
 interface AccountSyncPanelProps {

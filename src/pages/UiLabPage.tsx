@@ -1,6 +1,6 @@
 import { useMemo, useState } from "preact/hooks";
 import { SyncStateControl } from "../components/sync/SyncStateControl";
-import type { AccountProfile } from "../types/onedrive";
+import type { AccountProfile } from "../types/somedrive";
 
 interface UiLabPageProps {
   onBack: () => void;
@@ -10,9 +10,10 @@ const previewAccounts: AccountProfile[] = [
   {
     id: "lab-1",
     displayName: "Personal",
+    email: "personal@example.com",
     slug: "personal",
     kind: "personal",
-    syncRoot: "/home/user/OneDrive-OSS/personal",
+    syncRoot: "/home/user/SomeDrive/personal",
     authConfigured: true,
     agentState: "syncing",
     lastSyncAt: null,
@@ -20,9 +21,10 @@ const previewAccounts: AccountProfile[] = [
   {
     id: "lab-2",
     displayName: "Work",
+    email: "work@example.com",
     slug: "work",
     kind: "business",
-    syncRoot: "/home/user/OneDrive-OSS/work",
+    syncRoot: "/home/user/SomeDrive/work",
     authConfigured: true,
     agentState: "paused",
     lastSyncAt: null,
@@ -30,9 +32,10 @@ const previewAccounts: AccountProfile[] = [
   {
     id: "lab-3",
     displayName: "Personal 2",
+    email: "",
     slug: "personal-2",
     kind: "personal",
-    syncRoot: "/home/user/OneDrive-OSS/personal-2",
+    syncRoot: "/home/user/SomeDrive/personal-2",
     authConfigured: false,
     agentState: "error",
     lastSyncAt: null,

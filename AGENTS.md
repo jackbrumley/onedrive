@@ -1,4 +1,4 @@
-# OneDrive Agent Manifesto & Guidelines
+# SomeDrive Agent Manifesto & Guidelines
 
 This document serves as a constitution for all agentic coding entities (and humans) operating within this repository. Integrity, cleanliness, and architectural soundness are our primary metrics of success.
 
@@ -44,6 +44,14 @@ When implementing platform-sensitive features, follow this structure:
 3. **Quirks Last:** Only add DE/provider-specific quirk modules when a real incompatibility is confirmed and cannot be solved generically.
 
 This pattern keeps the codebase clean as new distros, compositor versions, or portal changes appear.
+
+### 7. Development-Phase Data Policy (Clean Slate)
+This project is currently in active development and testing. We optimize for speed of iteration and clarity, not backward compatibility.
+- **No Backward Compatibility Requirement:** Local config/state formats can change directly when needed.
+- **No Legacy Layers:** Do not add migration code, compatibility shims, fallback adapters, or legacy parsing paths.
+- **Direct Schema Evolution:** If storage/schema changes, update the active model and related code paths directly.
+- **Fresh-State Testing Expected:** During testing, it is valid and expected to remove local app data/accounts and re-run setup from a clean install.
+- **Pre-Release Reassessment:** Compatibility policy can be revisited when moving toward beta/public release readiness.
 
 ---
 

@@ -1,6 +1,7 @@
 use crate::app::account_profiles::{load_profiles, save_profiles, AccountProfile};
 use crate::app::activity_log;
 use crate::app::auth::{load_auth_session, refresh_access_token};
+use crate::app::log_context;
 use crate::app::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -14,6 +15,11 @@ pub fn on_agent_state_changed(
     profile_id: &str,
     agent_state: &str,
 ) -> Result<(), String> {
+    log::info!(
+        "{} SYNC_AGENT_STATE_CHANGE requested_state={}",
+        log_context::account_prefix(profile_id),
+        agent_state
+    );
     if agent_state == "syncing" {
         start_sync_worker(state, profile_id)?;
     } else {
@@ -23,16 +29,22 @@ pub fn on_agent_state_changed(
 }
 
 fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Result<(), String> {
+    let account_prefix = log_context::account_prefix(profile_id);
     {
         let mut stops = state
             .sync_worker_stops
             .lock()
             .map_err(|_| "Sync worker lock is poisoned".to_string())?;
         if stops.contains_key(profile_id) {
+            log::info!("{} SYNC_WORKER_ALREADY_RUNNING", account_prefix);
             return Ok(());
         }
         let (tx, mut rx) = tokio::sync::oneshot::channel::<()>();
         stops.insert(profile_id.to_string(), tx);
+        log::info!(
+            "{} SYNC_WORKER_STARTING interval_seconds=15",
+            account_prefix
+        );
 
         let profile_id_owned = profile_id.to_string();
         let profiles_lock = Arc::clone(&state.profiles_lock);
@@ -41,14 +53,17 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
             loop {
                 tokio::select! {
                     _ = &mut rx => {
+                        log::info!("{} SYNC_WORKER_STOP_SIGNAL", log_context::account_prefix(&profile_id_owned));
                         break;
                     }
                     _ = ticker.tick() => {
+                        log::info!("{} SYNC_TICK", log_context::account_prefix(&profile_id_owned));
                         match tick_sync_cycle(&profiles_lock, &profile_id_owned).await {
                             Ok(stats) => {
                                 log::info!(
-                                    "Sync cycle profile_id={} downloaded={} uploaded={} local_deleted={} remote_deleted={} remote_folders={} remote_pages={} remote_items={} local_items={}",
-                                    profile_id_owned,
+                                    "{} [cycle:{}] SYNC_CYCLE_COMPLETE downloaded={} uploaded={} local_deleted={} remote_deleted={} remote_folders={} remote_pages={} remote_items={} local_items={}",
+                                    stats.account_prefix,
+                                    stats.cycle_id,
                                     stats.downloaded_files,
                                     stats.uploaded_files,
                                     stats.deleted_local,
@@ -60,12 +75,19 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                                 );
                             }
                             Err(error) => {
-                                log::error!("Sync cycle failed for profile_id={}: {}", profile_id_owned, error);
+                                log::error!(
+                                    "{} SYNC_CYCLE_FAILED {}",
+                                    log_context::account_prefix(&profile_id_owned),
+                                    error
+                                );
                                 let _ = activity_log::append_event(
                                     &profile_id_owned,
-                                    &profile_id_owned,
+                                    &log_context::account_identity(&profile_id_owned),
                                     "error",
-                                    &format!("Sync cycle failed: {error}"),
+                                    &format!(
+                                        "{} SYNC_CYCLE_FAILED {error}",
+                                        log_context::account_prefix(&profile_id_owned)
+                                    ),
                                 );
                             }
                         }
@@ -75,7 +97,15 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
         });
     }
 
-    let _ = activity_log::append_event(profile_id, profile_id, "info", "Sync agent started");
+    let _ = activity_log::append_event(
+        profile_id,
+        &log_context::account_identity(profile_id),
+        "info",
+        &format!(
+            "{} Sync agent started",
+            log_context::account_prefix(profile_id)
+        ),
+    );
     Ok(())
 }
 
@@ -90,7 +120,15 @@ fn stop_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Res
 
     if let Some(sender) = maybe_sender {
         let _ = sender.send(());
-        let _ = activity_log::append_event(profile_id, profile_id, "info", "Sync agent stopped");
+        let _ = activity_log::append_event(
+            profile_id,
+            &log_context::account_identity(profile_id),
+            "info",
+            &format!(
+                "{} Sync agent stopped",
+                log_context::account_prefix(profile_id)
+            ),
+        );
     }
 
     Ok(())
@@ -98,6 +136,8 @@ fn stop_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Res
 
 #[derive(Default)]
 struct SyncCycleStats {
+    account_prefix: String,
+    cycle_id: String,
     downloaded_files: usize,
     uploaded_files: usize,
     deleted_local: usize,
@@ -110,6 +150,8 @@ struct SyncCycleStats {
 
 struct GraphContext {
     profile_id: String,
+    account_prefix: String,
+    cycle_id: String,
     access_token: String,
 }
 
@@ -192,9 +234,16 @@ async fn tick_sync_cycle(
     profile_id: &str,
 ) -> Result<SyncCycleStats, String> {
     let profile = load_syncable_profile(profiles_lock, profile_id)?;
+    let account_prefix = log_context::account_prefix_from_parts(profile_id, &profile.email);
+    let cycle_id = new_cycle_id();
     let sync_root = PathBuf::from(profile.sync_root.clone());
-    std::fs::create_dir_all(&sync_root)
-        .map_err(|error| format!("Failed to create sync root '{}': {}", sync_root.display(), error))?;
+    std::fs::create_dir_all(&sync_root).map_err(|error| {
+        format!(
+            "Failed to create sync root '{}': {}",
+            sync_root.display(),
+            error
+        )
+    })?;
 
     let session = load_auth_session(profile_id)?;
     if session.access_token.trim().is_empty() {
@@ -203,12 +252,29 @@ async fn tick_sync_cycle(
 
     let mut graph = GraphContext {
         profile_id: profile_id.to_string(),
+        account_prefix: account_prefix.clone(),
+        cycle_id: cycle_id.clone(),
         access_token: session.access_token,
     };
 
     let mut sync_state = load_sync_state(profile_id)?;
-    let mut stats = SyncCycleStats::default();
-    let _ = activity_log::append_event(profile_id, &profile.display_name, "info", "Sync cycle started");
+    let mut stats = SyncCycleStats {
+        account_prefix: account_prefix.clone(),
+        cycle_id: cycle_id.clone(),
+        ..SyncCycleStats::default()
+    };
+    log::info!(
+        "{} [cycle:{}] SYNC_CYCLE_START sync_root={}",
+        account_prefix,
+        cycle_id,
+        sync_root.display()
+    );
+    let _ = activity_log::append_event(
+        profile_id,
+        &profile.email,
+        "info",
+        &format!("{} [cycle:{}] SYNC_CYCLE_START", account_prefix, cycle_id),
+    );
 
     let remote_changes = fetch_delta_changes(
         &mut graph,
@@ -254,8 +320,19 @@ async fn tick_sync_cycle(
         stats.remote_items_received,
         stats.local_items_seen
     );
-    let _ = activity_log::append_event(profile_id, &profile.display_name, "success", &summary);
+    let _ = activity_log::append_event(
+        profile_id,
+        &profile.email,
+        "success",
+        &format!("{} [cycle:{}] {}", account_prefix, cycle_id, summary),
+    );
     Ok(stats)
+}
+
+fn new_cycle_id() -> String {
+    let nanos = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+    let pid = std::process::id();
+    format!("{}-{}", nanos, pid)
 }
 
 fn load_syncable_profile(
@@ -302,16 +379,41 @@ async fn fetch_delta_changes(
     stats: &mut SyncCycleStats,
 ) -> Result<Vec<DeltaItem>, String> {
     let mut all_items: Vec<DeltaItem> = Vec::new();
-    let mut current_url = initial_delta_link
-        .unwrap_or_else(|| format!("{GRAPH_ROOT}/me/drive/root/delta"));
+    let mut current_url =
+        initial_delta_link.unwrap_or_else(|| format!("{GRAPH_ROOT}/me/drive/root/delta"));
 
     loop {
+        log::info!(
+            "{} [cycle:{}] DELTA_PAGE_REQUEST url={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            current_url
+        );
         let response_text = graph_get_text(graph, &current_url).await?;
         let response: DeltaResponse = serde_json::from_str(&response_text)
             .map_err(|error| format!("Failed to decode delta response: {error}"))?;
 
         stats.remote_pages += 1;
         stats.remote_items_received += response.value.len();
+        log::info!(
+            "{} [cycle:{}] DELTA_PAGE_RECEIVED page={} items={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            stats.remote_pages,
+            response.value.len()
+        );
+        for item in &response.value {
+            let path = resolve_delta_item_path(item).unwrap_or_else(|| "<unknown>".to_string());
+            log::info!(
+                "{} [cycle:{}] DELTA_ITEM id={} path={} is_dir={} deleted={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                item.id,
+                path,
+                item.folder.is_some(),
+                item.deleted.is_some()
+            );
+        }
         all_items.extend(response.value.into_iter());
 
         if let Some(next_link) = response.next_link {
@@ -338,6 +440,14 @@ async fn apply_remote_changes(
     for item in changes {
         if item.deleted.is_some() {
             if let Some(existing) = sync_state.remote_by_id.get(&item.id).cloned() {
+                log::info!(
+                    "{} [cycle:{}] REMOTE_DELETE_ITEM id={} path={} is_dir={}",
+                    graph.account_prefix,
+                    graph.cycle_id,
+                    item.id,
+                    existing.path,
+                    existing.is_dir
+                );
                 let local_abs = sync_root.join(path_to_local(&existing.path));
                 let local_current = read_local_entry(&local_abs)?;
                 let previous_local = sync_state.local_snapshot.get(&existing.path);
@@ -347,6 +457,12 @@ async fn apply_remote_changes(
                     .unwrap_or(false);
 
                 if local_changed && !existing.is_dir {
+                    log::info!(
+                        "{} [cycle:{}] REMOTE_DELETE_LOCAL_CHANGED_UPLOAD path={}",
+                        graph.account_prefix,
+                        graph.cycle_id,
+                        existing.path
+                    );
                     let uploaded = upload_file_by_path(graph, sync_root, &existing.path).await?;
                     let known = remote_known_item_from_drive_item(uploaded, &existing.path)?;
                     upsert_remote_known_item(sync_state, known);
@@ -358,12 +474,24 @@ async fn apply_remote_changes(
                 sync_state.remote_path_to_id.remove(&existing.path);
                 sync_state.local_snapshot.remove(&existing.path);
                 remove_local_path(sync_root, &existing.path)?;
+                log::info!(
+                    "{} [cycle:{}] LOCAL_DELETE_OK path={}",
+                    graph.account_prefix,
+                    graph.cycle_id,
+                    existing.path
+                );
                 stats.deleted_local += 1;
             }
             continue;
         }
 
         let Some(path) = resolve_delta_item_path(item) else {
+            log::warn!(
+                "{} [cycle:{}] DELTA_ITEM_SKIPPED id={} reason=missing_path",
+                graph.account_prefix,
+                graph.cycle_id,
+                item.id
+            );
             continue;
         };
 
@@ -377,8 +505,19 @@ async fn apply_remote_changes(
 
         let local_abs = sync_root.join(path_to_local(&path));
         if remote_entry.is_dir {
-            std::fs::create_dir_all(&local_abs)
-                .map_err(|error| format!("Failed creating local directory '{}': {}", local_abs.display(), error))?;
+            log::info!(
+                "{} [cycle:{}] LOCAL_DIR_ENSURE path={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                path
+            );
+            std::fs::create_dir_all(&local_abs).map_err(|error| {
+                format!(
+                    "Failed creating local directory '{}': {}",
+                    local_abs.display(),
+                    error
+                )
+            })?;
         } else {
             let local_current = read_local_entry(&local_abs)?;
             let previous_local = sync_state.local_snapshot.get(&path);
@@ -390,6 +529,14 @@ async fn apply_remote_changes(
             if local_changed {
                 let local_entry = local_current.expect("local_changed implies local entry exists");
                 if local_entry.modified_ts > remote_entry.modified_ts {
+                    log::info!(
+                        "{} [cycle:{}] REMOTE_OLDER_UPLOAD_LOCAL path={} local_ts={} remote_ts={}",
+                        graph.account_prefix,
+                        graph.cycle_id,
+                        path,
+                        local_entry.modified_ts,
+                        remote_entry.modified_ts
+                    );
                     let uploaded = upload_file_by_path(graph, sync_root, &path).await?;
                     let known = remote_known_item_from_drive_item(uploaded, &path)?;
                     upsert_remote_known_item(sync_state, known);
@@ -397,10 +544,18 @@ async fn apply_remote_changes(
                     continue;
                 }
 
-                create_safe_backup(&local_abs)?;
+                if let Some(backup_path) = create_safe_backup(&local_abs)? {
+                    log::info!(
+                        "{} [cycle:{}] SAFE_BACKUP_CREATED source={} backup={}",
+                        graph.account_prefix,
+                        graph.cycle_id,
+                        local_abs.display(),
+                        backup_path.display()
+                    );
+                }
             }
 
-            download_remote_item_content(graph, &item.id, &local_abs).await?;
+            download_remote_item_content(graph, &item.id, &path, &local_abs).await?;
             stats.downloaded_files += 1;
         }
 
@@ -429,6 +584,12 @@ async fn apply_local_changes(
 
         if local_entry.is_dir {
             if remote_id.is_none() {
+                log::info!(
+                    "{} [cycle:{}] REMOTE_DIR_CREATE_START path={}",
+                    graph.account_prefix,
+                    graph.cycle_id,
+                    path
+                );
                 let created = create_remote_folder(graph, &path).await?;
                 let known = remote_known_item_from_drive_item(created, &path)?;
                 upsert_remote_known_item(sync_state, known);
@@ -441,6 +602,16 @@ async fn apply_local_changes(
             continue;
         }
 
+        log::info!(
+            "{} [cycle:{}] LOCAL_CHANGE path={} is_dir={} size={} modified_ts={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            path,
+            local_entry.is_dir,
+            local_entry.size,
+            local_entry.modified_ts
+        );
+
         if let Some(existing_id) = remote_id {
             let remote_modified = sync_state
                 .remote_by_id
@@ -448,12 +619,27 @@ async fn apply_local_changes(
                 .map(|item| item.modified_ts)
                 .unwrap_or(0);
             if local_entry.modified_ts >= remote_modified {
+                log::info!(
+                    "{} [cycle:{}] LOCAL_UPLOAD_EXISTING path={} remote_id={} local_ts={} remote_ts={}",
+                    graph.account_prefix,
+                    graph.cycle_id,
+                    path,
+                    existing_id,
+                    local_entry.modified_ts,
+                    remote_modified
+                );
                 let uploaded = upload_file_by_path(graph, sync_root, &path).await?;
                 let known = remote_known_item_from_drive_item(uploaded, &path)?;
                 upsert_remote_known_item(sync_state, known);
                 stats.uploaded_files += 1;
             }
         } else {
+            log::info!(
+                "{} [cycle:{}] LOCAL_UPLOAD_NEW path={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                path
+            );
             let uploaded = upload_file_by_path(graph, sync_root, &path).await?;
             let known = remote_known_item_from_drive_item(uploaded, &path)?;
             upsert_remote_known_item(sync_state, known);
@@ -473,9 +659,23 @@ async fn apply_local_changes(
 
     for deleted_path in deleted_paths {
         if let Some(remote_id) = sync_state.remote_path_to_id.get(&deleted_path).cloned() {
+            log::info!(
+                "{} [cycle:{}] REMOTE_DELETE_START path={} remote_id={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                deleted_path,
+                remote_id
+            );
             delete_remote_item(graph, &remote_id).await?;
             sync_state.remote_path_to_id.remove(&deleted_path);
             sync_state.remote_by_id.remove(&remote_id);
+            log::info!(
+                "{} [cycle:{}] REMOTE_DELETE_OK path={} remote_id={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                deleted_path,
+                remote_id
+            );
             stats.deleted_remote += 1;
         }
     }
@@ -504,21 +704,26 @@ fn remove_local_path(sync_root: &Path, relative_path: &str) -> Result<(), String
     }
     let metadata = std::fs::metadata(&full_path).map_err(|error| error.to_string())?;
     if metadata.is_dir() {
-        std::fs::remove_dir_all(&full_path)
-            .map_err(|error| format!("Failed removing directory '{}': {}", full_path.display(), error))
+        std::fs::remove_dir_all(&full_path).map_err(|error| {
+            format!(
+                "Failed removing directory '{}': {}",
+                full_path.display(),
+                error
+            )
+        })
     } else {
         std::fs::remove_file(&full_path)
             .map_err(|error| format!("Failed removing file '{}': {}", full_path.display(), error))
     }
 }
 
-fn create_safe_backup(local_path: &Path) -> Result<(), String> {
+fn create_safe_backup(local_path: &Path) -> Result<Option<PathBuf>, String> {
     if !local_path.exists() {
-        return Ok(());
+        return Ok(None);
     }
     let metadata = std::fs::metadata(local_path).map_err(|error| error.to_string())?;
     if !metadata.is_file() {
-        return Ok(());
+        return Ok(None);
     }
 
     let parent = local_path
@@ -544,7 +749,7 @@ fn create_safe_backup(local_path: &Path) -> Result<(), String> {
                     error
                 )
             })?;
-            return Ok(());
+            return Ok(Some(backup_path));
         }
         index += 1;
     }
@@ -620,7 +825,11 @@ async fn graph_get_text(graph: &mut GraphContext, url: &str) -> Result<String, S
             .map_err(|error| format!("Failed reading Graph response: {error}"))?;
 
         if status.as_u16() == 401 && !refreshed {
-            log::warn!("Graph GET unauthorized, refreshing token for profile_id={}", graph.profile_id);
+            log::warn!(
+                "{} [cycle:{}] GRAPH_GET_401_REFRESH",
+                graph.account_prefix,
+                graph.cycle_id
+            );
             graph.refresh_token().await?;
             refreshed = true;
             continue;
@@ -628,7 +837,10 @@ async fn graph_get_text(graph: &mut GraphContext, url: &str) -> Result<String, S
 
         if !status.is_success() {
             let snippet: String = text.chars().take(400).collect();
-            return Err(format!("Graph GET {} failed with status {}: {}", url, status, snippet));
+            return Err(format!(
+                "Graph GET {} failed with status {}: {}",
+                url, status, snippet
+            ));
         }
         return Ok(text);
     }
@@ -646,7 +858,11 @@ async fn graph_delete(graph: &mut GraphContext, url: &str) -> Result<(), String>
             .map_err(|error| format!("Graph DELETE failed: {error}"))?;
         let status = response.status();
         if status.as_u16() == 401 && !refreshed {
-            log::warn!("Graph DELETE unauthorized, refreshing token for profile_id={}", graph.profile_id);
+            log::warn!(
+                "{} [cycle:{}] GRAPH_DELETE_401_REFRESH",
+                graph.account_prefix,
+                graph.cycle_id
+            );
             graph.refresh_token().await?;
             refreshed = true;
             continue;
@@ -658,15 +874,27 @@ async fn graph_delete(graph: &mut GraphContext, url: &str) -> Result<(), String>
 
         let text = response.text().await.unwrap_or_default();
         let snippet: String = text.chars().take(400).collect();
-        return Err(format!("Graph DELETE {} failed with status {}: {}", url, status, snippet));
+        return Err(format!(
+            "Graph DELETE {} failed with status {}: {}",
+            url, status, snippet
+        ));
     }
 }
 
 async fn download_remote_item_content(
     graph: &mut GraphContext,
     item_id: &str,
+    relative_path: &str,
     local_path: &Path,
 ) -> Result<(), String> {
+    log::info!(
+        "{} [cycle:{}] DOWNLOAD_START item_id={} path={} local_path={}",
+        graph.account_prefix,
+        graph.cycle_id,
+        item_id,
+        relative_path,
+        local_path.display()
+    );
     let url = format!("{GRAPH_ROOT}/me/drive/items/{}/content", item_id);
     let client = reqwest::Client::new();
     let mut refreshed = false;
@@ -679,7 +907,11 @@ async fn download_remote_item_content(
             .map_err(|error| format!("Failed to download remote content: {error}"))?;
         let status = response.status();
         if status.as_u16() == 401 && !refreshed {
-            log::warn!("Graph download unauthorized, refreshing token for profile_id={}", graph.profile_id);
+            log::warn!(
+                "{} [cycle:{}] GRAPH_DOWNLOAD_401_REFRESH",
+                graph.account_prefix,
+                graph.cycle_id
+            );
             graph.refresh_token().await?;
             refreshed = true;
             continue;
@@ -700,11 +932,30 @@ async fn download_remote_item_content(
     };
 
     if let Some(parent) = local_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("Failed creating local parent '{}': {}", parent.display(), error))?;
+        std::fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "Failed creating local parent '{}': {}",
+                parent.display(),
+                error
+            )
+        })?;
     }
-    std::fs::write(local_path, &bytes)
-        .map_err(|error| format!("Failed writing local file '{}': {}", local_path.display(), error))
+    std::fs::write(local_path, &bytes).map_err(|error| {
+        format!(
+            "Failed writing local file '{}': {}",
+            local_path.display(),
+            error
+        )
+    })?;
+    log::info!(
+        "{} [cycle:{}] DOWNLOAD_OK item_id={} path={} bytes={}",
+        graph.account_prefix,
+        graph.cycle_id,
+        item_id,
+        relative_path,
+        bytes.len()
+    );
+    Ok(())
 }
 
 async fn upload_file_by_path(
@@ -713,11 +964,24 @@ async fn upload_file_by_path(
     relative_path: &str,
 ) -> Result<DriveItemResponse, String> {
     let local_path = sync_root.join(path_to_local(relative_path));
-    let content = std::fs::read(&local_path)
-        .map_err(|error| format!("Failed reading local file '{}': {}", local_path.display(), error))?;
+    let content = std::fs::read(&local_path).map_err(|error| {
+        format!(
+            "Failed reading local file '{}': {}",
+            local_path.display(),
+            error
+        )
+    })?;
 
     let encoded_path = encode_graph_path(relative_path);
     let url = format!("{GRAPH_ROOT}/me/drive/root:/{}:/content", encoded_path);
+    log::info!(
+        "{} [cycle:{}] UPLOAD_START path={} local_path={} bytes={}",
+        graph.account_prefix,
+        graph.cycle_id,
+        relative_path,
+        local_path.display(),
+        content.len()
+    );
     let client = reqwest::Client::new();
     let mut refreshed = false;
     loop {
@@ -736,7 +1000,11 @@ async fn upload_file_by_path(
             .map_err(|error| format!("Failed reading upload response: {error}"))?;
 
         if status.as_u16() == 401 && !refreshed {
-            log::warn!("Graph upload unauthorized, refreshing token for profile_id={}", graph.profile_id);
+            log::warn!(
+                "{} [cycle:{}] GRAPH_UPLOAD_401_REFRESH",
+                graph.account_prefix,
+                graph.cycle_id
+            );
             graph.refresh_token().await?;
             refreshed = true;
             continue;
@@ -749,23 +1017,45 @@ async fn upload_file_by_path(
                 relative_path, status, snippet
             ));
         }
-        return serde_json::from_str::<DriveItemResponse>(&text)
-            .map_err(|error| format!("Failed decoding upload response JSON: {error}"));
+        let parsed = serde_json::from_str::<DriveItemResponse>(&text)
+            .map_err(|error| format!("Failed decoding upload response JSON: {error}"))?;
+        log::info!(
+            "{} [cycle:{}] UPLOAD_OK path={} remote_id={} size={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            relative_path,
+            parsed.id,
+            parsed.size.unwrap_or(0)
+        );
+        return Ok(parsed);
     }
 }
 
-async fn create_remote_folder(graph: &mut GraphContext, relative_path: &str) -> Result<DriveItemResponse, String> {
+async fn create_remote_folder(
+    graph: &mut GraphContext,
+    relative_path: &str,
+) -> Result<DriveItemResponse, String> {
     let (parent, name) = split_parent_and_name(relative_path)?;
     let endpoint = if parent.is_empty() {
         format!("{GRAPH_ROOT}/me/drive/root/children")
     } else {
-        format!("{GRAPH_ROOT}/me/drive/root:/{}:/children", encode_graph_path(parent))
+        format!(
+            "{GRAPH_ROOT}/me/drive/root:/{}:/children",
+            encode_graph_path(parent)
+        )
     };
     let payload = serde_json::json!({
         "name": name,
         "folder": {},
         "@microsoft.graph.conflictBehavior": "replace"
     });
+    log::info!(
+        "{} [cycle:{}] REMOTE_DIR_CREATE_REQUEST path={} parent={}",
+        graph.account_prefix,
+        graph.cycle_id,
+        relative_path,
+        parent
+    );
 
     let client = reqwest::Client::new();
     let mut refreshed = false;
@@ -776,7 +1066,12 @@ async fn create_remote_folder(graph: &mut GraphContext, relative_path: &str) -> 
             .json(&payload)
             .send()
             .await
-            .map_err(|error| format!("Failed creating remote folder '{}': {}", relative_path, error))?;
+            .map_err(|error| {
+                format!(
+                    "Failed creating remote folder '{}': {}",
+                    relative_path, error
+                )
+            })?;
 
         let status = response.status();
         let text = response
@@ -785,7 +1080,11 @@ async fn create_remote_folder(graph: &mut GraphContext, relative_path: &str) -> 
             .map_err(|error| format!("Failed reading create folder response: {error}"))?;
 
         if status.as_u16() == 401 && !refreshed {
-            log::warn!("Graph folder-create unauthorized, refreshing token for profile_id={}", graph.profile_id);
+            log::warn!(
+                "{} [cycle:{}] GRAPH_DIR_CREATE_401_REFRESH",
+                graph.account_prefix,
+                graph.cycle_id
+            );
             graph.refresh_token().await?;
             refreshed = true;
             continue;
@@ -798,14 +1097,35 @@ async fn create_remote_folder(graph: &mut GraphContext, relative_path: &str) -> 
                 relative_path, status, snippet
             ));
         }
-        return serde_json::from_str::<DriveItemResponse>(&text)
-            .map_err(|error| format!("Failed decoding create-folder response JSON: {error}"));
+        let parsed = serde_json::from_str::<DriveItemResponse>(&text)
+            .map_err(|error| format!("Failed decoding create-folder response JSON: {error}"))?;
+        log::info!(
+            "{} [cycle:{}] REMOTE_DIR_CREATE_OK path={} remote_id={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            relative_path,
+            parsed.id
+        );
+        return Ok(parsed);
     }
 }
 
 async fn delete_remote_item(graph: &mut GraphContext, item_id: &str) -> Result<(), String> {
     let url = format!("{GRAPH_ROOT}/me/drive/items/{}", item_id);
-    graph_delete(graph, &url).await
+    log::info!(
+        "{} [cycle:{}] REMOTE_DELETE_REQUEST item_id={}",
+        graph.account_prefix,
+        graph.cycle_id,
+        item_id
+    );
+    graph_delete(graph, &url).await?;
+    log::info!(
+        "{} [cycle:{}] REMOTE_DELETE_RESULT item_id={} status=ok",
+        graph.account_prefix,
+        graph.cycle_id,
+        item_id
+    );
+    Ok(())
 }
 
 fn split_parent_and_name(relative_path: &str) -> Result<(&str, &str), String> {
@@ -851,8 +1171,14 @@ fn remote_known_item_from_drive_item(
     item: DriveItemResponse,
     fallback_path: &str,
 ) -> Result<RemoteKnownItem, String> {
-    let path = if let (Some(name), Some(parent_ref)) = (item.name.clone(), item.parent_reference.clone()) {
-        let parent = parent_ref.path.as_deref().map(extract_root_relative).unwrap_or_default();
+    let path = if let (Some(name), Some(parent_ref)) =
+        (item.name.clone(), item.parent_reference.clone())
+    {
+        let parent = parent_ref
+            .path
+            .as_deref()
+            .map(extract_root_relative)
+            .unwrap_or_default();
         normalize_relative_path(&if parent.is_empty() {
             name
         } else {
@@ -882,14 +1208,19 @@ fn collect_local_snapshot(sync_root: &Path) -> Result<HashMap<String, LocalSnaps
 
     let mut stack: Vec<PathBuf> = vec![sync_root.to_path_buf()];
     while let Some(current) = stack.pop() {
-        let entries = std::fs::read_dir(&current)
-            .map_err(|error| format!("Failed reading directory '{}': {}", current.display(), error))?;
+        let entries = std::fs::read_dir(&current).map_err(|error| {
+            format!(
+                "Failed reading directory '{}': {}",
+                current.display(),
+                error
+            )
+        })?;
         for entry in entries {
             let entry = entry.map_err(|error| error.to_string())?;
             let path = entry.path();
-            let metadata = entry
-                .metadata()
-                .map_err(|error| format!("Failed reading metadata '{}': {}", path.display(), error))?;
+            let metadata = entry.metadata().map_err(|error| {
+                format!("Failed reading metadata '{}': {}", path.display(), error)
+            })?;
 
             if !metadata.is_file() && !metadata.is_dir() {
                 continue;
@@ -897,7 +1228,13 @@ fn collect_local_snapshot(sync_root: &Path) -> Result<HashMap<String, LocalSnaps
 
             let relative = path
                 .strip_prefix(sync_root)
-                .map_err(|error| format!("Failed computing relative path '{}': {}", path.display(), error))?
+                .map_err(|error| {
+                    format!(
+                        "Failed computing relative path '{}': {}",
+                        path.display(),
+                        error
+                    )
+                })?
                 .to_string_lossy()
                 .replace('\\', "/");
             let normalized = normalize_relative_path(&relative);
@@ -916,7 +1253,11 @@ fn collect_local_snapshot(sync_root: &Path) -> Result<HashMap<String, LocalSnaps
                 normalized,
                 LocalSnapshotEntry {
                     is_dir: metadata.is_dir(),
-                    size: if metadata.is_file() { metadata.len() } else { 0 },
+                    size: if metadata.is_file() {
+                        metadata.len()
+                    } else {
+                        0
+                    },
                     modified_ts,
                 },
             );
@@ -943,15 +1284,20 @@ fn read_local_entry(path: &Path) -> Result<Option<LocalSnapshotEntry>, String> {
         .unwrap_or(0);
     Ok(Some(LocalSnapshotEntry {
         is_dir: metadata.is_dir(),
-        size: if metadata.is_file() { metadata.len() } else { 0 },
+        size: if metadata.is_file() {
+            metadata.len()
+        } else {
+            0
+        },
         modified_ts,
     }))
 }
 
 fn sync_state_path(profile_id: &str) -> Result<PathBuf, String> {
-    let config_dir = dirs::config_dir().ok_or_else(|| "Could not resolve config directory".to_string())?;
+    let config_dir =
+        dirs::config_dir().ok_or_else(|| "Could not resolve config directory".to_string())?;
     Ok(config_dir
-        .join("onedrive")
+        .join("somedrive")
         .join("accounts")
         .join(profile_id)
         .join("sync_state.json"))
@@ -971,8 +1317,13 @@ fn load_sync_state(profile_id: &str) -> Result<PersistedSyncState, String> {
 fn save_sync_state(profile_id: &str, state: &PersistedSyncState) -> Result<(), String> {
     let path = sync_state_path(profile_id)?;
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("Failed creating sync state directory '{}': {}", parent.display(), error))?;
+        std::fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "Failed creating sync state directory '{}': {}",
+                parent.display(),
+                error
+            )
+        })?;
     }
     let text = serde_json::to_string_pretty(state)
         .map_err(|error| format!("Failed encoding sync state JSON: {error}"))?;

@@ -29,7 +29,7 @@ When an account is in `syncing` state:
 
 Store at:
 
-- `~/.config/onedrive/accounts/<profile-id>/sync_state.json`
+- `~/.config/somedrive/accounts/<profile-id>/sync_state.json`
 
 State fields:
 

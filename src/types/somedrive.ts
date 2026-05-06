@@ -5,6 +5,7 @@ export type SyncAgentState = "idle" | "syncing" | "paused" | "error";
 export interface AccountProfile {
   id: string;
   displayName: string;
+  email: string;
   slug: string;
   kind: AccountKind;
   syncRoot: string;

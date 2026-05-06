@@ -4,7 +4,7 @@ import { AccountOverviewPanel } from "../components/accounts/AccountOverviewPane
 import { AccountSettingsPanel } from "../components/accounts/AccountSettingsPanel";
 import { AccountSyncPanel } from "../components/accounts/AccountSyncPanel";
 import type { AccountDetailTab } from "../routes/appRoutes";
-import type { AccountProfile, ActivityEvent } from "../types/onedrive";
+import type { AccountProfile, ActivityEvent } from "../types/somedrive";
 
 interface AccountDetailPageProps {
   account: AccountProfile | null;

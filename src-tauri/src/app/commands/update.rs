@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 const GITHUB_LATEST_RELEASE_API_URL: &str =
-    "https://api.github.com/repos/jackbrumley/onedrive/releases/latest";
+    "https://api.github.com/repos/jackbrumley/somedrive/releases/latest";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,7 +28,7 @@ pub async fn check_for_updates() -> Result<UpdateCheckResult, String> {
 
     let response = client
         .get(GITHUB_LATEST_RELEASE_API_URL)
-        .header(reqwest::header::USER_AGENT, "onedrive-update-checker")
+        .header(reqwest::header::USER_AGENT, "somedrive-update-checker")
         .header(reqwest::header::ACCEPT, "application/vnd.github+json")
         .send()
         .await
@@ -78,7 +78,9 @@ fn parse_version(value: &str) -> Option<(u64, u64, u64)> {
         return None;
     }
 
-    let core = sanitized.split_once('-').map_or(sanitized, |(left, _)| left);
+    let core = sanitized
+        .split_once('-')
+        .map_or(sanitized, |(left, _)| left);
     let mut segments = core.split('.');
 
     let major = segments.next()?.parse::<u64>().ok()?;

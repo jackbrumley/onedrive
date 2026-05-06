@@ -2,7 +2,7 @@ import { useState } from "preact/hooks";
 import { AddAccountCard } from "../components/accounts/AddAccountCard";
 import { AddAccountModal } from "../components/accounts/AddAccountModal";
 import { AccountCard } from "../components/accounts/AccountCard";
-import type { AccountProfile, AccountKind } from "../types/onedrive";
+import type { AccountProfile, AccountKind } from "../types/somedrive";
 
 interface AccountsHomePageProps {
   accounts: AccountProfile[];

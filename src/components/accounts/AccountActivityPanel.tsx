@@ -1,4 +1,4 @@
-import type { ActivityEvent } from "../../types/onedrive";
+import type { ActivityEvent } from "../../types/somedrive";
 
 interface AccountActivityPanelProps {
   events: ActivityEvent[];

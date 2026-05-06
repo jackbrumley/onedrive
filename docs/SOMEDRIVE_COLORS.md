@@ -1,6 +1,6 @@
-# OneDrive Color Reference
+# SomeDrive Color Reference
 
-This document defines the primary OneDrive-inspired palette used by the app UI.
+This document defines the primary SomeDrive palette used by the app UI.
 
 ## Source Colors
 
@@ -21,7 +21,7 @@ Core brand tokens:
 - `--brand-primary: #107AD1`
 - `--brand-strong: #0E65B6`
 - `--brand-highlight: #31A9E8`
-- `--od-text-blue: #0E65B6`
+- `--sd-text-blue: #0E65B6`
 
 UI context tokens:
 
@@ -39,5 +39,5 @@ Action accent token:
 - Use `--brand-primary` for primary buttons and active controls.
 - Use `--brand-strong` for pressed/hover states and stronger outlines.
 - Use `--brand-highlight` for headings, icon accents, and key status emphasis.
-- Use dark charcoal surfaces for primary backgrounds to keep OneDrive blues vibrant.
+- Use dark charcoal surfaces for primary backgrounds to keep brand blues vibrant.
 - Reserve green for positive, creation-oriented actions (for example, Add Account card).

@@ -1,13 +1,13 @@
 [package]
-name = "onedrive"
+name = "somedrive"
 version = "0.1.0"
 description = "Linux-first desktop client for Microsoft OneDrive"
-authors = ["OneDrive Team"]
+authors = ["Jack Brumley"]
 license = "MIT"
 edition = "2021"
 
 [lib]
-name = "onedrive_lib"
+name = "somedrive_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

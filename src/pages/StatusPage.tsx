@@ -1,4 +1,4 @@
-import type { AppStatusSnapshot, UpdateCheckResult } from "../types/onedrive";
+import type { AppStatusSnapshot, UpdateCheckResult } from "../types/somedrive";
 
 interface StatusPageProps {
   status: AppStatusSnapshot;
