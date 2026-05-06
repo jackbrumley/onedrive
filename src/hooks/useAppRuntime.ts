@@ -16,6 +16,7 @@ import type {
   SetAccountSyncRootInput,
   SetAccountAgentStateInput,
   SyncAgentState,
+  SyncRuntimeSnapshot,
   ToastType,
   UpdateCheckResult,
 } from "../types/somedrive";
@@ -35,6 +36,11 @@ const initialStatus: AppStatusSnapshot = {
   accounts: [],
 };
 
+const initialSyncRuntime: SyncRuntimeSnapshot = {
+  generatedAt: new Date(0).toISOString(),
+  accounts: [],
+};
+
 export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
   const [routeState, setRouteState] = useState<AppRouteState>(routeStateFromHash(window.location.hash));
   const [status, setStatus] = useState<AppStatusSnapshot>(initialStatus);
@@ -43,6 +49,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
+  const [syncRuntime, setSyncRuntime] = useState<SyncRuntimeSnapshot>(initialSyncRuntime);
 
   const navigate = (nextState: AppRouteState) => {
     const nextHash = hashFromRouteState(nextState);
@@ -103,6 +110,15 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     }
   };
 
+  const refreshSyncRuntime = async () => {
+    try {
+      const snapshot = await invoke<SyncRuntimeSnapshot>("get_sync_runtime_snapshot");
+      setSyncRuntime(snapshot);
+    } catch {
+      // runtime telemetry is best-effort for now
+    }
+  };
+
   const checkForUpdates = async () => {
     setCheckingUpdates(true);
     setUpdateError(null);
@@ -130,7 +146,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     try {
       const profile = await invoke<AccountProfile>("create_account_profile", { input });
       showToast(`Account '${displayName}' added.`, "success", 2200);
-      await Promise.all([refreshStatus(), refreshActivity()]);
+      await Promise.all([refreshStatus(), refreshActivity(), refreshSyncRuntime()]);
       const authStarted = await startInteractiveAuth(profile.id);
       openAccount(profile.id, "settings");
       return authStarted;
@@ -145,7 +161,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     try {
       await invoke("rename_account_profile", { input });
       showToast("Account name updated.", "success", 2200);
-      await Promise.all([refreshStatus(), refreshActivity()]);
+      await Promise.all([refreshStatus(), refreshActivity(), refreshSyncRuntime()]);
     } catch (error) {
       showToast(`Failed to rename account: ${error}`, "error", 4200);
     }
@@ -155,7 +171,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     try {
       await invoke("remove_account_profile", { input: { id } });
       showToast("Account removed. Synced files were not deleted.", "info", 3600);
-      await Promise.all([refreshStatus(), refreshActivity()]);
+      await Promise.all([refreshStatus(), refreshActivity(), refreshSyncRuntime()]);
     } catch (error) {
       showToast(`Failed to remove account: ${error}`, "error", 4200);
     }
@@ -166,7 +182,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     try {
       await invoke("set_account_agent_state", { input });
       showToast(`Agent state set to '${agentState}'.`, "success", 2200);
-      await Promise.all([refreshStatus(), refreshActivity()]);
+      await Promise.all([refreshStatus(), refreshActivity(), refreshSyncRuntime()]);
     } catch (error) {
       showToast(`Failed to update agent state: ${error}`, "error", 4200);
     }
@@ -177,7 +193,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     try {
       await invoke("set_account_sync_root", { input });
       showToast("Sync folder updated.", "success", 2200);
-      await Promise.all([refreshStatus(), refreshActivity()]);
+      await Promise.all([refreshStatus(), refreshActivity(), refreshSyncRuntime()]);
     } catch (error) {
       showToast(`Failed to update sync folder: ${error}`, "error", 4200);
     }
@@ -198,7 +214,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     try {
       await invoke("clear_account_auth", { profileId });
       showToast("Account auth session cleared.", "info", 2200);
-      await Promise.all([refreshStatus(), refreshActivity()]);
+      await Promise.all([refreshStatus(), refreshActivity(), refreshSyncRuntime()]);
     } catch (error) {
       showToast(`Failed to clear auth: ${error}`, "error", 4200);
     }
@@ -212,7 +228,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
       } else {
         showToast("No syncing accounts to pause.", "info", 2200);
       }
-      await Promise.all([refreshStatus(), refreshActivity()]);
+      await Promise.all([refreshStatus(), refreshActivity(), refreshSyncRuntime()]);
     } catch (error) {
       showToast(`Failed to pause all accounts: ${error}`, "error", 4200);
     }
@@ -226,7 +242,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
       } else {
         showToast("No paused accounts to resume.", "info", 2200);
       }
-      await Promise.all([refreshStatus(), refreshActivity()]);
+      await Promise.all([refreshStatus(), refreshActivity(), refreshSyncRuntime()]);
     } catch (error) {
       showToast(`Failed to resume all accounts: ${error}`, "error", 4200);
     }
@@ -263,7 +279,14 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     window.addEventListener("hashchange", syncRoute);
     refreshStatus();
     refreshActivity();
-    return () => window.removeEventListener("hashchange", syncRoute);
+    refreshSyncRuntime();
+    const runtimeInterval = window.setInterval(() => {
+      refreshSyncRuntime();
+    }, 1500);
+    return () => {
+      window.removeEventListener("hashchange", syncRoute);
+      window.clearInterval(runtimeInterval);
+    };
   }, []);
 
   return {
@@ -274,6 +297,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     updateError,
     lastCheckedAt,
     activityEvents,
+    syncRuntime,
     syncingCount: status.accounts.filter((account) => account.agentState === "syncing").length,
     pausedCount: status.accounts.filter((account) => account.agentState === "paused").length,
     navigate,
@@ -283,6 +307,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     goUiLab,
     refreshStatus,
     refreshActivity,
+    refreshSyncRuntime,
     checkForUpdates,
     createAccountProfile,
     renameAccountProfile,

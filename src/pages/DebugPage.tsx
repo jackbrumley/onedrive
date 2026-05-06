@@ -3,6 +3,7 @@ import type { AppStatusSnapshot } from "../types/somedrive";
 
 interface DebugPageProps {
   status: AppStatusSnapshot;
+  onBack: () => void;
   onNavigateUiLab: () => void;
   onRefreshStatus: () => Promise<void>;
   onFetchSessionLogText: () => Promise<string>;
@@ -12,6 +13,7 @@ interface DebugPageProps {
 
 export function DebugPage({
   status,
+  onBack,
   onNavigateUiLab,
   onRefreshStatus,
   onFetchSessionLogText,
@@ -31,7 +33,12 @@ export function DebugPage({
 
   return (
     <section class="page">
-      <h2>Settings</h2>
+      <div class="page-header">
+        <h2>Settings</h2>
+        <button class="page-header-action" onClick={onBack}>
+          Back
+        </button>
+      </div>
 
       <article class="card">
         <h3>Development Tools</h3>

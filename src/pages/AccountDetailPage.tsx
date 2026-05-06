@@ -4,10 +4,11 @@ import { AccountOverviewPanel } from "../components/accounts/AccountOverviewPane
 import { AccountSettingsPanel } from "../components/accounts/AccountSettingsPanel";
 import { AccountSyncPanel } from "../components/accounts/AccountSyncPanel";
 import type { AccountDetailTab } from "../routes/appRoutes";
-import type { AccountProfile, ActivityEvent } from "../types/somedrive";
+import type { AccountProfile, ActivityEvent, SyncRuntimeAccountStatus } from "../types/somedrive";
 
 interface AccountDetailPageProps {
   account: AccountProfile | null;
+  runtimeStatus: SyncRuntimeAccountStatus | null;
   activeTab: AccountDetailTab;
   events: ActivityEvent[];
   onBack: () => void;
@@ -22,6 +23,7 @@ interface AccountDetailPageProps {
 
 export function AccountDetailPage({
   account,
+  runtimeStatus,
   activeTab,
   events,
   onBack,
@@ -64,6 +66,7 @@ export function AccountDetailPage({
       {activeTab === "sync" && (
         <AccountSyncPanel
           account={account}
+          runtimeStatus={runtimeStatus}
           recentEvents={events.slice(0, 8)}
           onSetAgentState={onSetAgentState}
         />

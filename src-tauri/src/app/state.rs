@@ -1,3 +1,4 @@
+use crate::app::sync_runtime::SyncRuntimeMap;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -21,6 +22,7 @@ pub struct AppState {
     pub auth_pending: Arc<Mutex<HashMap<String, DeviceAuthPending>>>,
     pub interactive_auth_pending: Arc<Mutex<HashMap<String, InteractiveAuthPending>>>,
     pub sync_worker_stops: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>>,
+    pub sync_runtime: Arc<Mutex<SyncRuntimeMap>>,
 }
 
 pub fn create_app_state() -> AppState {
@@ -29,5 +31,6 @@ pub fn create_app_state() -> AppState {
         auth_pending: Arc::new(Mutex::new(HashMap::new())),
         interactive_auth_pending: Arc::new(Mutex::new(HashMap::new())),
         sync_worker_stops: Arc::new(Mutex::new(HashMap::new())),
+        sync_runtime: Arc::new(Mutex::new(HashMap::new())),
     }
 }

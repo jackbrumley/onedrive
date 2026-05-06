@@ -2,16 +2,19 @@ import { useState } from "preact/hooks";
 import { AddAccountCard } from "../components/accounts/AddAccountCard";
 import { AddAccountModal } from "../components/accounts/AddAccountModal";
 import { AccountCard } from "../components/accounts/AccountCard";
-import type { AccountProfile, AccountKind } from "../types/somedrive";
+import type { AccountDetailTab } from "../routes/appRoutes";
+import type { AccountProfile, AccountKind, SyncRuntimeAccountStatus } from "../types/somedrive";
 
 interface AccountsHomePageProps {
   accounts: AccountProfile[];
+  syncRuntimeByAccountId: Record<string, SyncRuntimeAccountStatus>;
   onCreateAccount: (displayName: string, kind: AccountKind) => Promise<boolean>;
-  onOpenAccount: (accountId: string) => void;
+  onOpenAccount: (accountId: string, tab?: AccountDetailTab) => void;
 }
 
 export function AccountsHomePage({
   accounts,
+  syncRuntimeByAccountId,
   onCreateAccount,
   onOpenAccount,
 }: AccountsHomePageProps) {
@@ -19,11 +22,15 @@ export function AccountsHomePage({
 
   return (
     <section class="page">
+      <div class="page-header">
+        <h2>Accounts</h2>
+      </div>
       <div class="accounts-grid">
         {accounts.map((account) => (
           <AccountCard
             key={account.id}
             account={account}
+            runtimeStatus={syncRuntimeByAccountId[account.id] ?? null}
             onOpenDetails={onOpenAccount}
           />
         ))}

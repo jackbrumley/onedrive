@@ -4,31 +4,35 @@ This document defines the primary SomeDrive palette used by the app UI.
 
 ## Source Colors
 
-Icon/source colors provided:
+Brand direction anchored to `docs/logo.svg` with the current app palette:
 
-- `#107AD1` (from `107AD1FF`)
-- `#0E65B6` (from `0E65B6FF`)
-- `#31A9E8` (from `31A9E8FF`)
+- `#1D4ED8` (primary action blue)
+- `#1A57D3` (hover/pressed blue)
+- `#22C1C3` (secondary accent)
+- `#0891B2` (soft/link accent)
+- `#FFFFFF` (cloud/S mark)
 
-Preferred text accent:
+Preferred text treatment:
 
-- `#0E65B6` (from `0E65B6FF`)
+- headings: `#F3F7FF`
+- links/icons: `#0891B2`
 
 ## Token Mapping
 
 Core brand tokens:
 
-- `--brand-primary: #107AD1`
-- `--brand-strong: #0E65B6`
-- `--brand-highlight: #31A9E8`
-- `--sd-text-blue: #0E65B6`
+- `--brand-primary: #1D4ED8`
+- `--brand-strong: #1A57D3`
+- `--brand-highlight: #22C1C3`
+- `--brand-soft: #0891B2`
+- `--brand-on-color: #FFFFFF`
 
 UI context tokens:
 
-- `--bg-page: #1B1F24` (dark charcoal)
-- `--bg-card: #2B323D`
-- `--text-main: #E8EEF8`
-- `--text-muted: #A5B4C9`
+- `--bg-page: #121722` (dark charcoal)
+- `--bg-card: #222D3D`
+- `--text-main: #F3F7FF`
+- `--text-muted: #A7B6CC`
 
 Action accent token:
 
@@ -38,6 +42,8 @@ Action accent token:
 
 - Use `--brand-primary` for primary buttons and active controls.
 - Use `--brand-strong` for pressed/hover states and stronger outlines.
-- Use `--brand-highlight` for headings, icon accents, and key status emphasis.
+- Use `--brand-highlight` sparingly for focus/secondary accent moments.
+- App background uses a logo-aligned gradient blend from `#1D4ED8` to `#0891B2`.
+- Use `--brand-on-color` for icon/label content that sits on brand gradients.
 - Use dark charcoal surfaces for primary backgrounds to keep brand blues vibrant.
 - Reserve green for positive, creation-oriented actions (for example, Add Account card).

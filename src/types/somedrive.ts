@@ -76,6 +76,41 @@ export interface UpdateCheckResult {
   releaseUrl: string;
 }
 
+export interface SyncRuntimeTransfer {
+  id: string;
+  direction: string;
+  path: string;
+  bytesDone: number;
+  bytesTotal: number | null;
+  startedAt: string;
+  updatedAt: string;
+}
+
+export interface SyncRuntimeRecentItem {
+  id: string;
+  direction: string;
+  path: string;
+  bytesTotal: number | null;
+  finishedAt: string;
+  status: string;
+  error: string | null;
+}
+
+export interface SyncRuntimeAccountStatus {
+  profileId: string;
+  phase: string;
+  phaseMessage: string;
+  inProgress: SyncRuntimeTransfer[];
+  recentCompleted: SyncRuntimeRecentItem[];
+  recentFailed: SyncRuntimeRecentItem[];
+  updatedAt: string;
+}
+
+export interface SyncRuntimeSnapshot {
+  generatedAt: string;
+  accounts: SyncRuntimeAccountStatus[];
+}
+
 export type ToastType = "success" | "error" | "info";
 
 export interface ToastMessage {

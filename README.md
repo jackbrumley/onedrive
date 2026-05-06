@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src-tauri/icons/128x128.png" alt="SomeDrive Logo" width="96" height="96" />
+  <img src="docs/logo.svg" alt="SomeDrive Logo" width="120" height="120" />
 </p>
 
 <h1 align="center">SomeDrive - Linux-First Desktop Client for Microsoft OneDrive</h1>
@@ -7,7 +7,7 @@
 <p align="center">Simple GUI-first Microsoft OneDrive sync for Linux.</p>
 
 <p align="center">
-  <a href="https://opensource.org/license/mit"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License" /></a>
+  <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="GNU GPLv3 License" /></a>
   <a href="https://github.com/jackbrumley/somedrive"><img src="https://img.shields.io/badge/Platform-Linux-16a34a" alt="Platform" /></a>
   <a href="https://tauri.app/"><img src="https://img.shields.io/badge/Built%20With-Tauri-14b8a6" alt="Built with Tauri" /></a>
 </p>

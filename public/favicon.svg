@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <marker
+      id="roundedArrow"
+      markerWidth="1.6"
+      markerHeight="2.2"
+      refX="0"
+      refY="0"
+      orient="auto-start-reverse"
+      markerUnits="strokeWidth"
+      viewBox="0 0 6.1347524 5.9304951"
+      preserveAspectRatio="none"
+    >
+      <path
+        d="m -0.21114562,-4.1055728 6.42229122,3.21114561 a 1,1 90 0 1 0,1.78885438 L -0.21114562,4.1055728 A 1.236068,1.236068 31.717474 0 1 -2,3 v -6 a 1.236068,1.236068 148.28253 0 1 1.78885438,-1.1055728 z"
+        transform="scale(0.7)"
+        style="fill:context-stroke;fill-rule:evenodd;stroke:none"
+      />
+    </marker>
+    <linearGradient id="g26" x1="86" y1="432" x2="426" y2="84" gradientUnits="userSpaceOnUse" gradientTransform="matrix(1.2167908,0,0,1.4321015,-57.932012,-162.17366)">
+      <stop offset="0" stop-color="#0891b2" />
+      <stop offset="1" stop-color="#1d4ed8" />
+    </linearGradient>
+  </defs>
+
+  <path d="m 190.34988,81.585106 c 0,-25.62708 19.46863,-46.128745 43.80445,-46.128745 h 109.51116 l 41.37089,48.691454 h -194.6865 z" fill="#22c1c3" />
+  <path d="M 71.047808,35.45636 H 209.76197 l 36.50372,48.691455 H 440.9522 c 30.41978,0 55.97237,30.074135 55.97237,65.876665 v 260.64248 c 0,35.80254 -25.55259,65.87668 -55.97237,65.87668 H 71.047808 c -30.419769,0 -55.972374,-30.07414 -55.972374,-65.87668 V 101.33304 c 0,-35.802547 25.552605,-65.87668 55.972374,-65.87668 z" fill="url(#g26)" />
+  <path d="m 343.90816,233.23779 c 130.67873,-13.18116 130.708,182.95316 -70.20474,182.95316" fill="none" stroke="#ffffff" stroke-width="34.0701" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="m 273.70342,416.19095 c -282.5297421,0 -205.059028,-201.41341 -105.59189,-186.09259" fill="none" stroke="#ffffff" stroke-width="34.0701" stroke-linecap="round" />
+  <path d="m 202.05605,411.00298 c 152.06484,0 152.06484,-130.69215 61.7866,-130.69215 -35.62705,0 -96.03027,-16.40298 -97.73422,-62.21153 -4.32821,-116.3587 198.89643,-130.644626 177.79973,15.13849" fill="none" stroke="#ffffff" stroke-width="34.0701" stroke-linecap="round" stroke-linejoin="round" marker-start="url(#roundedArrow)" marker-end="url(#roundedArrow)" />
+</svg>

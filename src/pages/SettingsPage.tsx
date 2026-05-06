@@ -68,7 +68,7 @@ export function SettingsPage({
 
   return (
     <section class="page">
-      <h2>Settings</h2>
+      <h2 class="settings-title">Settings</h2>
 
       <article class="card">
         <h3>Add Account</h3>

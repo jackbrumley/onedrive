@@ -20,19 +20,25 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
     ? runtime.activityEvents.filter((event) => event.profileId === selectedAccount.id)
     : [];
 
+  const syncRuntimeByAccountId = Object.fromEntries(
+    runtime.syncRuntime.accounts.map((status) => [status.profileId, status])
+  );
+
   return (
     <AppPageRenderer
       page={runtime.routeState.page}
       renderAccountsHome={() => (
         <AccountsHomePage
           accounts={runtime.status.accounts}
+          syncRuntimeByAccountId={syncRuntimeByAccountId}
           onCreateAccount={runtime.createAccountProfile}
-          onOpenAccount={(accountId) => runtime.openAccount(accountId, "overview")}
+          onOpenAccount={runtime.openAccount}
         />
       )}
       renderAccountDetail={() => (
         <AccountDetailPage
           account={selectedAccount}
+          runtimeStatus={selectedAccount ? (syncRuntimeByAccountId[selectedAccount.id] ?? null) : null}
           activeTab={runtime.routeState.accountTab}
           events={selectedAccountEvents}
           onBack={runtime.goHome}
@@ -52,6 +58,7 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
       renderDebug={() => (
         <DebugPage
           status={runtime.status}
+          onBack={runtime.goHome}
           onNavigateUiLab={runtime.goUiLab}
           onRefreshStatus={runtime.refreshStatus}
           onFetchSessionLogText={runtime.fetchSessionLogText}

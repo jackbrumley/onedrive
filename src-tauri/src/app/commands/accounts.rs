@@ -7,6 +7,7 @@ use crate::app::activity_log;
 use crate::app::log_context;
 use crate::app::state::AppState;
 use crate::app::sync_engine;
+use crate::app::sync_runtime;
 use std::fs;
 
 #[tauri::command]
@@ -76,6 +77,9 @@ pub fn remove_account_profile(
     let profile_id = input.id.clone();
     remove_profile(input)?;
     sync_engine::on_agent_state_changed(&state, &profile_id, "idle")?;
+    if let Ok(mut runtime_map) = state.sync_runtime.lock() {
+        sync_runtime::remove_account(&mut runtime_map, &profile_id);
+    }
     let _ = activity_log::append_event(
         &profile_id,
         &profile_id,

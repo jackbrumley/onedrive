@@ -3,6 +3,8 @@ use crate::app::activity_log;
 use crate::app::auth::{load_auth_session, refresh_access_token};
 use crate::app::log_context;
 use crate::app::state::AppState;
+use crate::app::sync_runtime::{self, SyncRuntimeMap};
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -24,6 +26,15 @@ pub fn on_agent_state_changed(
         start_sync_worker(state, profile_id)?;
     } else {
         stop_sync_worker(state, profile_id)?;
+        if let Ok(mut runtime_map) = state.sync_runtime.lock() {
+            sync_runtime::clear_in_progress(&mut runtime_map, profile_id);
+            let (phase, message) = if agent_state == "paused" {
+                ("paused", "Synchronization paused")
+            } else {
+                ("idle", "Idle")
+            };
+            sync_runtime::set_phase(&mut runtime_map, profile_id, phase, message);
+        }
     }
     Ok(())
 }
@@ -48,17 +59,30 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
 
         let profile_id_owned = profile_id.to_string();
         let profiles_lock = Arc::clone(&state.profiles_lock);
+        let sync_runtime = Arc::clone(&state.sync_runtime);
+        if let Ok(mut runtime_map) = sync_runtime.lock() {
+            sync_runtime::set_phase(
+                &mut runtime_map,
+                &profile_id_owned,
+                "syncing",
+                "Waiting for next sync cycle",
+            );
+        }
         tauri::async_runtime::spawn(async move {
             let mut ticker = tokio::time::interval(std::time::Duration::from_secs(15));
             loop {
                 tokio::select! {
                     _ = &mut rx => {
                         log::info!("{} SYNC_WORKER_STOP_SIGNAL", log_context::account_prefix(&profile_id_owned));
+                        if let Ok(mut runtime_map) = sync_runtime.lock() {
+                            sync_runtime::clear_in_progress(&mut runtime_map, &profile_id_owned);
+                            sync_runtime::set_phase(&mut runtime_map, &profile_id_owned, "paused", "Synchronization paused");
+                        }
                         break;
                     }
                     _ = ticker.tick() => {
                         log::info!("{} SYNC_TICK", log_context::account_prefix(&profile_id_owned));
-                        match tick_sync_cycle(&profiles_lock, &profile_id_owned).await {
+                        match tick_sync_cycle(&profiles_lock, &sync_runtime, &profile_id_owned).await {
                             Ok(stats) => {
                                 log::info!(
                                     "{} [cycle:{}] SYNC_CYCLE_COMPLETE downloaded={} uploaded={} local_deleted={} remote_deleted={} remote_folders={} remote_pages={} remote_items={} local_items={}",
@@ -80,6 +104,15 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                                     log_context::account_prefix(&profile_id_owned),
                                     error
                                 );
+                                if let Ok(mut runtime_map) = sync_runtime.lock() {
+                                    sync_runtime::clear_in_progress(&mut runtime_map, &profile_id_owned);
+                                    sync_runtime::set_phase(
+                                        &mut runtime_map,
+                                        &profile_id_owned,
+                                        "error",
+                                        &format!("Sync error: {}", error),
+                                    );
+                                }
                                 let _ = activity_log::append_event(
                                     &profile_id_owned,
                                     &log_context::account_identity(&profile_id_owned),
@@ -153,6 +186,7 @@ struct GraphContext {
     account_prefix: String,
     cycle_id: String,
     access_token: String,
+    sync_runtime: Arc<std::sync::Mutex<SyncRuntimeMap>>,
 }
 
 impl GraphContext {
@@ -160,6 +194,73 @@ impl GraphContext {
         let refreshed = refresh_access_token(&self.profile_id).await?;
         self.access_token = refreshed.access_token;
         Ok(())
+    }
+}
+
+fn runtime_set_phase(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    phase: &str,
+    phase_message: &str,
+) {
+    if let Ok(mut runtime_map) = runtime.lock() {
+        sync_runtime::set_phase(&mut runtime_map, profile_id, phase, phase_message);
+    }
+}
+
+fn runtime_start_transfer(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    direction: &str,
+    path: &str,
+    bytes_total: Option<u64>,
+) -> Option<String> {
+    let mut runtime_map = runtime.lock().ok()?;
+    Some(sync_runtime::start_transfer(
+        &mut runtime_map,
+        profile_id,
+        direction,
+        path,
+        bytes_total,
+    ))
+}
+
+fn runtime_update_transfer_progress(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    transfer_id: &str,
+    bytes_done: u64,
+    bytes_total: Option<u64>,
+) {
+    if let Ok(mut runtime_map) = runtime.lock() {
+        sync_runtime::update_transfer_progress(
+            &mut runtime_map,
+            profile_id,
+            transfer_id,
+            bytes_done,
+            bytes_total,
+        );
+    }
+}
+
+fn runtime_finish_transfer_success(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    transfer_id: &str,
+) {
+    if let Ok(mut runtime_map) = runtime.lock() {
+        sync_runtime::finish_transfer_success(&mut runtime_map, profile_id, transfer_id);
+    }
+}
+
+fn runtime_finish_transfer_error(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    transfer_id: &str,
+    error: &str,
+) {
+    if let Ok(mut runtime_map) = runtime.lock() {
+        sync_runtime::finish_transfer_error(&mut runtime_map, profile_id, transfer_id, error);
     }
 }
 
@@ -231,6 +332,7 @@ struct DriveItemResponse {
 
 async fn tick_sync_cycle(
     profiles_lock: &Arc<std::sync::Mutex<()>>,
+    sync_runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
     profile_id: &str,
 ) -> Result<SyncCycleStats, String> {
     let profile = load_syncable_profile(profiles_lock, profile_id)?;
@@ -255,7 +357,15 @@ async fn tick_sync_cycle(
         account_prefix: account_prefix.clone(),
         cycle_id: cycle_id.clone(),
         access_token: session.access_token,
+        sync_runtime: Arc::clone(sync_runtime),
     };
+
+    runtime_set_phase(
+        &graph.sync_runtime,
+        profile_id,
+        "syncing",
+        "Preparing synchronization cycle",
+    );
 
     let mut sync_state = load_sync_state(profile_id)?;
     let mut stats = SyncCycleStats {
@@ -293,8 +403,20 @@ async fn tick_sync_cycle(
     )
     .await?;
 
+    runtime_set_phase(
+        &graph.sync_runtime,
+        profile_id,
+        "scanning_local",
+        "Scanning local files",
+    );
     let local_snapshot = collect_local_snapshot(&sync_root)?;
     stats.local_items_seen = local_snapshot.len();
+    runtime_set_phase(
+        &graph.sync_runtime,
+        profile_id,
+        "applying_local",
+        "Applying local changes",
+    );
     apply_local_changes(
         &mut graph,
         &sync_root,
@@ -325,6 +447,12 @@ async fn tick_sync_cycle(
         &profile.email,
         "success",
         &format!("{} [cycle:{}] {}", account_prefix, cycle_id, summary),
+    );
+    runtime_set_phase(
+        &graph.sync_runtime,
+        profile_id,
+        "idle",
+        "Idle - waiting for next sync cycle",
     );
     Ok(stats)
 }
@@ -378,6 +506,12 @@ async fn fetch_delta_changes(
     sync_state: &mut PersistedSyncState,
     stats: &mut SyncCycleStats,
 ) -> Result<Vec<DeltaItem>, String> {
+    runtime_set_phase(
+        &graph.sync_runtime,
+        &graph.profile_id,
+        "scanning_remote",
+        "Fetching remote file list",
+    );
     let mut all_items: Vec<DeltaItem> = Vec::new();
     let mut current_url =
         initial_delta_link.unwrap_or_else(|| format!("{GRAPH_ROOT}/me/drive/root/delta"));
@@ -437,6 +571,12 @@ async fn apply_remote_changes(
     sync_state: &mut PersistedSyncState,
     stats: &mut SyncCycleStats,
 ) -> Result<(), String> {
+    runtime_set_phase(
+        &graph.sync_runtime,
+        &graph.profile_id,
+        "applying_remote",
+        "Applying remote changes",
+    );
     for item in changes {
         if item.deleted.is_some() {
             if let Some(existing) = sync_state.remote_by_id.get(&item.id).cloned() {
@@ -572,6 +712,12 @@ async fn apply_local_changes(
     sync_state: &mut PersistedSyncState,
     stats: &mut SyncCycleStats,
 ) -> Result<(), String> {
+    runtime_set_phase(
+        &graph.sync_runtime,
+        &graph.profile_id,
+        "applying_local",
+        "Applying local changes",
+    );
     let mut local_paths: Vec<String> = current_local_snapshot.keys().cloned().collect();
     local_paths.sort_by_key(|path| path.matches('/').count());
     for path in local_paths {
@@ -898,13 +1044,30 @@ async fn download_remote_item_content(
     let url = format!("{GRAPH_ROOT}/me/drive/items/{}/content", item_id);
     let client = reqwest::Client::new();
     let mut refreshed = false;
+    let transfer_id = runtime_start_transfer(
+        &graph.sync_runtime,
+        &graph.profile_id,
+        "download",
+        relative_path,
+        None,
+    );
     let bytes = loop {
         let response = client
             .get(&url)
             .bearer_auth(&graph.access_token)
             .send()
             .await
-            .map_err(|error| format!("Failed to download remote content: {error}"))?;
+            .map_err(|error| {
+                if let Some(active_transfer_id) = &transfer_id {
+                    runtime_finish_transfer_error(
+                        &graph.sync_runtime,
+                        &graph.profile_id,
+                        active_transfer_id,
+                        &format!("Download request failed: {}", error),
+                    );
+                }
+                format!("Failed to download remote content: {error}")
+            })?;
         let status = response.status();
         if status.as_u16() == 401 && !refreshed {
             log::warn!(
@@ -919,16 +1082,60 @@ async fn download_remote_item_content(
         if !status.is_success() {
             let text = response.text().await.unwrap_or_default();
             let snippet: String = text.chars().take(400).collect();
+            if let Some(active_transfer_id) = &transfer_id {
+                runtime_finish_transfer_error(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    active_transfer_id,
+                    &format!("Download failed with status {}", status),
+                );
+            }
             return Err(format!(
                 "Download failed for item {} with status {}: {}",
                 item_id, status, snippet
             ));
         }
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|error| format!("Failed reading download bytes: {error}"))?;
-        break bytes;
+        let total = response.content_length();
+        if let Some(active_transfer_id) = &transfer_id {
+            runtime_update_transfer_progress(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                active_transfer_id,
+                0,
+                total,
+            );
+        }
+        let mut stream = response.bytes_stream();
+        let mut downloaded_bytes: u64 = 0;
+        let mut buffer: Vec<u8> = Vec::new();
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = match chunk_result {
+                Ok(value) => value,
+                Err(error) => {
+                    if let Some(active_transfer_id) = &transfer_id {
+                        runtime_finish_transfer_error(
+                            &graph.sync_runtime,
+                            &graph.profile_id,
+                            active_transfer_id,
+                            &format!("Failed reading download stream: {}", error),
+                        );
+                    }
+                    return Err(format!("Failed reading download bytes stream: {error}"));
+                }
+            };
+            downloaded_bytes += chunk.len() as u64;
+            buffer.extend_from_slice(&chunk);
+            if let Some(active_transfer_id) = &transfer_id {
+                runtime_update_transfer_progress(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    active_transfer_id,
+                    downloaded_bytes,
+                    total,
+                );
+            }
+        }
+        break buffer;
     };
 
     if let Some(parent) = local_path.parent() {
@@ -940,13 +1147,31 @@ async fn download_remote_item_content(
             )
         })?;
     }
-    std::fs::write(local_path, &bytes).map_err(|error| {
-        format!(
+    if let Err(error) = std::fs::write(local_path, &bytes) {
+        if let Some(active_transfer_id) = &transfer_id {
+            runtime_finish_transfer_error(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                active_transfer_id,
+                &format!("Failed writing local file: {}", error),
+            );
+        }
+        return Err(format!(
             "Failed writing local file '{}': {}",
             local_path.display(),
             error
-        )
-    })?;
+        ));
+    }
+    if let Some(active_transfer_id) = &transfer_id {
+        runtime_update_transfer_progress(
+            &graph.sync_runtime,
+            &graph.profile_id,
+            active_transfer_id,
+            bytes.len() as u64,
+            Some(bytes.len() as u64),
+        );
+        runtime_finish_transfer_success(&graph.sync_runtime, &graph.profile_id, active_transfer_id);
+    }
     log::info!(
         "{} [cycle:{}] DOWNLOAD_OK item_id={} path={} bytes={}",
         graph.account_prefix,
@@ -974,6 +1199,14 @@ async fn upload_file_by_path(
 
     let encoded_path = encode_graph_path(relative_path);
     let url = format!("{GRAPH_ROOT}/me/drive/root:/{}:/content", encoded_path);
+    let content_len = content.len() as u64;
+    let transfer_id = runtime_start_transfer(
+        &graph.sync_runtime,
+        &graph.profile_id,
+        "upload",
+        relative_path,
+        Some(content_len),
+    );
     log::info!(
         "{} [cycle:{}] UPLOAD_START path={} local_path={} bytes={}",
         graph.account_prefix,
@@ -991,7 +1224,17 @@ async fn upload_file_by_path(
             .body(content.clone())
             .send()
             .await
-            .map_err(|error| format!("Failed uploading file '{}': {}", relative_path, error))?;
+            .map_err(|error| {
+                if let Some(active_transfer_id) = &transfer_id {
+                    runtime_finish_transfer_error(
+                        &graph.sync_runtime,
+                        &graph.profile_id,
+                        active_transfer_id,
+                        &format!("Upload request failed: {}", error),
+                    );
+                }
+                format!("Failed uploading file '{}': {}", relative_path, error)
+            })?;
 
         let status = response.status();
         let text = response
@@ -1012,6 +1255,14 @@ async fn upload_file_by_path(
 
         if !status.is_success() {
             let snippet: String = text.chars().take(400).collect();
+            if let Some(active_transfer_id) = &transfer_id {
+                runtime_finish_transfer_error(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    active_transfer_id,
+                    &format!("Upload failed with status {}", status),
+                );
+            }
             return Err(format!(
                 "Upload failed for '{}' with status {}: {}",
                 relative_path, status, snippet
@@ -1019,6 +1270,20 @@ async fn upload_file_by_path(
         }
         let parsed = serde_json::from_str::<DriveItemResponse>(&text)
             .map_err(|error| format!("Failed decoding upload response JSON: {error}"))?;
+        if let Some(active_transfer_id) = &transfer_id {
+            runtime_update_transfer_progress(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                active_transfer_id,
+                content_len,
+                Some(content_len),
+            );
+            runtime_finish_transfer_success(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                active_transfer_id,
+            );
+        }
         log::info!(
             "{} [cycle:{}] UPLOAD_OK path={} remote_id={} size={}",
             graph.account_prefix,

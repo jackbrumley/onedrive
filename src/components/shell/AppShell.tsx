@@ -1,4 +1,5 @@
 import type { ComponentChildren } from "preact";
+import { IconSettings } from "@tabler/icons-preact";
 import type { AppPage } from "../../routes/appRoutes";
 import { useWindowControls } from "../../hooks/useWindowControls";
 import { SyncStateControl } from "../sync/SyncStateControl";
@@ -34,7 +35,6 @@ export function AppShell({
     handleTitleBarDoubleClick,
   } = useWindowControls();
 
-  const isHome = page === "accountsHome";
   const isDebug = page === "debug" || page === "uiLab";
   const hasSyncAccounts = syncingCount > 0 || pausedCount > 0;
 
@@ -44,15 +44,15 @@ export function AppShell({
         <div class="title-block">
           <h1>SomeDrive</h1>
         </div>
-        <div class="shell-actions">
-          <button class={isHome ? "top-pill active" : "top-pill"} onClick={onGoHome}>
-            Accounts
-          </button>
-          <button class={isDebug ? "top-pill active" : "top-pill"} onClick={onGoDebug}>
-            Settings
-          </button>
-        </div>
         <div class="title-right-actions">
+          <button
+            class={isDebug ? "window-control settings-nav-btn active" : "window-control settings-nav-btn"}
+            onClick={isDebug ? onGoHome : onGoDebug}
+            aria-label={isDebug ? "Back to accounts" : "Open settings"}
+            title={isDebug ? "Back to accounts" : "Open settings"}
+          >
+            <IconSettings size={14} stroke={2.2} />
+          </button>
           <SyncStateControl
             state={hasSyncAccounts ? (syncingCount > 0 ? "syncing" : "paused") : "inactive"}
             onToggle={async (next) => {
@@ -68,12 +68,12 @@ export function AppShell({
             disabled={!hasSyncAccounts}
             size={15}
           />
-        <WindowControls
-          isMaximized={isMaximized}
-          onMinimize={minimize}
-          onToggleMaximize={toggleMaximize}
-          onClose={close}
-        />
+          <WindowControls
+            isMaximized={isMaximized}
+            onMinimize={minimize}
+            onToggleMaximize={toggleMaximize}
+            onClose={close}
+          />
         </div>
       </header>
 

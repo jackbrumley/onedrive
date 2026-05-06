@@ -25,6 +25,7 @@ pub fn run() {
         .setup(app::bootstrap::configure_shell)
         .invoke_handler(tauri::generate_handler![
             get_status_snapshot,
+            get_sync_runtime_snapshot,
             check_for_updates,
             list_account_profiles,
             create_account_profile,
