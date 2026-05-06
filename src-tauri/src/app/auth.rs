@@ -2,10 +2,11 @@ use crate::app::account_profiles::{load_profiles, save_profiles};
 use crate::app::activity_log;
 use crate::app::log_context;
 use crate::app::state::{AppState, DeviceAuthPending, InteractiveAuthPending};
+use crate::app::sync_engine;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 const DEFAULT_MS_CLIENT_ID: &str = "ab9b8c07-8f02-4f72-87fa-80105867a763";
 const DEFAULT_INTERACTIVE_CLIENT_ID: &str = "d50ca740-c83f-4d1b-b616-12c519384f0c";
@@ -87,6 +88,15 @@ pub struct AuthSessionSnapshot {
     pub token_type: Option<String>,
     pub scope: Option<String>,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InteractiveAuthUpdatedEvent {
+    profile_id: String,
+    email: String,
+    auth_configured: bool,
+    agent_state: String,
 }
 
 #[tauri::command]
@@ -579,6 +589,11 @@ async fn complete_interactive_auth_from_callback(
         .ok_or_else(|| "Token response missing access token".to_string())?;
     let account_email = fetch_account_email(&access_token).await?;
     let updated_at = chrono::Local::now().to_rfc3339();
+    log::info!(
+        "{} AUTH_INTERACTIVE_TOKEN_EXCHANGE_SUCCESS email={}",
+        log_context::account_prefix(profile_id),
+        account_email
+    );
 
     write_auth_session(
         profile_id,
@@ -592,20 +607,63 @@ async fn complete_interactive_auth_from_callback(
         },
     )?;
 
-    {
+    let updated_profile = {
         let _guard = app_state
             .profiles_lock
             .lock()
             .map_err(|_| "Account profile lock is poisoned".to_string())?;
         let mut profiles = load_profiles()?;
-        if let Some(profile) = profiles.iter_mut().find(|profile| profile.id == profile_id) {
-            profile.auth_configured = true;
-            profile.email = account_email.clone();
-        }
+        let profile = profiles
+            .iter_mut()
+            .find(|profile| profile.id == profile_id)
+            .ok_or_else(|| "Account profile not found during auth callback update".to_string())?;
+        profile.auth_configured = true;
+        profile.email = account_email.clone();
+        profile.agent_state = "syncing".to_string();
+        let updated = profile.clone();
         save_profiles(&profiles)?;
-    }
+        updated
+    };
+
+    log::info!(
+        "{} AUTH_INTERACTIVE_PROFILE_UPDATED profile_id={} email={} auth_configured={} agent_state={}",
+        log_context::account_prefix_from_parts(profile_id, &updated_profile.email),
+        updated_profile.id,
+        updated_profile.email,
+        updated_profile.auth_configured,
+        updated_profile.agent_state
+    );
+
+    log::info!(
+        "{} AUTH_INTERACTIVE_AUTO_START_SYNC requested",
+        log_context::account_prefix_from_parts(profile_id, &updated_profile.email)
+    );
+    sync_engine::on_agent_state_changed(&app_state, profile_id, "syncing")?;
+    log::info!(
+        "{} AUTH_INTERACTIVE_AUTO_START_SYNC_RESULT success",
+        log_context::account_prefix_from_parts(profile_id, &updated_profile.email)
+    );
 
     clear_pending_interactive_auth(app, profile_id)?;
+
+    let event_payload = InteractiveAuthUpdatedEvent {
+        profile_id: profile_id.to_string(),
+        email: updated_profile.email.clone(),
+        auth_configured: updated_profile.auth_configured,
+        agent_state: updated_profile.agent_state.clone(),
+    };
+    if let Err(error) = app.emit("account-auth-updated", event_payload) {
+        log::error!(
+            "{} AUTH_INTERACTIVE_UI_NOTIFY emitted=false error={}",
+            log_context::account_prefix_from_parts(profile_id, &updated_profile.email),
+            error
+        );
+    } else {
+        log::info!(
+            "{} AUTH_INTERACTIVE_UI_NOTIFY emitted=true",
+            log_context::account_prefix_from_parts(profile_id, &updated_profile.email)
+        );
+    }
 
     let _ = activity_log::append_event(
         profile_id,

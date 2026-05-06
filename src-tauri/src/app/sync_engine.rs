@@ -4,13 +4,23 @@ use crate::app::auth::{load_auth_session, refresh_access_token};
 use crate::app::log_context;
 use crate::app::state::AppState;
 use crate::app::sync_runtime::{self, SyncRuntimeMap};
-use futures_util::StreamExt;
+use futures_util::{stream, StreamExt};
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 const GRAPH_ROOT: &str = "https://graph.microsoft.com/v1.0";
+const DEFAULT_DOWNLOAD_CONCURRENCY: usize = 8;
+const MAX_DOWNLOAD_CONCURRENCY: usize = 32;
+const MAX_DOWNLOAD_RETRIES: u32 = 5;
+const MAX_RETRY_DELAY_SECONDS: u64 = 30;
+const SYNC_CANCELLED_ERROR: &str = "Synchronization cancelled";
+const CANCEL_POLL_INTERVAL_MILLIS: u64 = 100;
 
 pub fn on_agent_state_changed(
     state: &tauri::State<'_, AppState>,
@@ -23,8 +33,10 @@ pub fn on_agent_state_changed(
         agent_state
     );
     if agent_state == "syncing" {
+        let _ = set_cancel_flag(state, profile_id, false)?;
         start_sync_worker(state, profile_id)?;
     } else {
+        let _ = set_cancel_flag(state, profile_id, true)?;
         stop_sync_worker(state, profile_id)?;
         if let Ok(mut runtime_map) = state.sync_runtime.lock() {
             sync_runtime::clear_in_progress(&mut runtime_map, profile_id);
@@ -41,6 +53,9 @@ pub fn on_agent_state_changed(
 
 fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Result<(), String> {
     let account_prefix = log_context::account_prefix(profile_id);
+    let cancel_flag = set_cancel_flag(state, profile_id, false)?;
+    let cycle_lock = get_or_create_cycle_lock(state, profile_id)?;
+    let initial_delay = remaining_until_next_cycle(profile_id, Duration::from_secs(15));
     {
         let mut stops = state
             .sync_worker_stops
@@ -65,11 +80,30 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                 &mut runtime_map,
                 &profile_id_owned,
                 "syncing",
-                "Waiting for next sync cycle",
+                "Preparing next sync cycle",
             );
         }
         tauri::async_runtime::spawn(async move {
             let mut ticker = tokio::time::interval(std::time::Duration::from_secs(15));
+            if let Some(delay) = initial_delay {
+                log::info!(
+                    "{} SYNC_WORKER_RESUME_DELAY wait_ms={}",
+                    log_context::account_prefix(&profile_id_owned),
+                    delay.as_millis()
+                );
+                if sleep_with_cancellation(&cancel_flag, delay).await.is_err() {
+                    if let Ok(mut runtime_map) = sync_runtime.lock() {
+                        sync_runtime::clear_in_progress(&mut runtime_map, &profile_id_owned);
+                        sync_runtime::set_phase(
+                            &mut runtime_map,
+                            &profile_id_owned,
+                            "paused",
+                            "Synchronization paused",
+                        );
+                    }
+                    return;
+                }
+            }
             loop {
                 tokio::select! {
                     _ = &mut rx => {
@@ -81,8 +115,21 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                         break;
                     }
                     _ = ticker.tick() => {
+                        if cancel_flag.load(Ordering::Relaxed) {
+                            continue;
+                        }
+                        let _cycle_guard = match cycle_lock.try_lock() {
+                            Ok(guard) => guard,
+                            Err(_) => {
+                                log::warn!(
+                                    "{} SYNC_TICK_SKIPPED cycle already running",
+                                    log_context::account_prefix(&profile_id_owned)
+                                );
+                                continue;
+                            }
+                        };
                         log::info!("{} SYNC_TICK", log_context::account_prefix(&profile_id_owned));
-                        match tick_sync_cycle(&profiles_lock, &sync_runtime, &profile_id_owned).await {
+                        match tick_sync_cycle(&profiles_lock, &sync_runtime, &profile_id_owned, &cancel_flag).await {
                             Ok(stats) => {
                                 log::info!(
                                     "{} [cycle:{}] SYNC_CYCLE_COMPLETE downloaded={} uploaded={} local_deleted={} remote_deleted={} remote_folders={} remote_pages={} remote_items={} local_items={}",
@@ -99,6 +146,16 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                                 );
                             }
                             Err(error) => {
+                                if is_sync_cancelled_error(&error) {
+                                    log::info!(
+                                        "{} SYNC_CYCLE_CANCELLED",
+                                        log_context::account_prefix(&profile_id_owned)
+                                    );
+                                    if let Ok(mut runtime_map) = sync_runtime.lock() {
+                                        sync_runtime::clear_in_progress(&mut runtime_map, &profile_id_owned);
+                                    }
+                                    continue;
+                                }
                                 log::error!(
                                     "{} SYNC_CYCLE_FAILED {}",
                                     log_context::account_prefix(&profile_id_owned),
@@ -143,6 +200,7 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
 }
 
 fn stop_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Result<(), String> {
+    let _ = set_cancel_flag(state, profile_id, true)?;
     let maybe_sender = {
         let mut stops = state
             .sync_worker_stops
@@ -181,6 +239,7 @@ struct SyncCycleStats {
     local_items_seen: usize,
 }
 
+#[derive(Clone)]
 struct GraphContext {
     profile_id: String,
     account_prefix: String,
@@ -194,6 +253,92 @@ impl GraphContext {
         let refreshed = refresh_access_token(&self.profile_id).await?;
         self.access_token = refreshed.access_token;
         Ok(())
+    }
+}
+
+fn resolve_download_concurrency() -> usize {
+    std::env::var("SOMEDRIVE_SYNC_DOWNLOAD_CONCURRENCY")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .map(|value| value.clamp(1, MAX_DOWNLOAD_CONCURRENCY))
+        .unwrap_or(DEFAULT_DOWNLOAD_CONCURRENCY)
+}
+
+fn parse_retry_after_delay(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    let retry_after = headers.get(reqwest::header::RETRY_AFTER)?;
+    let text = retry_after.to_str().ok()?.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let seconds = text.parse::<u64>().ok()?;
+    Some(Duration::from_secs(seconds.min(MAX_RETRY_DELAY_SECONDS)))
+}
+
+fn exponential_backoff_delay(attempt: u32) -> Duration {
+    let exponent = attempt.saturating_sub(1).min(6);
+    let seconds = 2_u64.saturating_pow(exponent).min(MAX_RETRY_DELAY_SECONDS);
+    Duration::from_secs(seconds)
+}
+
+fn is_sync_cancelled_error(error: &str) -> bool {
+    error == SYNC_CANCELLED_ERROR
+}
+
+fn ensure_not_cancelled(cancel_flag: &Arc<AtomicBool>) -> Result<(), String> {
+    if cancel_flag.load(Ordering::Relaxed) {
+        return Err(SYNC_CANCELLED_ERROR.to_string());
+    }
+    Ok(())
+}
+
+fn set_cancel_flag(
+    state: &tauri::State<'_, AppState>,
+    profile_id: &str,
+    value: bool,
+) -> Result<Arc<AtomicBool>, String> {
+    let mut flags = state
+        .sync_cancel_flags
+        .lock()
+        .map_err(|_| "Sync cancel flag lock is poisoned".to_string())?;
+    let flag = flags
+        .entry(profile_id.to_string())
+        .or_insert_with(|| Arc::new(AtomicBool::new(false)))
+        .clone();
+    flag.store(value, Ordering::Relaxed);
+    Ok(flag)
+}
+
+fn get_or_create_cycle_lock(
+    state: &tauri::State<'_, AppState>,
+    profile_id: &str,
+) -> Result<Arc<tokio::sync::Mutex<()>>, String> {
+    let mut locks = state
+        .sync_cycle_locks
+        .lock()
+        .map_err(|_| "Sync cycle lock map is poisoned".to_string())?;
+    Ok(locks
+        .entry(profile_id.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone())
+}
+
+async fn wait_for_cancellation(cancel_flag: Arc<AtomicBool>) {
+    while !cancel_flag.load(Ordering::Relaxed) {
+        tokio::time::sleep(Duration::from_millis(CANCEL_POLL_INTERVAL_MILLIS)).await;
+    }
+}
+
+async fn sleep_with_cancellation(
+    cancel_flag: &Arc<AtomicBool>,
+    duration: Duration,
+) -> Result<(), String> {
+    ensure_not_cancelled(cancel_flag)?;
+    if duration.is_zero() {
+        return Ok(());
+    }
+    tokio::select! {
+        _ = wait_for_cancellation(Arc::clone(cancel_flag)) => Err(SYNC_CANCELLED_ERROR.to_string()),
+        _ = tokio::time::sleep(duration) => Ok(()),
     }
 }
 
@@ -334,7 +479,9 @@ async fn tick_sync_cycle(
     profiles_lock: &Arc<std::sync::Mutex<()>>,
     sync_runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
     profile_id: &str,
+    cancel_flag: &Arc<AtomicBool>,
 ) -> Result<SyncCycleStats, String> {
+    ensure_not_cancelled(cancel_flag)?;
     let profile = load_syncable_profile(profiles_lock, profile_id)?;
     let account_prefix = log_context::account_prefix_from_parts(profile_id, &profile.email);
     let cycle_id = new_cycle_id();
@@ -391,15 +538,18 @@ async fn tick_sync_cycle(
         sync_state.delta_link.clone(),
         &mut sync_state,
         &mut stats,
+        cancel_flag,
     )
     .await?;
 
+    ensure_not_cancelled(cancel_flag)?;
     apply_remote_changes(
         &mut graph,
         &sync_root,
         &remote_changes,
         &mut sync_state,
         &mut stats,
+        cancel_flag,
     )
     .await?;
 
@@ -417,12 +567,14 @@ async fn tick_sync_cycle(
         "applying_local",
         "Applying local changes",
     );
+    ensure_not_cancelled(cancel_flag)?;
     apply_local_changes(
         &mut graph,
         &sync_root,
         &local_snapshot,
         &mut sync_state,
         &mut stats,
+        cancel_flag,
     )
     .await?;
 
@@ -461,6 +613,21 @@ fn new_cycle_id() -> String {
     let nanos = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
     let pid = std::process::id();
     format!("{}-{}", nanos, pid)
+}
+
+fn remaining_until_next_cycle(profile_id: &str, interval: Duration) -> Option<Duration> {
+    let state = load_sync_state(profile_id).ok()?;
+    let last_cycle_at = state.last_cycle_at?;
+    let timestamp = chrono::DateTime::parse_from_rfc3339(&last_cycle_at).ok()?;
+    let elapsed = chrono::Utc::now().signed_duration_since(timestamp.with_timezone(&chrono::Utc));
+    if elapsed.num_milliseconds() <= 0 {
+        return Some(interval);
+    }
+    let elapsed_duration = Duration::from_millis(elapsed.num_milliseconds() as u64);
+    if elapsed_duration >= interval {
+        return None;
+    }
+    Some(interval - elapsed_duration)
 }
 
 fn load_syncable_profile(
@@ -505,6 +672,7 @@ async fn fetch_delta_changes(
     initial_delta_link: Option<String>,
     sync_state: &mut PersistedSyncState,
     stats: &mut SyncCycleStats,
+    cancel_flag: &Arc<AtomicBool>,
 ) -> Result<Vec<DeltaItem>, String> {
     runtime_set_phase(
         &graph.sync_runtime,
@@ -517,13 +685,14 @@ async fn fetch_delta_changes(
         initial_delta_link.unwrap_or_else(|| format!("{GRAPH_ROOT}/me/drive/root/delta"));
 
     loop {
+        ensure_not_cancelled(cancel_flag)?;
         log::info!(
             "{} [cycle:{}] DELTA_PAGE_REQUEST url={}",
             graph.account_prefix,
             graph.cycle_id,
             current_url
         );
-        let response_text = graph_get_text(graph, &current_url).await?;
+        let response_text = graph_get_text(graph, &current_url, cancel_flag).await?;
         let response: DeltaResponse = serde_json::from_str(&response_text)
             .map_err(|error| format!("Failed to decode delta response: {error}"))?;
 
@@ -570,6 +739,7 @@ async fn apply_remote_changes(
     changes: &[DeltaItem],
     sync_state: &mut PersistedSyncState,
     stats: &mut SyncCycleStats,
+    cancel_flag: &Arc<AtomicBool>,
 ) -> Result<(), String> {
     runtime_set_phase(
         &graph.sync_runtime,
@@ -577,7 +747,10 @@ async fn apply_remote_changes(
         "applying_remote",
         "Applying remote changes",
     );
+    let mut pending_downloads: Vec<(String, String, PathBuf, RemoteKnownItem)> = Vec::new();
+
     for item in changes {
+        ensure_not_cancelled(cancel_flag)?;
         if item.deleted.is_some() {
             if let Some(existing) = sync_state.remote_by_id.get(&item.id).cloned() {
                 log::info!(
@@ -603,7 +776,8 @@ async fn apply_remote_changes(
                         graph.cycle_id,
                         existing.path
                     );
-                    let uploaded = upload_file_by_path(graph, sync_root, &existing.path).await?;
+                    let uploaded =
+                        upload_file_by_path(graph, sync_root, &existing.path, cancel_flag).await?;
                     let known = remote_known_item_from_drive_item(uploaded, &existing.path)?;
                     upsert_remote_known_item(sync_state, known);
                     stats.uploaded_files += 1;
@@ -677,7 +851,8 @@ async fn apply_remote_changes(
                         local_entry.modified_ts,
                         remote_entry.modified_ts
                     );
-                    let uploaded = upload_file_by_path(graph, sync_root, &path).await?;
+                    let uploaded =
+                        upload_file_by_path(graph, sync_root, &path, cancel_flag).await?;
                     let known = remote_known_item_from_drive_item(uploaded, &path)?;
                     upsert_remote_known_item(sync_state, known);
                     stats.uploaded_files += 1;
@@ -695,11 +870,61 @@ async fn apply_remote_changes(
                 }
             }
 
-            download_remote_item_content(graph, &item.id, &path, &local_abs).await?;
-            stats.downloaded_files += 1;
+            pending_downloads.push((item.id.clone(), path, local_abs, remote_entry.clone()));
+            continue;
         }
 
         upsert_remote_known_item(sync_state, remote_entry);
+    }
+
+    if !pending_downloads.is_empty() {
+        let download_concurrency = resolve_download_concurrency();
+        log::info!(
+            "{} [cycle:{}] REMOTE_DOWNLOAD_BATCH_START queued={} concurrency={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            pending_downloads.len(),
+            download_concurrency
+        );
+
+        let mut download_tasks = stream::iter(pending_downloads.into_iter().map(|download| {
+            let cancel_state = Arc::clone(cancel_flag);
+            let graph_context = graph.clone();
+            async move {
+                let (item_id, path, local_abs, remote_entry) = download;
+                match download_remote_item_content(
+                    &graph_context,
+                    &item_id,
+                    &path,
+                    &local_abs,
+                    &cancel_state,
+                )
+                .await
+                {
+                    Ok(()) => Ok((item_id, path, remote_entry)),
+                    Err(error) => Err(format!(
+                        "Remote download failed item_id={} path={}: {}",
+                        item_id, path, error
+                    )),
+                }
+            }
+        }))
+        .buffer_unordered(download_concurrency);
+
+        let mut completed_count: usize = 0;
+        while let Some(task_result) = download_tasks.next().await {
+            let (_, _, remote_entry) = task_result?;
+            upsert_remote_known_item(sync_state, remote_entry);
+            stats.downloaded_files += 1;
+            completed_count += 1;
+        }
+
+        log::info!(
+            "{} [cycle:{}] REMOTE_DOWNLOAD_BATCH_COMPLETE completed={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            completed_count
+        );
     }
 
     Ok(())
@@ -711,6 +936,7 @@ async fn apply_local_changes(
     current_local_snapshot: &HashMap<String, LocalSnapshotEntry>,
     sync_state: &mut PersistedSyncState,
     stats: &mut SyncCycleStats,
+    cancel_flag: &Arc<AtomicBool>,
 ) -> Result<(), String> {
     runtime_set_phase(
         &graph.sync_runtime,
@@ -721,6 +947,7 @@ async fn apply_local_changes(
     let mut local_paths: Vec<String> = current_local_snapshot.keys().cloned().collect();
     local_paths.sort_by_key(|path| path.matches('/').count());
     for path in local_paths {
+        ensure_not_cancelled(cancel_flag)?;
         let Some(local_entry) = current_local_snapshot.get(&path) else {
             continue;
         };
@@ -736,7 +963,7 @@ async fn apply_local_changes(
                     graph.cycle_id,
                     path
                 );
-                let created = create_remote_folder(graph, &path).await?;
+                let created = create_remote_folder(graph, &path, cancel_flag).await?;
                 let known = remote_known_item_from_drive_item(created, &path)?;
                 upsert_remote_known_item(sync_state, known);
                 stats.created_remote_folders += 1;
@@ -774,7 +1001,7 @@ async fn apply_local_changes(
                     local_entry.modified_ts,
                     remote_modified
                 );
-                let uploaded = upload_file_by_path(graph, sync_root, &path).await?;
+                let uploaded = upload_file_by_path(graph, sync_root, &path, cancel_flag).await?;
                 let known = remote_known_item_from_drive_item(uploaded, &path)?;
                 upsert_remote_known_item(sync_state, known);
                 stats.uploaded_files += 1;
@@ -786,7 +1013,7 @@ async fn apply_local_changes(
                 graph.cycle_id,
                 path
             );
-            let uploaded = upload_file_by_path(graph, sync_root, &path).await?;
+            let uploaded = upload_file_by_path(graph, sync_root, &path, cancel_flag).await?;
             let known = remote_known_item_from_drive_item(uploaded, &path)?;
             upsert_remote_known_item(sync_state, known);
             stats.uploaded_files += 1;
@@ -804,6 +1031,7 @@ async fn apply_local_changes(
     deleted_paths.sort_by_key(|path| std::cmp::Reverse(path.matches('/').count()));
 
     for deleted_path in deleted_paths {
+        ensure_not_cancelled(cancel_flag)?;
         if let Some(remote_id) = sync_state.remote_path_to_id.get(&deleted_path).cloned() {
             log::info!(
                 "{} [cycle:{}] REMOTE_DELETE_START path={} remote_id={}",
@@ -812,7 +1040,7 @@ async fn apply_local_changes(
                 deleted_path,
                 remote_id
             );
-            delete_remote_item(graph, &remote_id).await?;
+            delete_remote_item(graph, &remote_id, cancel_flag).await?;
             sync_state.remote_path_to_id.remove(&deleted_path);
             sync_state.remote_by_id.remove(&remote_id);
             log::info!(
@@ -954,16 +1182,26 @@ fn parse_rfc3339_seconds(value: Option<&str>) -> i64 {
         .unwrap_or(0)
 }
 
-async fn graph_get_text(graph: &mut GraphContext, url: &str) -> Result<String, String> {
+async fn graph_get_text(
+    graph: &mut GraphContext,
+    url: &str,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<String, String> {
     let client = reqwest::Client::new();
     let mut refreshed = false;
     loop {
-        let response = client
-            .get(url)
-            .bearer_auth(&graph.access_token)
-            .send()
-            .await
-            .map_err(|error| format!("Graph GET failed: {error}"))?;
+        ensure_not_cancelled(cancel_flag)?;
+        let response = tokio::select! {
+            _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
+                return Err(SYNC_CANCELLED_ERROR.to_string());
+            }
+            value = client
+                .get(url)
+                .bearer_auth(&graph.access_token)
+                .send() => {
+                value.map_err(|error| format!("Graph GET failed: {error}"))?
+            }
+        };
         let status = response.status();
         let text = response
             .text()
@@ -1028,11 +1266,13 @@ async fn graph_delete(graph: &mut GraphContext, url: &str) -> Result<(), String>
 }
 
 async fn download_remote_item_content(
-    graph: &mut GraphContext,
+    graph: &GraphContext,
     item_id: &str,
     relative_path: &str,
     local_path: &Path,
+    cancel_flag: &Arc<AtomicBool>,
 ) -> Result<(), String> {
+    ensure_not_cancelled(cancel_flag)?;
     log::info!(
         "{} [cycle:{}] DOWNLOAD_START item_id={} path={} local_path={}",
         graph.account_prefix,
@@ -1043,7 +1283,9 @@ async fn download_remote_item_content(
     );
     let url = format!("{GRAPH_ROOT}/me/drive/items/{}/content", item_id);
     let client = reqwest::Client::new();
-    let mut refreshed = false;
+    let mut access_token = graph.access_token.clone();
+    let mut token_refreshed = false;
+    let mut attempt: u32 = 0;
     let transfer_id = runtime_start_transfer(
         &graph.sync_runtime,
         &graph.profile_id,
@@ -1051,33 +1293,84 @@ async fn download_remote_item_content(
         relative_path,
         None,
     );
-    let bytes = loop {
-        let response = client
-            .get(&url)
-            .bearer_auth(&graph.access_token)
-            .send()
-            .await
-            .map_err(|error| {
+    loop {
+        ensure_not_cancelled(cancel_flag)?;
+        attempt += 1;
+        let response = tokio::select! {
+            _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
                 if let Some(active_transfer_id) = &transfer_id {
                     runtime_finish_transfer_error(
                         &graph.sync_runtime,
                         &graph.profile_id,
                         active_transfer_id,
-                        &format!("Download request failed: {}", error),
+                        SYNC_CANCELLED_ERROR,
                     );
                 }
-                format!("Failed to download remote content: {error}")
-            })?;
+                return Err(SYNC_CANCELLED_ERROR.to_string());
+            }
+            value = client
+                .get(&url)
+                .bearer_auth(&access_token)
+                .send() => {
+                value.map_err(|error| format!("Download request failed: {error}"))
+            }
+        };
+        let response = match response {
+            Ok(value) => value,
+            Err(error) => {
+                if attempt < MAX_DOWNLOAD_RETRIES {
+                    let delay = exponential_backoff_delay(attempt);
+                    log::warn!(
+                        "{} [cycle:{}] DOWNLOAD_RETRY attempt={} path={} reason={} delay_ms={}",
+                        graph.account_prefix,
+                        graph.cycle_id,
+                        attempt,
+                        relative_path,
+                        error,
+                        delay.as_millis()
+                    );
+                    sleep_with_cancellation(cancel_flag, delay).await?;
+                    continue;
+                }
+                if let Some(active_transfer_id) = &transfer_id {
+                    runtime_finish_transfer_error(
+                        &graph.sync_runtime,
+                        &graph.profile_id,
+                        active_transfer_id,
+                        &error,
+                    );
+                }
+                return Err(error);
+            }
+        };
         let status = response.status();
-        if status.as_u16() == 401 && !refreshed {
+        if status.as_u16() == 401 && !token_refreshed {
             log::warn!(
                 "{} [cycle:{}] GRAPH_DOWNLOAD_401_REFRESH",
                 graph.account_prefix,
                 graph.cycle_id
             );
-            graph.refresh_token().await?;
-            refreshed = true;
+            let refreshed = refresh_access_token(&graph.profile_id).await?;
+            access_token = refreshed.access_token;
+            token_refreshed = true;
             continue;
+        }
+        if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+            if attempt < MAX_DOWNLOAD_RETRIES {
+                let delay = parse_retry_after_delay(response.headers())
+                    .unwrap_or_else(|| exponential_backoff_delay(attempt));
+                log::warn!(
+                    "{} [cycle:{}] DOWNLOAD_RETRY_HTTP attempt={} status={} path={} delay_ms={}",
+                    graph.account_prefix,
+                    graph.cycle_id,
+                    attempt,
+                    status,
+                    relative_path,
+                    delay.as_millis()
+                );
+                sleep_with_cancellation(cancel_flag, delay).await?;
+                continue;
+            }
         }
         if !status.is_success() {
             let text = response.text().await.unwrap_or_default();
@@ -1095,6 +1388,7 @@ async fn download_remote_item_content(
                 item_id, status, snippet
             ));
         }
+
         let total = response.content_length();
         if let Some(active_transfer_id) = &transfer_id {
             runtime_update_transfer_progress(
@@ -1105,10 +1399,41 @@ async fn download_remote_item_content(
                 total,
             );
         }
+
+        if let Some(parent) = local_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "Failed creating local parent '{}': {}",
+                    parent.display(),
+                    error
+                )
+            })?;
+        }
+
+        let temp_path = local_path.with_extension("somedrive-part");
+        let mut output_file = std::fs::File::create(&temp_path).map_err(|error| {
+            format!(
+                "Failed creating temporary download file '{}': {}",
+                temp_path.display(),
+                error
+            )
+        })?;
+
         let mut stream = response.bytes_stream();
         let mut downloaded_bytes: u64 = 0;
-        let mut buffer: Vec<u8> = Vec::new();
         while let Some(chunk_result) = stream.next().await {
+            if cancel_flag.load(Ordering::Relaxed) {
+                if let Some(active_transfer_id) = &transfer_id {
+                    runtime_finish_transfer_error(
+                        &graph.sync_runtime,
+                        &graph.profile_id,
+                        active_transfer_id,
+                        SYNC_CANCELLED_ERROR,
+                    );
+                }
+                let _ = std::fs::remove_file(&temp_path);
+                return Err(SYNC_CANCELLED_ERROR.to_string());
+            }
             let chunk = match chunk_result {
                 Ok(value) => value,
                 Err(error) => {
@@ -1120,11 +1445,29 @@ async fn download_remote_item_content(
                             &format!("Failed reading download stream: {}", error),
                         );
                     }
+                    let _ = std::fs::remove_file(&temp_path);
                     return Err(format!("Failed reading download bytes stream: {error}"));
                 }
             };
+
+            if let Err(error) = output_file.write_all(&chunk) {
+                if let Some(active_transfer_id) = &transfer_id {
+                    runtime_finish_transfer_error(
+                        &graph.sync_runtime,
+                        &graph.profile_id,
+                        active_transfer_id,
+                        &format!("Failed writing download chunk: {}", error),
+                    );
+                }
+                let _ = std::fs::remove_file(&temp_path);
+                return Err(format!(
+                    "Failed writing temporary file '{}': {}",
+                    temp_path.display(),
+                    error
+                ));
+            }
+
             downloaded_bytes += chunk.len() as u64;
-            buffer.extend_from_slice(&chunk);
             if let Some(active_transfer_id) = &transfer_id {
                 runtime_update_transfer_progress(
                     &graph.sync_runtime,
@@ -1135,51 +1478,81 @@ async fn download_remote_item_content(
                 );
             }
         }
-        break buffer;
-    };
 
-    if let Some(parent) = local_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| {
-            format!(
-                "Failed creating local parent '{}': {}",
-                parent.display(),
+        if let Err(error) = output_file.flush() {
+            if let Some(active_transfer_id) = &transfer_id {
+                runtime_finish_transfer_error(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    active_transfer_id,
+                    &format!("Failed flushing temporary file: {}", error),
+                );
+            }
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(format!(
+                "Failed flushing temporary file '{}': {}",
+                temp_path.display(),
                 error
-            )
-        })?;
-    }
-    if let Err(error) = std::fs::write(local_path, &bytes) {
+            ));
+        }
+
+        if cancel_flag.load(Ordering::Relaxed) {
+            if let Some(active_transfer_id) = &transfer_id {
+                runtime_finish_transfer_error(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    active_transfer_id,
+                    SYNC_CANCELLED_ERROR,
+                );
+            }
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(SYNC_CANCELLED_ERROR.to_string());
+        }
+
+        if let Err(error) = std::fs::rename(&temp_path, local_path) {
+            if let Some(active_transfer_id) = &transfer_id {
+                runtime_finish_transfer_error(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    active_transfer_id,
+                    &format!("Failed finalizing local file: {}", error),
+                );
+            }
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(format!(
+                "Failed moving '{}' to '{}': {}",
+                temp_path.display(),
+                local_path.display(),
+                error
+            ));
+        }
+
         if let Some(active_transfer_id) = &transfer_id {
-            runtime_finish_transfer_error(
+            runtime_update_transfer_progress(
                 &graph.sync_runtime,
                 &graph.profile_id,
                 active_transfer_id,
-                &format!("Failed writing local file: {}", error),
+                downloaded_bytes,
+                Some(downloaded_bytes),
+            );
+            runtime_finish_transfer_success(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                active_transfer_id,
             );
         }
-        return Err(format!(
-            "Failed writing local file '{}': {}",
-            local_path.display(),
-            error
-        ));
-    }
-    if let Some(active_transfer_id) = &transfer_id {
-        runtime_update_transfer_progress(
-            &graph.sync_runtime,
-            &graph.profile_id,
-            active_transfer_id,
-            bytes.len() as u64,
-            Some(bytes.len() as u64),
+
+        log::info!(
+            "{} [cycle:{}] DOWNLOAD_OK item_id={} path={} bytes={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            item_id,
+            relative_path,
+            downloaded_bytes
         );
-        runtime_finish_transfer_success(&graph.sync_runtime, &graph.profile_id, active_transfer_id);
+        break;
     }
-    log::info!(
-        "{} [cycle:{}] DOWNLOAD_OK item_id={} path={} bytes={}",
-        graph.account_prefix,
-        graph.cycle_id,
-        item_id,
-        relative_path,
-        bytes.len()
-    );
+
     Ok(())
 }
 
@@ -1187,7 +1560,9 @@ async fn upload_file_by_path(
     graph: &mut GraphContext,
     sync_root: &Path,
     relative_path: &str,
+    cancel_flag: &Arc<AtomicBool>,
 ) -> Result<DriveItemResponse, String> {
+    ensure_not_cancelled(cancel_flag)?;
     let local_path = sync_root.join(path_to_local(relative_path));
     let content = std::fs::read(&local_path).map_err(|error| {
         format!(
@@ -1218,29 +1593,45 @@ async fn upload_file_by_path(
     let client = reqwest::Client::new();
     let mut refreshed = false;
     loop {
-        let response = client
-            .put(&url)
-            .bearer_auth(&graph.access_token)
-            .body(content.clone())
-            .send()
-            .await
-            .map_err(|error| {
+        ensure_not_cancelled(cancel_flag)?;
+        let response = tokio::select! {
+            _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
                 if let Some(active_transfer_id) = &transfer_id {
                     runtime_finish_transfer_error(
                         &graph.sync_runtime,
                         &graph.profile_id,
                         active_transfer_id,
-                        &format!("Upload request failed: {}", error),
+                        SYNC_CANCELLED_ERROR,
                     );
                 }
-                format!("Failed uploading file '{}': {}", relative_path, error)
-            })?;
+                return Err(SYNC_CANCELLED_ERROR.to_string());
+            }
+            value = client
+                .put(&url)
+                .bearer_auth(&graph.access_token)
+                .body(content.clone())
+                .send() => {
+                value.map_err(|error| {
+                    if let Some(active_transfer_id) = &transfer_id {
+                        runtime_finish_transfer_error(
+                            &graph.sync_runtime,
+                            &graph.profile_id,
+                            active_transfer_id,
+                            &format!("Upload request failed: {}", error),
+                        );
+                    }
+                    format!("Failed uploading file '{}': {}", relative_path, error)
+                })?
+            }
+        };
 
         let status = response.status();
         let text = response
             .text()
             .await
             .map_err(|error| format!("Failed reading upload response: {error}"))?;
+
+        ensure_not_cancelled(cancel_flag)?;
 
         if status.as_u16() == 401 && !refreshed {
             log::warn!(
@@ -1299,7 +1690,9 @@ async fn upload_file_by_path(
 async fn create_remote_folder(
     graph: &mut GraphContext,
     relative_path: &str,
+    cancel_flag: &Arc<AtomicBool>,
 ) -> Result<DriveItemResponse, String> {
+    ensure_not_cancelled(cancel_flag)?;
     let (parent, name) = split_parent_and_name(relative_path)?;
     let endpoint = if parent.is_empty() {
         format!("{GRAPH_ROOT}/me/drive/root/children")
@@ -1325,18 +1718,24 @@ async fn create_remote_folder(
     let client = reqwest::Client::new();
     let mut refreshed = false;
     loop {
-        let response = client
-            .post(&endpoint)
-            .bearer_auth(&graph.access_token)
-            .json(&payload)
-            .send()
-            .await
-            .map_err(|error| {
-                format!(
-                    "Failed creating remote folder '{}': {}",
-                    relative_path, error
-                )
-            })?;
+        ensure_not_cancelled(cancel_flag)?;
+        let response = tokio::select! {
+            _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
+                return Err(SYNC_CANCELLED_ERROR.to_string());
+            }
+            value = client
+                .post(&endpoint)
+                .bearer_auth(&graph.access_token)
+                .json(&payload)
+                .send() => {
+                value.map_err(|error| {
+                    format!(
+                        "Failed creating remote folder '{}': {}",
+                        relative_path, error
+                    )
+                })?
+            }
+        };
 
         let status = response.status();
         let text = response
@@ -1375,7 +1774,12 @@ async fn create_remote_folder(
     }
 }
 
-async fn delete_remote_item(graph: &mut GraphContext, item_id: &str) -> Result<(), String> {
+async fn delete_remote_item(
+    graph: &mut GraphContext,
+    item_id: &str,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<(), String> {
+    ensure_not_cancelled(cancel_flag)?;
     let url = format!("{GRAPH_ROOT}/me/drive/items/{}", item_id);
     log::info!(
         "{} [cycle:{}] REMOTE_DELETE_REQUEST item_id={}",

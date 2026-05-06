@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "preact/hooks";
 import {
   hashFromRouteState,
@@ -276,6 +277,13 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
 
   useEffect(() => {
     const syncRoute = () => setRouteState(routeStateFromHash(window.location.hash));
+    let isDisposed = false;
+    const unlistenAuthUpdatePromise = listen("account-auth-updated", () => {
+      if (!isDisposed) {
+        void Promise.all([refreshStatus(), refreshActivity(), refreshSyncRuntime()]);
+      }
+    });
+
     window.addEventListener("hashchange", syncRoute);
     refreshStatus();
     refreshActivity();
@@ -284,8 +292,14 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
       refreshSyncRuntime();
     }, 1500);
     return () => {
+      isDisposed = true;
       window.removeEventListener("hashchange", syncRoute);
       window.clearInterval(runtimeInterval);
+      unlistenAuthUpdatePromise
+        .then((unlisten) => unlisten())
+        .catch(() => {
+          // no-op
+        });
     };
   }, []);
 

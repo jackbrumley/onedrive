@@ -1,5 +1,6 @@
 use crate::app::sync_runtime::SyncRuntimeMap;
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 pub struct DeviceAuthPending {
@@ -23,6 +24,8 @@ pub struct AppState {
     pub interactive_auth_pending: Arc<Mutex<HashMap<String, InteractiveAuthPending>>>,
     pub sync_worker_stops: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>>,
     pub sync_runtime: Arc<Mutex<SyncRuntimeMap>>,
+    pub sync_cancel_flags: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    pub sync_cycle_locks: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
 pub fn create_app_state() -> AppState {
@@ -32,5 +35,7 @@ pub fn create_app_state() -> AppState {
         interactive_auth_pending: Arc::new(Mutex::new(HashMap::new())),
         sync_worker_stops: Arc::new(Mutex::new(HashMap::new())),
         sync_runtime: Arc::new(Mutex::new(HashMap::new())),
+        sync_cancel_flags: Arc::new(Mutex::new(HashMap::new())),
+        sync_cycle_locks: Arc::new(Mutex::new(HashMap::new())),
     }
 }
