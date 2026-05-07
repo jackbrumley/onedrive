@@ -85,6 +85,25 @@ fn resolve_checkpoint_flush_step() -> usize {
         .unwrap_or(25)
 }
 
+fn resolve_simple_upload_max_bytes() -> u64 {
+    std::env::var("SOMEDRIVE_SYNC_SIMPLE_UPLOAD_MAX_BYTES")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(|value| value.clamp(1, 64 * 1024 * 1024))
+        .unwrap_or(4 * 1024 * 1024)
+}
+
+fn resolve_upload_chunk_bytes() -> usize {
+    const CHUNK_GRANULARITY: usize = 320 * 1024;
+    std::env::var("SOMEDRIVE_SYNC_UPLOAD_CHUNK_BYTES")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .map(|value| value.clamp(CHUNK_GRANULARITY, 60 * 1024 * 1024))
+        .map(|value| value - (value % CHUNK_GRANULARITY))
+        .filter(|value| *value >= CHUNK_GRANULARITY)
+        .unwrap_or(8 * 1024 * 1024)
+}
+
 fn parse_retry_after_delay(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     let retry_after = headers.get(reqwest::header::RETRY_AFTER)?;
     let text = retry_after.to_str().ok()?.trim();
@@ -356,4 +375,10 @@ struct DriveItemResponse {
     folder: Option<serde_json::Value>,
     parent_reference: Option<ParentReference>,
     last_modified_date_time: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UploadSessionResponse {
+    upload_url: String,
 }

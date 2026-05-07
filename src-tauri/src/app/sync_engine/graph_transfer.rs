@@ -396,17 +396,14 @@ async fn upload_file_by_path(
 ) -> Result<DriveItemResponse, String> {
     ensure_not_cancelled(cancel_flag)?;
     let local_path = sync_root.join(path_to_local(relative_path));
-    let content = std::fs::read(&local_path).map_err(|error| {
+    let metadata = std::fs::metadata(&local_path).map_err(|error| {
         format!(
-            "Failed reading local file '{}': {}",
+            "Failed reading local file metadata '{}': {}",
             local_path.display(),
             error
         )
     })?;
-
-    let encoded_path = encode_graph_path(relative_path);
-    let url = format!("{GRAPH_ROOT}/me/drive/root:/{}:/content", encoded_path);
-    let content_len = content.len() as u64;
+    let content_len = metadata.len();
     let transfer_id = runtime_start_transfer(
         &graph.sync_runtime,
         &graph.profile_id,
@@ -420,15 +417,57 @@ async fn upload_file_by_path(
         graph.cycle_id,
         relative_path,
         local_path.display(),
-        content.len()
+        content_len
     );
+
+    let simple_upload_limit = resolve_simple_upload_max_bytes();
+    if content_len <= simple_upload_limit {
+        let content = std::fs::read(&local_path).map_err(|error| {
+            format!(
+                "Failed reading local file '{}': {}",
+                local_path.display(),
+                error
+            )
+        })?;
+        return upload_small_file_simple(
+            graph,
+            relative_path,
+            content,
+            content_len,
+            transfer_id.as_deref(),
+            cancel_flag,
+        )
+        .await;
+    }
+
+    upload_large_file_session(
+        graph,
+        relative_path,
+        &local_path,
+        content_len,
+        transfer_id.as_deref(),
+        cancel_flag,
+    )
+    .await
+}
+
+async fn upload_small_file_simple(
+    graph: &mut GraphContext,
+    relative_path: &str,
+    content: Vec<u8>,
+    content_len: u64,
+    transfer_id: Option<&str>,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<DriveItemResponse, String> {
+    let encoded_path = encode_graph_path(relative_path);
+    let url = format!("{GRAPH_ROOT}/me/drive/root:/{}:/content", encoded_path);
     let client = reqwest::Client::new();
     let mut refreshed = false;
     loop {
         ensure_not_cancelled(cancel_flag)?;
         let response = tokio::select! {
             _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
-                if let Some(active_transfer_id) = &transfer_id {
+                if let Some(active_transfer_id) = transfer_id {
                     runtime_finish_transfer_error(
                         &graph.sync_runtime,
                         &graph.profile_id,
@@ -444,7 +483,7 @@ async fn upload_file_by_path(
                 .body(content.clone())
                 .send() => {
                 value.map_err(|error| {
-                    if let Some(active_transfer_id) = &transfer_id {
+                    if let Some(active_transfer_id) = transfer_id {
                         runtime_finish_transfer_error(
                             &graph.sync_runtime,
                             &graph.profile_id,
@@ -478,7 +517,7 @@ async fn upload_file_by_path(
 
         if !status.is_success() {
             let snippet: String = text.chars().take(400).collect();
-            if let Some(active_transfer_id) = &transfer_id {
+            if let Some(active_transfer_id) = transfer_id {
                 runtime_finish_transfer_error(
                     &graph.sync_runtime,
                     &graph.profile_id,
@@ -493,7 +532,7 @@ async fn upload_file_by_path(
         }
         let parsed = serde_json::from_str::<DriveItemResponse>(&text)
             .map_err(|error| format!("Failed decoding upload response JSON: {error}"))?;
-        if let Some(active_transfer_id) = &transfer_id {
+        if let Some(active_transfer_id) = transfer_id {
             runtime_update_transfer_progress(
                 &graph.sync_runtime,
                 &graph.profile_id,
@@ -516,6 +555,231 @@ async fn upload_file_by_path(
             parsed.size.unwrap_or(0)
         );
         return Ok(parsed);
+    }
+}
+
+async fn upload_large_file_session(
+    graph: &mut GraphContext,
+    relative_path: &str,
+    local_path: &Path,
+    content_len: u64,
+    transfer_id: Option<&str>,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<DriveItemResponse, String> {
+    let upload_url = create_upload_session(graph, relative_path, cancel_flag).await?;
+    let chunk_size = resolve_upload_chunk_bytes();
+    let client = reqwest::Client::new();
+    let mut file = std::fs::File::open(local_path).map_err(|error| {
+        format!(
+            "Failed opening local upload file '{}': {}",
+            local_path.display(),
+            error
+        )
+    })?;
+    let mut offset: u64 = 0;
+
+    while offset < content_len {
+        ensure_not_cancelled(cancel_flag)?;
+        let remaining = (content_len - offset) as usize;
+        let read_len = remaining.min(chunk_size);
+        let mut chunk = vec![0_u8; read_len];
+        file.read_exact(&mut chunk).map_err(|error| {
+            format!(
+                "Failed reading upload chunk '{}': {}",
+                local_path.display(),
+                error
+            )
+        })?;
+
+        let chunk_start = offset;
+        let chunk_end = offset + read_len as u64 - 1;
+        let content_range = format!("bytes {}-{}/{}", chunk_start, chunk_end, content_len);
+
+        let mut attempt: u32 = 0;
+        loop {
+            ensure_not_cancelled(cancel_flag)?;
+            attempt += 1;
+            let response = tokio::select! {
+                _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
+                    if let Some(active_transfer_id) = transfer_id {
+                        runtime_finish_transfer_error(
+                            &graph.sync_runtime,
+                            &graph.profile_id,
+                            active_transfer_id,
+                            SYNC_CANCELLED_ERROR,
+                        );
+                    }
+                    return Err(SYNC_CANCELLED_ERROR.to_string());
+                }
+                value = client
+                    .put(&upload_url)
+                    .header(reqwest::header::CONTENT_LENGTH, read_len)
+                    .header(reqwest::header::CONTENT_RANGE, content_range.clone())
+                    .body(chunk.clone())
+                    .send() => {
+                    value.map_err(|error| format!("Upload chunk request failed: {error}"))?
+                }
+            };
+
+            let status = response.status();
+            if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+                if attempt < MAX_DOWNLOAD_RETRIES {
+                    let delay = parse_retry_after_delay(response.headers())
+                        .unwrap_or_else(|| exponential_backoff_delay(attempt));
+                    log::warn!(
+                        "{} [cycle:{}] UPLOAD_CHUNK_RETRY attempt={} status={} path={} range={} delay_ms={}",
+                        graph.account_prefix,
+                        graph.cycle_id,
+                        attempt,
+                        status,
+                        relative_path,
+                        content_range,
+                        delay.as_millis()
+                    );
+                    sleep_with_cancellation(cancel_flag, delay).await?;
+                    continue;
+                }
+            }
+
+            let text = response.text().await.unwrap_or_default();
+            if status == StatusCode::ACCEPTED {
+                offset += read_len as u64;
+                if let Some(active_transfer_id) = transfer_id {
+                    runtime_update_transfer_progress(
+                        &graph.sync_runtime,
+                        &graph.profile_id,
+                        active_transfer_id,
+                        offset,
+                        Some(content_len),
+                    );
+                }
+                break;
+            }
+
+            if status.is_success() {
+                let parsed = serde_json::from_str::<DriveItemResponse>(&text).map_err(|error| {
+                    format!("Failed decoding upload-session completion response JSON: {error}")
+                })?;
+                if let Some(active_transfer_id) = transfer_id {
+                    runtime_update_transfer_progress(
+                        &graph.sync_runtime,
+                        &graph.profile_id,
+                        active_transfer_id,
+                        content_len,
+                        Some(content_len),
+                    );
+                    runtime_finish_transfer_success(
+                        &graph.sync_runtime,
+                        &graph.profile_id,
+                        active_transfer_id,
+                    );
+                }
+                log::info!(
+                    "{} [cycle:{}] UPLOAD_OK path={} remote_id={} size={}",
+                    graph.account_prefix,
+                    graph.cycle_id,
+                    relative_path,
+                    parsed.id,
+                    parsed.size.unwrap_or(0)
+                );
+                return Ok(parsed);
+            }
+
+            if let Some(active_transfer_id) = transfer_id {
+                runtime_finish_transfer_error(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    active_transfer_id,
+                    &format!("Upload failed with status {}", status),
+                );
+            }
+            let snippet: String = text.chars().take(400).collect();
+            return Err(format!(
+                "Upload failed for '{}' with status {}: {}",
+                relative_path, status, snippet
+            ));
+        }
+    }
+
+    Err(format!(
+        "Upload session ended before completion for '{}'",
+        relative_path
+    ))
+}
+
+async fn create_upload_session(
+    graph: &mut GraphContext,
+    relative_path: &str,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<String, String> {
+    let encoded_path = encode_graph_path(relative_path);
+    let url = format!(
+        "{GRAPH_ROOT}/me/drive/root:/{}:/createUploadSession",
+        encoded_path
+    );
+    let payload = serde_json::json!({
+        "item": {
+            "@microsoft.graph.conflictBehavior": "replace"
+        }
+    });
+    let client = reqwest::Client::new();
+    let mut refreshed = false;
+
+    loop {
+        ensure_not_cancelled(cancel_flag)?;
+        let response = tokio::select! {
+            _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
+                return Err(SYNC_CANCELLED_ERROR.to_string());
+            }
+            value = client
+                .post(&url)
+                .bearer_auth(&graph.access_token)
+                .json(&payload)
+                .send() => {
+                value.map_err(|error| format!("Create upload session request failed: {error}"))?
+            }
+        };
+
+        let status = response.status();
+        if status.as_u16() == 401 && !refreshed {
+            log::warn!(
+                "{} [cycle:{}] GRAPH_UPLOAD_SESSION_401_REFRESH",
+                graph.account_prefix,
+                graph.cycle_id
+            );
+            graph.refresh_token().await?;
+            refreshed = true;
+            continue;
+        }
+        if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+            let delay = parse_retry_after_delay(response.headers()).unwrap_or_else(|| Duration::from_secs(2));
+            log::warn!(
+                "{} [cycle:{}] GRAPH_UPLOAD_SESSION_RETRY status={} path={} delay_ms={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                status,
+                relative_path,
+                delay.as_millis()
+            );
+            sleep_with_cancellation(cancel_flag, delay).await?;
+            continue;
+        }
+
+        let text = response
+            .text()
+            .await
+            .map_err(|error| format!("Failed reading create upload session response: {error}"))?;
+        if !status.is_success() {
+            let snippet: String = text.chars().take(400).collect();
+            return Err(format!(
+                "Create upload session failed for '{}' with status {}: {}",
+                relative_path, status, snippet
+            ));
+        }
+
+        let session = serde_json::from_str::<UploadSessionResponse>(&text)
+            .map_err(|error| format!("Failed decoding create upload session response JSON: {error}"))?;
+        return Ok(session.upload_url);
     }
 }
 
