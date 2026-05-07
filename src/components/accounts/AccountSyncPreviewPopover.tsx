@@ -79,6 +79,21 @@ function extractUploadCooldownHint(phaseMessage: string | null): { path: string;
   };
 }
 
+function isTransientTransferError(errorText: string | null): boolean {
+  if (!errorText) {
+    return false;
+  }
+  const normalized = errorText.toLowerCase();
+  return (
+    normalized.includes("failed reading download stream") ||
+    normalized.includes("error decoding response body") ||
+    normalized.includes("timed out") ||
+    normalized.includes("connection reset") ||
+    normalized.includes("connection aborted") ||
+    normalized.includes("temporary")
+  );
+}
+
 export function AccountSyncPreviewPopover({
   runtimeStatus,
   issueMessage,
@@ -93,13 +108,21 @@ export function AccountSyncPreviewPopover({
   placement,
   visible,
 }: AccountSyncPreviewPopoverProps) {
-  const inProgress = runtimeStatus?.inProgress.slice(0, 8) ?? [];
-  const recentCompleted = runtimeStatus?.recentCompleted.slice(0, 6) ?? [];
-  const recentFailed = runtimeStatus?.recentFailed.slice(0, 4) ?? [];
+  const inProgress = runtimeStatus?.inProgress ?? [];
+  const recentCompleted = runtimeStatus?.recentCompleted ?? [];
+  const recentFailed = runtimeStatus?.recentFailed ?? [];
   const isRemoteScanActive = runtimeStatus?.phase === "scanning_remote";
   const uploadCooldownHint = extractUploadCooldownHint(runtimeStatus?.phaseMessage ?? null);
   const hasIssueSummary = Boolean(issueMessage);
+  const transientFailureCount = recentFailed.filter((item) => isTransientTransferError(item.error)).length;
+  const hasTransientRetryIssue = uploadCooldownHint !== null || transientFailureCount > 0;
+  const hasBlockingIssue = hasIssueSummary || issueKind !== null;
   const hasIssueSection = hasIssueSummary || issueActions.length > 0 || recentFailed.length > 0 || uploadCooldownHint !== null;
+  const issuesClassName = hasBlockingIssue
+    ? "account-sync-preview-issues"
+    : hasTransientRetryIssue
+      ? "account-sync-preview-issues account-sync-preview-issues-warning"
+      : "account-sync-preview-issues";
 
   const items = [
     ...inProgress.map((transfer) => ({
@@ -160,10 +183,15 @@ export function AccountSyncPreviewPopover({
         {runtimeStatus ? <span class="account-sync-preview-updated">updated {relativeUpdatedAt(runtimeStatus.updatedAt)}</span> : null}
       </p>
       {hasIssueSection && (
-        <section class="account-sync-preview-issues">
-          <p class="account-sync-preview-section-label">Issues</p>
+        <section class={issuesClassName}>
+          <p class="account-sync-preview-section-label">{hasBlockingIssue ? "Issues" : "Warnings"}</p>
           {hasIssueSummary && (
             <p class="account-sync-preview-issue-summary">{issueMessage}</p>
+          )}
+          {!hasBlockingIssue && hasTransientRetryIssue && (
+            <p class="account-sync-preview-issue-warning-note">
+              Temporary transfer issue detected. Sync will retry automatically.
+            </p>
           )}
           {uploadCooldownHint && (
             <p class="account-sync-preview-issue-cooldown">

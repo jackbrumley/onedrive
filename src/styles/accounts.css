@@ -235,8 +235,8 @@
 }
 
 .account-sync-preview-popover {
-  width: min(460px, 82vw);
-  max-height: min(420px, calc(100vh - 16px));
+  width: min(560px, 90vw);
+  max-height: min(78vh, 820px);
   overflow: auto;
   border-radius: 10px;
   border: 1px solid #bdd2ea;
@@ -314,6 +314,25 @@
   margin-bottom: 8px;
 }
 
+.account-sync-preview-issues-warning {
+  border-color: #e6c88d;
+  background: #fff8ed;
+}
+
+.account-sync-preview-issues-warning .account-sync-preview-section-label {
+  color: #9a6d2e;
+}
+
+.account-sync-preview-issues-warning .account-sync-preview-issue-warning-note,
+.account-sync-preview-issues-warning .account-sync-preview-issue-cooldown {
+  color: #7f5a24;
+}
+
+.account-sync-preview-issue-warning-note {
+  margin: 0;
+  font-size: 0.73rem;
+}
+
 .account-sync-preview-issue-summary {
   margin: 0;
   color: #7d2734;
@@ -374,12 +393,9 @@
 .account-sync-preview-list {
   display: grid;
   gap: 0;
-  max-height: 250px;
-  overflow: auto;
 }
 
 .account-sync-preview-list-errors {
-  max-height: 150px;
 }
 
 .account-sync-preview-item {
@@ -440,7 +456,7 @@
 .account-sync-preview-path {
   margin: 0;
   font-size: 0.76rem;
-  font-weight: 600;
+  font-weight: 400;
   color: #1d2d43;
   white-space: nowrap;
   overflow: hidden;
