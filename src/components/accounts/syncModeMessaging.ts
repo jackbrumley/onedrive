@@ -1,6 +1,6 @@
 import type { SyncRuntimeAccountStatus } from "../../types/somedrive";
 
-type SyncModeTone = "info" | "success" | "warning";
+type SyncModeTone = "info" | "success" | "warning" | "caution";
 
 interface SyncModeMessage {
   title: string;
@@ -42,20 +42,20 @@ export function syncModeMessage(
       return {
         title: "Preparing two-way sync",
         detail: "Cloud files are still in control. Local adds/deletes won't sync yet.",
-        tone: "warning",
+        tone: "caution",
       };
     }
     if (phase === "paused") {
       return {
         title: "Initial sync paused",
         detail: "Initial sync runs in cloud-files-only mode.",
-        tone: "warning",
+        tone: "caution",
       };
     }
     return {
       title: "Initial sync in progress",
       detail: "Downloading cloud files first. Local adds/deletes won't sync yet.",
-      tone: "warning",
+      tone: "caution",
     };
   }
 

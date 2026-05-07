@@ -66,7 +66,7 @@
 }
 
 .account-item {
-  border: 1px solid var(--line-soft);
+  border: 2px solid var(--line-soft);
   border-radius: 10px;
   padding: 12px;
   background: #f8fbff;
@@ -82,6 +82,7 @@
   color: var(--text-main);
   cursor: default;
   padding: 10px;
+  transition: border-color 140ms ease, background-color 140ms ease, box-shadow 160ms ease;
 }
 
 .account-home-button * {
@@ -89,8 +90,9 @@
 }
 
 .account-home-button:hover {
-  border-color: var(--success);
+  border-color: var(--brand-primary);
   background: #f4f9ff;
+  box-shadow: 0 4px 10px rgba(20, 117, 198, 0.12);
 }
 
 .account-home-button:focus-visible {
@@ -291,9 +293,9 @@
 }
 
 .account-sync-mode-banner {
-  border: 1px solid #bed5ee;
+  border: 1px solid var(--sync-tone-info-border);
   border-radius: 10px;
-  background: #eef6ff;
+  background: var(--sync-tone-info-bg);
   padding: 8px 10px;
   margin: 0 0 8px;
 }
@@ -302,39 +304,52 @@
   margin: 0;
   font-size: 0.82rem;
   font-weight: 700;
-  color: #1c4f7a;
+  color: var(--sync-tone-info-text);
 }
 
 .account-sync-mode-banner-detail {
   margin: 2px 0 0;
   font-size: 0.74rem;
-  color: #3d6388;
+  color: var(--sync-tone-info-detail);
 }
 
 .account-sync-mode-banner-success {
-  border-color: #b8dec7;
-  background: #ecf8f0;
+  border-color: var(--sync-tone-success-border);
+  background: var(--sync-tone-success-bg);
 }
 
 .account-sync-mode-banner-success .account-sync-mode-banner-title {
-  color: #236548;
+  color: var(--sync-tone-success-text);
 }
 
 .account-sync-mode-banner-success .account-sync-mode-banner-detail {
-  color: #3b7158;
+  color: var(--sync-tone-success-detail);
+}
+
+.account-sync-mode-banner-caution {
+  border-color: var(--sync-tone-caution-border);
+  background: var(--sync-tone-caution-bg);
+}
+
+.account-sync-mode-banner-caution .account-sync-mode-banner-title {
+  color: var(--sync-tone-caution-text);
+}
+
+.account-sync-mode-banner-caution .account-sync-mode-banner-detail {
+  color: var(--sync-tone-caution-detail);
 }
 
 .account-sync-mode-banner-warning {
-  border-color: #ebc4ca;
-  background: #fff2f4;
+  border-color: var(--sync-tone-warning-border);
+  background: var(--sync-tone-warning-bg);
 }
 
 .account-sync-mode-banner-warning .account-sync-mode-banner-title {
-  color: #7b2935;
+  color: var(--sync-tone-warning-text);
 }
 
 .account-sync-mode-banner-warning .account-sync-mode-banner-detail {
-  color: #8f3a47;
+  color: var(--sync-tone-warning-detail);
 }
 
 .account-sync-preview-phase-line {
@@ -688,7 +703,7 @@
   margin: 0;
   font-size: 0.77rem;
   line-height: 1.25;
-  color: #325d86;
+  color: var(--sync-tone-info-text);
 }
 
 .account-sync-mode-title {
@@ -701,35 +716,44 @@
 
 .account-sync-mode-detail {
   font-weight: 400;
-  color: #325d86;
+  color: var(--sync-tone-info-detail);
   opacity: 0.86;
 }
 
 .account-sync-mode-line-info {
-  color: #325d86;
+  color: var(--sync-tone-info-text);
 }
 
 .account-sync-mode-line-info .account-sync-mode-sep,
 .account-sync-mode-line-info .account-sync-mode-detail {
-  color: #5e7894;
+  color: var(--sync-tone-info-detail);
+}
+
+.account-sync-mode-line-caution {
+  color: var(--sync-tone-caution-text);
+}
+
+.account-sync-mode-line-caution .account-sync-mode-sep,
+.account-sync-mode-line-caution .account-sync-mode-detail {
+  color: var(--sync-tone-caution-detail);
 }
 
 .account-sync-mode-line-warning {
-  color: #8f5f1d;
+  color: var(--sync-tone-warning-text);
 }
 
 .account-sync-mode-line-warning .account-sync-mode-sep,
 .account-sync-mode-line-warning .account-sync-mode-detail {
-  color: #986d33;
+  color: var(--sync-tone-warning-detail);
 }
 
 .account-sync-mode-line-success {
-  color: #236548;
+  color: var(--sync-tone-success-text);
 }
 
 .account-sync-mode-line-success .account-sync-mode-sep,
 .account-sync-mode-line-success .account-sync-mode-detail {
-  color: #3b7158;
+  color: var(--sync-tone-success-detail);
 }
 
 .account-path-link {

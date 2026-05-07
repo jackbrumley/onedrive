@@ -9,7 +9,7 @@
   --text-main: #1d2735;
   --text-muted: #667a92;
 
-  --brand-primary: #1d4ed8;
+  --brand-primary: #1475c6;
   --brand-strong: #1a57d3;
   --brand-highlight: #22c1c3;
   --brand-soft: #0891b2;
@@ -42,6 +42,26 @@
 
   --danger-strong: #ba3a58;
   --danger-border: #b43853;
+
+  --sync-tone-info-text: #1c4f7a;
+  --sync-tone-info-detail: #3d6388;
+  --sync-tone-info-border: #bed5ee;
+  --sync-tone-info-bg: #eef6ff;
+
+  --sync-tone-caution-text: #8f5f1d;
+  --sync-tone-caution-detail: #986d33;
+  --sync-tone-caution-border: #e6c88d;
+  --sync-tone-caution-bg: #fff8ed;
+
+  --sync-tone-warning-text: #7b2935;
+  --sync-tone-warning-detail: #8f3a47;
+  --sync-tone-warning-border: #ebc4ca;
+  --sync-tone-warning-bg: #fff2f4;
+
+  --sync-tone-success-text: #236548;
+  --sync-tone-success-detail: #3b7158;
+  --sync-tone-success-border: #b8dec7;
+  --sync-tone-success-bg: #ecf8f0;
 
   --space-1: 4px;
   --space-2: 8px;
