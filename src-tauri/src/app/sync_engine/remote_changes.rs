@@ -4,7 +4,7 @@ async fn fetch_and_apply_delta_changes(
     sync_state: &mut PersistedSyncState,
     stats: &mut SyncCycleStats,
     cancel_flag: &Arc<AtomicBool>,
-) -> Result<(), String> {
+) -> Result<HashSet<String>, String> {
     const PHASE_PROGRESS_UPDATE_INTERVAL: Duration = Duration::from_millis(750);
     const PHASE_PROGRESS_ITEM_STEP: usize = 250;
 
@@ -150,6 +150,7 @@ async fn fetch_and_apply_delta_changes(
     let mut download_results_since_flush: usize = 0;
     let mut producer_done = false;
     let mut deferred_delta_link: Option<String> = None;
+    let mut remote_applied_paths: HashSet<String> = HashSet::new();
 
     loop {
         ensure_not_cancelled(cancel_flag)?;
@@ -248,6 +249,7 @@ async fn fetch_and_apply_delta_changes(
                     sync_state,
                     stats,
                     &mut pending_download_ids,
+                    &mut remote_applied_paths,
                     download_result,
                 );
                 pending_download_count = pending_download_count.saturating_sub(1);
@@ -288,7 +290,7 @@ async fn fetch_and_apply_delta_changes(
     sync_state.active_delta_next_link = None;
     save_sync_state(&graph.profile_id, sync_state)?;
 
-    Ok(())
+    Ok(remote_applied_paths)
 }
 
 async fn process_remote_page_items(
@@ -547,11 +549,13 @@ fn apply_remote_download_result(
     sync_state: &mut PersistedSyncState,
     stats: &mut SyncCycleStats,
     pending_download_ids: &mut HashSet<String>,
+    remote_applied_paths: &mut HashSet<String>,
     result: RemoteDownloadResult,
 ) {
     pending_download_ids.remove(&result.remote_entry.id);
     match result.outcome {
         RemoteDownloadOutcome::Downloaded => {
+            remote_applied_paths.insert(result.remote_entry.path.clone());
             upsert_remote_known_item(sync_state, result.remote_entry);
             stats.downloaded_files += 1;
         }

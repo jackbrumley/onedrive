@@ -2,6 +2,7 @@ async fn apply_local_changes(
     graph: &mut GraphContext,
     sync_root: &Path,
     current_local_snapshot: &HashMap<String, LocalSnapshotEntry>,
+    remote_applied_paths: &std::collections::HashSet<String>,
     sync_state: &mut PersistedSyncState,
     stats: &mut SyncCycleStats,
     cancel_flag: &Arc<AtomicBool>,
@@ -16,6 +17,9 @@ async fn apply_local_changes(
     local_paths.sort_by_key(|path| path.matches('/').count());
     for path in local_paths {
         ensure_not_cancelled(cancel_flag)?;
+        if is_safe_backup_artifact(&path) {
+            continue;
+        }
         let Some(local_entry) = current_local_snapshot.get(&path) else {
             continue;
         };
@@ -43,6 +47,16 @@ async fn apply_local_changes(
             continue;
         }
 
+        if remote_applied_paths.contains(&path) {
+            log::info!(
+                "{} [cycle:{}] LOCAL_SKIP_REMOTE_APPLIED path={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                path
+            );
+            continue;
+        }
+
         log::info!(
             "{} [cycle:{}] LOCAL_CHANGE path={} is_dir={} size={} modified_ts={}",
             graph.account_prefix,
@@ -59,7 +73,7 @@ async fn apply_local_changes(
                 .get(&existing_id)
                 .map(|item| item.modified_ts)
                 .unwrap_or(0);
-            if local_entry.modified_ts >= remote_modified {
+            if local_entry.modified_ts > remote_modified {
                 let now = current_unix_seconds();
                 if let Some(remaining_seconds) =
                     upload_cooldown_remaining_seconds(sync_state, &path, now)
@@ -220,6 +234,10 @@ fn has_local_changed(current: &LocalSnapshotEntry, previous: Option<&LocalSnapsh
         Some(entry) => entry != current,
         None => true,
     }
+}
+
+fn is_safe_backup_artifact(path: &str) -> bool {
+    path.rsplit('/').next().is_some_and(|name| name.contains("-safeBackup-"))
 }
 
 fn current_unix_seconds() -> i64 {

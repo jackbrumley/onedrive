@@ -56,7 +56,7 @@ async fn tick_sync_cycle(
         &format!("{} [cycle:{}] SYNC_CYCLE_START", account_prefix, cycle_id),
     );
 
-    fetch_and_apply_delta_changes(
+    let remote_applied_paths = fetch_and_apply_delta_changes(
         &mut graph,
         &sync_root,
         &mut sync_state,
@@ -84,6 +84,7 @@ async fn tick_sync_cycle(
         &mut graph,
         &sync_root,
         &local_snapshot,
+        &remote_applied_paths,
         &mut sync_state,
         &mut stats,
         cancel_flag,
