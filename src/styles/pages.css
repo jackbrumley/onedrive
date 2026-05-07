@@ -55,13 +55,15 @@
   box-shadow: 0 8px 20px rgba(24, 39, 75, 0.08);
 }
 
-.card h3,
-.card h4 {
-  margin-top: 0;
-  color: var(--titlebar-solid);
+.card > * + * {
+  margin-top: var(--space-3);
 }
 
-.card-error {
-  border-color: #e8a8b7;
-  background: #fff1f4;
+.card p + p {
+  margin-top: var(--space-1);
+}
+
+.card h3,
+.card h4 {
+  color: var(--titlebar-solid);
 }

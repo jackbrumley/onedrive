@@ -43,6 +43,11 @@
   --danger-strong: #ba3a58;
   --danger-border: #b43853;
 
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+
   --success: #28c268;
   --success-strong: #22a857;
   --danger: #d54d69;

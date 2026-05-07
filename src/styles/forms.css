@@ -1,7 +1,7 @@
 .button-row {
   display: flex;
   gap: 8px;
-  margin-bottom: 10px;
+  margin: 0;
   flex-wrap: wrap;
 }
 
@@ -210,6 +210,13 @@ input::placeholder {
 .settings-list {
   display: grid;
   gap: 10px;
+}
+
+.settings-list + .button-row,
+.settings-list + .inline-form-row,
+.inline-form-row + .button-row,
+.button-row + .button-row {
+  margin-top: var(--space-3);
 }
 
 .toggle-field {

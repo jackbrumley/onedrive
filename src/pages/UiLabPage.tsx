@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { IconChevronLeft } from "@tabler/icons-preact";
 import { AccountCard } from "../components/accounts/AccountCard";
 import { AccountDetailPage } from "./AccountDetailPage";
-import { SyncStateControl } from "../components/sync/SyncStateControl";
 import type {
   AccountProfile,
   SyncAgentState,
@@ -71,10 +70,6 @@ const previewAccounts: AccountProfile[] = [
 ];
 
 export function UiLabPage({ onBack }: UiLabPageProps) {
-  const [scenario, setScenario] = useState<"empty" | "single" | "mixed">("mixed");
-  const [showErrorBanner, setShowErrorBanner] = useState(true);
-  const [demoAccountSyncState, setDemoAccountSyncState] = useState<"syncing" | "paused">("syncing");
-  const [demoGlobalSyncState, setDemoGlobalSyncState] = useState<"syncing" | "paused">("paused");
   const initialLabRoute = parseUiLabRoute(window.location.hash);
   const [selectedLabAccountId, setSelectedLabAccountId] = useState<string | null>(initialLabRoute?.accountId ?? null);
   const [selectedLabAccountView, setSelectedLabAccountView] = useState<UiLabAccountView>(initialLabRoute?.view ?? "sync");
@@ -90,18 +85,11 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
   };
 
   const accounts = useMemo(() => {
-    const withOverrides = previewAccounts.map((account) => ({
+    return previewAccounts.map((account) => ({
       ...account,
       agentState: labAgentStateById[account.id] ?? account.agentState,
     }));
-    if (scenario === "empty") {
-      return [];
-    }
-    if (scenario === "single") {
-      return [withOverrides[0]];
-    }
-    return withOverrides;
-  }, [labAgentStateById, scenario]);
+  }, [labAgentStateById]);
 
   const selectedLabAccount = selectedLabAccountId
     ? accounts.find((account) => account.id === selectedLabAccountId) ?? null
@@ -266,29 +254,6 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
             </div>
           )}
 
-          <div class="button-row" style={{ marginTop: "10px" }}>
-            <button onClick={() => setScenario("empty")}>Empty State</button>
-            <button onClick={() => setScenario("single")}>Single Account</button>
-            <button onClick={() => setScenario("mixed")}>Mixed Accounts</button>
-            <button onClick={() => setShowErrorBanner((current) => !current)}>
-              {showErrorBanner ? "Hide" : "Show"} Error Banner
-            </button>
-          </div>
-
-          {showErrorBanner && (
-            <article class="card card-error" style={{ marginTop: "10px" }}>
-              <h3>Simulated Error Banner</h3>
-              <p>One account needs re-authentication. User action should stay in-app.</p>
-              <button>Reconnect Account</button>
-            </article>
-          )}
-
-          <div class="button-row" style={{ alignItems: "center", marginTop: "10px" }}>
-            <span class="pill">Account Sync: {demoAccountSyncState}</span>
-            <SyncStateControl state={demoAccountSyncState} onToggle={async (next) => setDemoAccountSyncState(next)} />
-            <span class="pill">Global Sync: {demoGlobalSyncState}</span>
-            <SyncStateControl state={demoGlobalSyncState} onToggle={async (next) => setDemoGlobalSyncState(next)} />
-          </div>
         </>
       ) : (
         <AccountDetailPage
