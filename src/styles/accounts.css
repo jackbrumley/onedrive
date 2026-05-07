@@ -290,6 +290,53 @@
   font-size: 0.76rem;
 }
 
+.account-sync-mode-banner {
+  border: 1px solid #bed5ee;
+  border-radius: 10px;
+  background: #eef6ff;
+  padding: 8px 10px;
+  margin: 0 0 8px;
+}
+
+.account-sync-mode-banner-title {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #1c4f7a;
+}
+
+.account-sync-mode-banner-detail {
+  margin: 2px 0 0;
+  font-size: 0.74rem;
+  color: #3d6388;
+}
+
+.account-sync-mode-banner-success {
+  border-color: #b8dec7;
+  background: #ecf8f0;
+}
+
+.account-sync-mode-banner-success .account-sync-mode-banner-title {
+  color: #236548;
+}
+
+.account-sync-mode-banner-success .account-sync-mode-banner-detail {
+  color: #3b7158;
+}
+
+.account-sync-mode-banner-warning {
+  border-color: #ebc4ca;
+  background: #fff2f4;
+}
+
+.account-sync-mode-banner-warning .account-sync-mode-banner-title {
+  color: #7b2935;
+}
+
+.account-sync-mode-banner-warning .account-sync-mode-banner-detail {
+  color: #8f3a47;
+}
+
 .account-sync-preview-phase-line {
   display: inline-flex;
   align-items: center;
@@ -408,6 +455,37 @@
 
 .account-sync-preview-action-btn-conflict:hover {
   background: #c47719;
+}
+
+.account-sync-preview-action-btn-warning {
+  background: #cc4b5e;
+}
+
+.account-sync-preview-action-btn-warning:hover {
+  background: #b63a4c;
+}
+
+.account-sync-preview-delete-review {
+  margin-top: 6px;
+  border-top: 1px solid #e7ccd1;
+  padding-top: 6px;
+}
+
+.account-sync-preview-delete-review-title {
+  margin: 0 0 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #7d2734;
+}
+
+.account-sync-preview-delete-review-actions {
+  margin: 0 0 6px;
+}
+
+.account-sync-preview-delete-review-more {
+  margin: 5px 0 0;
+  font-size: 0.7rem;
+  color: #8f3a47;
 }
 
 .account-sync-preview-list {
@@ -606,10 +684,25 @@
   animation: sync-progress-sweep 1.15s ease-in-out infinite;
 }
 
-.account-last-sync {
+.account-sync-mode-line {
   margin: 0;
-  font-size: 0.84rem;
-  color: var(--text-muted);
+  font-size: 0.77rem;
+  line-height: 1.25;
+  color: #325d86;
+}
+
+.account-sync-mode-title {
+  font-weight: 600;
+}
+
+.account-sync-mode-sep {
+  color: #5e7894;
+}
+
+.account-sync-mode-detail {
+  font-weight: 400;
+  color: #325d86;
+  opacity: 0.86;
 }
 
 .account-path-link {

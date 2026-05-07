@@ -79,23 +79,43 @@ async fn tick_sync_cycle(
         cycle_id,
         stats.local_items_seen
     );
-    runtime_set_phase(
-        &graph.sync_runtime,
-        profile_id,
-        "applying_local",
-        "Applying local changes",
-    );
-    ensure_not_cancelled(cancel_flag)?;
-    apply_local_changes(
-        &mut graph,
-        &sync_root,
-        &local_snapshot,
-        &remote_applied_paths,
-        &mut sync_state,
-        &mut stats,
-        cancel_flag,
-    )
-    .await?;
+    if sync_state.two_way_ready {
+        runtime_set_phase(
+            &graph.sync_runtime,
+            profile_id,
+            "applying_local",
+            "Applying local changes",
+        );
+        ensure_not_cancelled(cancel_flag)?;
+        apply_local_changes(
+            &mut graph,
+            &sync_root,
+            &local_snapshot,
+            &remote_applied_paths,
+            &mut sync_state,
+            &mut stats,
+            cancel_flag,
+        )
+        .await?;
+    } else {
+        runtime_set_phase(
+            &graph.sync_runtime,
+            profile_id,
+            "applying_local",
+            "Preparing two-way sync - building your local baseline",
+        );
+        ensure_not_cancelled(cancel_flag)?;
+        reconcile_bootstrap_local_snapshot(
+            &mut graph,
+            &sync_root,
+            &local_snapshot,
+            &mut sync_state,
+            &mut stats,
+            cancel_flag,
+        )
+        .await?;
+        sync_state.two_way_ready = true;
+    }
 
     sync_state.local_snapshot = collect_local_snapshot(&sync_root)?;
     sync_state.last_cycle_at = Some(chrono::Local::now().to_rfc3339());

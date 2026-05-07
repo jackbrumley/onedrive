@@ -44,7 +44,7 @@ const previewAccounts: AccountProfile[] = [
     syncRoot: "/home/user/SomeDrive/personal",
     authConfigured: true,
     agentState: "syncing",
-    lastSyncAt: null,
+    lastSyncAt: "2026-05-07T10:24:00.000Z",
   },
   {
     id: "lab-2",
@@ -54,7 +54,7 @@ const previewAccounts: AccountProfile[] = [
     kind: "business",
     syncRoot: "/home/user/SomeDrive/work",
     authConfigured: true,
-    agentState: "paused",
+    agentState: "syncing",
     lastSyncAt: null,
   },
   {
@@ -163,8 +163,8 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
       },
       "lab-2": {
         profileId: "lab-2",
-        phase: "paused",
-        phaseMessage: "Synchronization paused",
+        phase: "applying_local",
+        phaseMessage: "Preparing two-way sync - building your local baseline",
         issueCode: null,
         issueMessage: null,
         issueActions: [],
@@ -310,6 +310,10 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
           onOpenItemFolder={async () => undefined}
           onReauthenticate={async () => null}
           onRetrySync={async () => undefined}
+          onConfirmLargeDelete={async () => undefined}
+          onKeepCloudFiles={async () => undefined}
+          onFetchLargeDeletePreview={async () => []}
+          onExportLargeDeletePreview={async () => undefined}
         />
       )}
     </section>

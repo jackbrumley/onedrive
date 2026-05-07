@@ -133,6 +133,14 @@ fn resolve_stall_timeout() -> Duration {
         .unwrap_or(Duration::from_secs(DEFAULT_STALL_TIMEOUT_SECONDS))
 }
 
+fn resolve_large_delete_guard_threshold() -> usize {
+    std::env::var("SOMEDRIVE_SYNC_LARGE_DELETE_THRESHOLD")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .map(|value| value.clamp(1, 100_000))
+        .unwrap_or(10)
+}
+
 fn graph_http_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .connect_timeout(resolve_connect_timeout())
@@ -393,6 +401,9 @@ struct PersistedSyncState {
     local_snapshot: HashMap<String, LocalSnapshotEntry>,
     upload_failure_counts_by_path: HashMap<String, u32>,
     upload_retry_after_by_path: HashMap<String, i64>,
+    two_way_ready: bool,
+    large_delete_guard_approved: bool,
+    large_delete_pending_paths: Vec<String>,
     last_cycle_at: Option<String>,
 }
 

@@ -28,6 +28,10 @@ interface AccountDetailPageProps {
   onOpenItemFolder: (accountId: string, relativePath: string) => Promise<void>;
   onReauthenticate: (accountId: string) => Promise<unknown>;
   onRetrySync: (accountId: string) => Promise<void>;
+  onConfirmLargeDelete: (accountId: string) => Promise<void>;
+  onKeepCloudFiles: (accountId: string) => Promise<void>;
+  onFetchLargeDeletePreview: (accountId: string) => Promise<string[]>;
+  onExportLargeDeletePreview: (accountId: string) => Promise<void>;
 }
 
 export function AccountDetailPage({
@@ -47,6 +51,10 @@ export function AccountDetailPage({
   onOpenItemFolder,
   onReauthenticate,
   onRetrySync,
+  onConfirmLargeDelete,
+  onKeepCloudFiles,
+  onFetchLargeDeletePreview,
+  onExportLargeDeletePreview,
 }: AccountDetailPageProps) {
   const [syncButtonHovered, setSyncButtonHovered] = useState(false);
 
@@ -71,6 +79,7 @@ export function AccountDetailPage({
     runtimeStatus?.phase === "scanning_local" ||
     runtimeStatus?.phase === "applying_local";
   const nextSyncState: "syncing" | "paused" = syncActive ? "paused" : "syncing";
+  const accountKindLabel = account.kind.charAt(0).toUpperCase() + account.kind.slice(1);
   const accountKindIcon = account.kind === "business" ? <IconBuildingBank size={15} /> : <IconUser size={15} />;
   const isSyncView = view === "sync";
   const backHref = isSyncView ? "#/accounts" : `#/accounts/${encodeURIComponent(account.id)}`;
@@ -102,7 +111,7 @@ export function AccountDetailPage({
         <h2>{account.displayName}</h2>
         {isSyncView && (
           <div class="account-detail-page-header-actions">
-            <span class="pill icon-pill account-kind-pill account-detail-kind-pill">{accountKindIcon} {account.kind}</span>
+            <span class="pill icon-pill account-kind-pill account-detail-kind-pill">{accountKindIcon} {accountKindLabel}</span>
             <button
               class="account-detail-settings-btn"
               type="button"
@@ -152,6 +161,10 @@ export function AccountDetailPage({
         onOpenItemFolder={onOpenItemFolder}
         onReauthenticate={onReauthenticate}
         onRetrySync={onRetrySync}
+        onConfirmLargeDelete={onConfirmLargeDelete}
+        onKeepCloudFiles={onKeepCloudFiles}
+        onFetchLargeDeletePreview={onFetchLargeDeletePreview}
+        onExportLargeDeletePreview={onExportLargeDeletePreview}
       />
     </section>
   );

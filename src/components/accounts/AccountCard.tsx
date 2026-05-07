@@ -10,6 +10,7 @@ import {
 import { useState } from "preact/hooks";
 import { AccountHomeCardButton } from "./AccountHomeCardButton";
 import type { AccountProfile, SyncRuntimeAccountStatus } from "../../types/somedrive";
+import { syncModeMessage } from "./syncModeMessaging";
 
 const ISSUE_BADGE_WINDOW_MS = 10 * 60 * 1000;
 
@@ -44,7 +45,8 @@ interface AccountCardProps {
 
 export function AccountCard({ account, runtimeStatus, onOpenDetails, onSetAgentState, onOpenSyncRootFolder }: AccountCardProps) {
   const [syncButtonHovered, setSyncButtonHovered] = useState(false);
-  const lastSyncLabel = account.lastSyncAt ? new Date(account.lastSyncAt).toLocaleString() : "Never";
+  const modeMessage = syncModeMessage(runtimeStatus, account.lastSyncAt !== null);
+  const accountKindLabel = account.kind.charAt(0).toUpperCase() + account.kind.slice(1);
   const accountIcon = account.kind === "business" ? <IconBuildingBank size={16} /> : <IconUser size={16} />;
   const runtimeIssueCode = runtimeStatus?.issueCode ?? null;
   const hasBlockingIssue =
@@ -92,10 +94,14 @@ export function AccountCard({ account, runtimeStatus, onOpenDetails, onSetAgentS
           >
             <IconFolder size={14} /> {account.syncRoot}
           </button>
-          <p class="account-last-sync">Last Sync: {lastSyncLabel}</p>
+          <p class="account-sync-mode-line">
+            <span class="account-sync-mode-title">{modeMessage.title}</span>
+            <span class="account-sync-mode-sep">: </span>
+            <span class="account-sync-mode-detail">{modeMessage.detail}</span>
+          </p>
         </div>
         <div class="account-card-right">
-          <span class="pill icon-pill account-kind-pill">{accountIcon} {account.kind}</span>
+          <span class="pill icon-pill account-kind-pill">{accountIcon} {accountKindLabel}</span>
           <button
             class={syncButtonClass}
             type="button"

@@ -12,12 +12,45 @@ body {
   margin: 0;
   min-height: 100vh;
   font-family: var(--font-main);
+  font-weight: 400;
   color: var(--text-main);
   overflow: hidden;
   background:
     radial-gradient(980px 620px at -12% 108%, rgba(34, 193, 195, 0.08) 0%, rgba(34, 193, 195, 0) 62%),
     radial-gradient(860px 520px at 108% -10%, rgba(8, 145, 178, 0.08) 0%, rgba(8, 145, 178, 0) 60%),
     linear-gradient(180deg, #f1f4f8 0%, #e7ecf3 55%, #dde4ed 100%);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  font-weight: 600;
+}
+
+p {
+  margin: 0;
+  font-weight: 400;
+}
+
+small {
+  font-weight: 400;
+}
+
+strong {
+  font-weight: 600;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  font-weight: inherit;
+  color: inherit;
 }
 
 #root {

@@ -16,9 +16,11 @@ import {
   IconVideo,
 } from "@tabler/icons-preact";
 import type { SyncRuntimeAccountStatus } from "../../types/somedrive";
+import { syncModeMessage } from "./syncModeMessaging";
 
 interface AccountSyncActivityPanelProps {
   runtimeStatus: SyncRuntimeAccountStatus | null;
+  hasCompletedInitialSync: boolean;
   issueMessage: string | null;
   issueKind: "auth_required" | "sync_error" | null;
   issueActions: string[];
@@ -28,6 +30,10 @@ interface AccountSyncActivityPanelProps {
   onOpenSyncRootFolder: () => Promise<void>;
   onReauthenticate: () => Promise<unknown>;
   onRetrySync: () => Promise<void>;
+  onConfirmLargeDelete: () => Promise<void>;
+  onKeepCloudFiles: () => Promise<void>;
+  largeDeletePreviewPaths: string[];
+  onExportLargeDeletePreview: () => Promise<void>;
 }
 
 function formatBytes(value: number | null): string {
@@ -162,6 +168,7 @@ function iconForFilePath(path: string) {
 
 export function AccountSyncActivityPanel({
   runtimeStatus,
+  hasCompletedInitialSync,
   issueMessage,
   issueKind,
   issueActions,
@@ -171,7 +178,12 @@ export function AccountSyncActivityPanel({
   onOpenSyncRootFolder,
   onReauthenticate,
   onRetrySync,
+  onConfirmLargeDelete,
+  onKeepCloudFiles,
+  largeDeletePreviewPaths,
+  onExportLargeDeletePreview,
 }: AccountSyncActivityPanelProps) {
+  const modeMessage = syncModeMessage(runtimeStatus, hasCompletedInitialSync);
   const inProgress = runtimeStatus?.inProgress ?? [];
   const recentCompleted = runtimeStatus?.recentCompleted ?? [];
   const recentFailed = runtimeStatus?.recentFailed ?? [];
@@ -238,6 +250,10 @@ export function AccountSyncActivityPanel({
 
   return (
     <div class="account-sync-activity-panel" role="region" aria-label="Sync activity">
+      <section class={`account-sync-mode-banner account-sync-mode-banner-${modeMessage.tone}`}>
+        <p class="account-sync-mode-banner-title">{modeMessage.title}</p>
+        <p class="account-sync-mode-banner-detail">{modeMessage.detail}</p>
+      </section>
       <p class="account-sync-preview-subtitle">
         <span class="account-sync-preview-phase-line">
           {isRemoteScanActive && <IconRefresh size={13} class="sync-preview-icon-active" />}
@@ -328,7 +344,79 @@ export function AccountSyncActivityPanel({
                 Retry Sync
               </button>
             )}
+            {issueActions.includes("confirm_large_delete") && (
+              <button
+                type="button"
+                class="account-sync-preview-action-btn account-sync-preview-action-btn-warning"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void onConfirmLargeDelete();
+                }}
+              >
+                Delete from Cloud
+              </button>
+            )}
+            {issueActions.includes("keep_cloud_files") && (
+              <button
+                type="button"
+                class="account-sync-preview-action-btn"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void onKeepCloudFiles();
+                }}
+              >
+                Keep Cloud Files
+              </button>
+            )}
           </div>
+          {largeDeletePreviewPaths.length > 0 && (
+            <div class="account-sync-preview-delete-review">
+              <p class="account-sync-preview-delete-review-title">
+                Review deletions ({largeDeletePreviewPaths.length})
+              </p>
+              <div class="account-sync-preview-delete-review-actions">
+                <button
+                  type="button"
+                  class="account-sync-preview-action-btn"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void onExportLargeDeletePreview();
+                  }}
+                >
+                  Export Full List
+                </button>
+              </div>
+              <div class="account-sync-preview-list">
+                {largeDeletePreviewPaths.slice(0, 40).map((path) => (
+                  <article key={path} class="account-sync-preview-item">
+                    <button
+                      type="button"
+                      class="account-sync-preview-item-button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void onOpenItemFolder(path);
+                      }}
+                    >
+                      <div class="account-sync-preview-row">
+                        <span class="account-sync-preview-file-icon">{iconForFilePath(path)}</span>
+                        <div class="account-sync-preview-content">
+                          <p class="account-sync-preview-path">{path}</p>
+                          <p class="account-sync-preview-meta">
+                            <span>Pending cloud deletion</span>
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  </article>
+                ))}
+              </div>
+              {largeDeletePreviewPaths.length > 40 && (
+                <p class="account-sync-preview-delete-review-more">
+                  Showing first 40 paths.
+                </p>
+              )}
+            </div>
+          )}
           {recentFailed.length > 0 && (
             <div class="account-sync-preview-list account-sync-preview-list-errors">
               {recentFailed.map((item) => (

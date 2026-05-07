@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 import type {
   AccountKind,
   AccountProfile,
@@ -144,6 +145,55 @@ export function createAccountActions({
     }
   };
 
+  const confirmAccountLargeDelete = async (profileId: string) => {
+    try {
+      await invoke("confirm_account_large_delete", { profileId });
+      showToast("Large deletion confirmed. Cloud changes will apply on the next sync cycle.", "info", 3400);
+      await refreshAll();
+    } catch (error) {
+      showToast(`Failed to confirm deletion: ${error}`, "error", 4200);
+    }
+  };
+
+  const keepCloudFilesAfterLargeDelete = async (profileId: string) => {
+    try {
+      await invoke("keep_cloud_files_after_large_delete", { profileId });
+      showToast("Keeping cloud files. Initial sync will restore missing items locally.", "info", 3600);
+      await refreshAll();
+    } catch (error) {
+      showToast(`Failed to keep cloud files: ${error}`, "error", 4200);
+    }
+  };
+
+  const fetchAccountLargeDeletePreview = async (profileId: string) => {
+    try {
+      return await invoke<string[]>("get_account_large_delete_preview", { profileId });
+    } catch (error) {
+      showToast(`Failed to load deletion preview: ${error}`, "error", 4200);
+      return [];
+    }
+  };
+
+  const exportAccountLargeDeletePreview = async (profileId: string) => {
+    try {
+      const defaultFileName = `somedrive-large-delete-review-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.txt`;
+      const destinationPath = await save({
+        title: "Export large deletion review",
+        defaultPath: defaultFileName,
+      });
+      if (typeof destinationPath !== "string" || !destinationPath.trim()) {
+        return;
+      }
+      const writtenPath = await invoke<string>("export_account_large_delete_preview", {
+        profileId,
+        destinationPath,
+      });
+      showToast(`Deletion review exported to ${writtenPath}.`, "success", 3200);
+    } catch (error) {
+      showToast(`Failed to export deletion review: ${error}`, "error", 4200);
+    }
+  };
+
   return {
     createAccountProfile,
     renameAccountProfile,
@@ -155,5 +205,9 @@ export function createAccountActions({
     pauseAllAccounts,
     resumeAllAccounts,
     retryAccountSync,
+    confirmAccountLargeDelete,
+    keepCloudFilesAfterLargeDelete,
+    fetchAccountLargeDeletePreview,
+    exportAccountLargeDeletePreview,
   };
 }

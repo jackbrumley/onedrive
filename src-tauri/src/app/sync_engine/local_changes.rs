@@ -204,14 +204,117 @@ async fn apply_local_changes(
         }
     }
 
-    let deleted_paths: Vec<String> = sync_state
+    let mut deleted_paths: Vec<String> = sync_state
         .local_snapshot
         .keys()
         .filter(|path| !current_local_snapshot.contains_key(*path))
         .cloned()
         .collect();
 
-    let mut deleted_paths = deleted_paths;
+    if sync_state.large_delete_guard_approved && !sync_state.large_delete_pending_paths.is_empty() {
+        deleted_paths = sync_state.large_delete_pending_paths.clone();
+    }
+
+    if !sync_state.large_delete_guard_approved && !sync_state.large_delete_pending_paths.is_empty() {
+        let pending_count = sync_state.large_delete_pending_paths.len();
+        let issue_message = format!(
+            "Large deletion detected: {} items. Review before deleting from cloud.",
+            pending_count
+        );
+        if let Ok(mut runtime_map) = graph.sync_runtime.lock() {
+            sync_runtime::set_issue(
+                &mut runtime_map,
+                &graph.profile_id,
+                "large_delete_guard",
+                &issue_message,
+                &[
+                    "confirm_large_delete",
+                    "keep_cloud_files",
+                    "open_sync_root",
+                    "retry_sync",
+                ],
+                None,
+                None,
+            );
+        }
+        runtime_set_phase(
+            &graph.sync_runtime,
+            &graph.profile_id,
+            "paused",
+            "Large deletion detected - review required",
+        );
+        log::warn!(
+            "{} [cycle:{}] LARGE_DELETE_GUARD_BLOCKING pending_count={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            pending_count
+        );
+        return Ok(());
+    }
+
+    let remote_deleted_paths: Vec<String> = deleted_paths
+        .iter()
+        .filter(|path| sync_state.remote_path_to_id.contains_key(path.as_str()))
+        .cloned()
+        .collect();
+
+    let large_delete_guard_threshold = resolve_large_delete_guard_threshold();
+    if remote_deleted_paths.len() >= large_delete_guard_threshold {
+        if !sync_state.large_delete_guard_approved {
+            sync_state.large_delete_pending_paths = remote_deleted_paths;
+            let pending_count = sync_state.large_delete_pending_paths.len();
+            let issue_message = format!(
+                "Large deletion detected: {} items. Review before deleting from cloud.",
+                pending_count
+            );
+            if let Ok(mut runtime_map) = graph.sync_runtime.lock() {
+                sync_runtime::set_issue(
+                    &mut runtime_map,
+                    &graph.profile_id,
+                    "large_delete_guard",
+                    &issue_message,
+                    &[
+                        "confirm_large_delete",
+                        "keep_cloud_files",
+                        "open_sync_root",
+                        "retry_sync",
+                    ],
+                    None,
+                    None,
+                );
+            }
+            runtime_set_phase(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                "paused",
+                "Large deletion detected - review required",
+            );
+            log::warn!(
+                "{} [cycle:{}] LARGE_DELETE_GUARD_TRIGGERED count={} threshold={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                pending_count,
+                large_delete_guard_threshold
+            );
+            return Ok(());
+        }
+
+        log::warn!(
+            "{} [cycle:{}] LARGE_DELETE_GUARD_CONFIRMED count={} threshold={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            remote_deleted_paths.len(),
+            large_delete_guard_threshold
+        );
+        sync_state.large_delete_guard_approved = false;
+        sync_state.large_delete_pending_paths.clear();
+        runtime_clear_issue(&graph.sync_runtime, &graph.profile_id);
+    } else if sync_state.large_delete_guard_approved {
+        sync_state.large_delete_guard_approved = false;
+        sync_state.large_delete_pending_paths.clear();
+        runtime_clear_issue(&graph.sync_runtime, &graph.profile_id);
+    }
+
     deleted_paths.sort_by_key(|path| std::cmp::Reverse(path.matches('/').count()));
     let mut deleted_paths_seen: usize = 0;
 
@@ -248,6 +351,74 @@ async fn apply_local_changes(
                 remote_id
             );
             stats.deleted_remote += 1;
+        }
+    }
+
+    Ok(())
+}
+
+async fn reconcile_bootstrap_local_snapshot(
+    graph: &mut GraphContext,
+    sync_root: &Path,
+    current_local_snapshot: &HashMap<String, LocalSnapshotEntry>,
+    sync_state: &mut PersistedSyncState,
+    stats: &mut SyncCycleStats,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<(), String> {
+    let mut remote_items: Vec<RemoteKnownItem> = sync_state.remote_by_id.values().cloned().collect();
+    remote_items.sort_by_key(|item| item.path.matches('/').count());
+
+    for remote_item in remote_items {
+        ensure_not_cancelled(cancel_flag)?;
+        if current_local_snapshot.contains_key(&remote_item.path) {
+            continue;
+        }
+
+        let local_abs = sync_root.join(path_to_local(&remote_item.path));
+        if remote_item.is_dir {
+            std::fs::create_dir_all(&local_abs).map_err(|error| {
+                format!(
+                    "Failed creating local directory '{}' during initial sync: {}",
+                    local_abs.display(),
+                    error
+                )
+            })?;
+            continue;
+        }
+
+        log::info!(
+            "{} [cycle:{}] INITIAL_SYNC_RESTORE path={} id={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            remote_item.path,
+            remote_item.id
+        );
+        let outcome = download_remote_item_content(
+            graph,
+            &remote_item.id,
+            &remote_item.path,
+            &local_abs,
+            cancel_flag,
+        )
+        .await?;
+
+        match outcome {
+            RemoteDownloadOutcome::Downloaded => {
+                stats.downloaded_files += 1;
+            }
+            RemoteDownloadOutcome::SkippedMissingRemote => {
+                sync_state.remote_by_id.remove(&remote_item.id);
+                sync_state.remote_path_to_id.remove(&remote_item.path);
+                sync_state.local_snapshot.remove(&remote_item.path);
+                stats.remote_items_skipped_missing += 1;
+                log::warn!(
+                    "{} [cycle:{}] INITIAL_SYNC_RESTORE_SKIPPED_MISSING path={} id={}",
+                    graph.account_prefix,
+                    graph.cycle_id,
+                    remote_item.path,
+                    remote_item.id
+                );
+            }
         }
     }
 

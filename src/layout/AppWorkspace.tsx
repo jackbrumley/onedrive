@@ -53,6 +53,10 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
           onOpenItemFolder={runtime.openAccountItemFolder}
           onReauthenticate={runtime.startInteractiveAuth}
           onRetrySync={runtime.retryAccountSync}
+          onConfirmLargeDelete={runtime.confirmAccountLargeDelete}
+          onKeepCloudFiles={runtime.keepCloudFilesAfterLargeDelete}
+          onFetchLargeDeletePreview={runtime.fetchAccountLargeDeletePreview}
+          onExportLargeDeletePreview={runtime.exportAccountLargeDeletePreview}
         />
       )}
       renderSettings={() => (

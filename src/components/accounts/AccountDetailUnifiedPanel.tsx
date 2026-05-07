@@ -16,6 +16,10 @@ interface AccountDetailUnifiedPanelProps {
   onOpenItemFolder: (accountId: string, relativePath: string) => Promise<void>;
   onReauthenticate: (accountId: string) => Promise<unknown>;
   onRetrySync: (accountId: string) => Promise<void>;
+  onConfirmLargeDelete: (accountId: string) => Promise<void>;
+  onKeepCloudFiles: (accountId: string) => Promise<void>;
+  onFetchLargeDeletePreview: (accountId: string) => Promise<string[]>;
+  onExportLargeDeletePreview: (accountId: string) => Promise<void>;
   actionsDisabled?: boolean;
 }
 
@@ -32,13 +36,36 @@ export function AccountDetailUnifiedPanel({
   onOpenItemFolder,
   onReauthenticate,
   onRetrySync,
+  onConfirmLargeDelete,
+  onKeepCloudFiles,
+  onFetchLargeDeletePreview,
+  onExportLargeDeletePreview,
   actionsDisabled = false,
 }: AccountDetailUnifiedPanelProps) {
   const [draftName, setDraftName] = useState(account.displayName);
+  const [largeDeletePreviewPaths, setLargeDeletePreviewPaths] = useState<string[]>([]);
+
+  const hasLargeDeleteGuardIssue = runtimeStatus?.issueCode === "large_delete_guard";
 
   useEffect(() => {
     setDraftName(account.displayName);
   }, [account.displayName]);
+
+  useEffect(() => {
+    if (mode !== "sync" || !hasLargeDeleteGuardIssue) {
+      setLargeDeletePreviewPaths([]);
+      return;
+    }
+    let active = true;
+    void onFetchLargeDeletePreview(account.id).then((paths) => {
+      if (active) {
+        setLargeDeletePreviewPaths(paths);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [account.id, hasLargeDeleteGuardIssue, mode, onFetchLargeDeletePreview]);
 
   const chooseSyncFolder = async () => {
     if (actionsDisabled) {
@@ -86,6 +113,7 @@ export function AccountDetailUnifiedPanel({
       <article class="card account-detail-unified-card account-detail-sync-preview">
         <AccountSyncActivityPanel
           runtimeStatus={runtimeStatus}
+          hasCompletedInitialSync={account.lastSyncAt !== null}
           issueMessage={hasBlockingIssue ? syncIssueMessage : null}
           issueKind={issueKind}
           issueActions={issueActions}
@@ -95,6 +123,10 @@ export function AccountDetailUnifiedPanel({
           onOpenSyncRootFolder={() => onOpenSyncRootFolder(account.id)}
           onReauthenticate={() => onReauthenticate(account.id)}
           onRetrySync={() => onRetrySync(account.id)}
+          onConfirmLargeDelete={() => onConfirmLargeDelete(account.id)}
+          onKeepCloudFiles={() => onKeepCloudFiles(account.id)}
+          largeDeletePreviewPaths={largeDeletePreviewPaths}
+          onExportLargeDeletePreview={() => onExportLargeDeletePreview(account.id)}
         />
       </article>
     );

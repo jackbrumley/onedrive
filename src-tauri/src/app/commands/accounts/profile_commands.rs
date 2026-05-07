@@ -105,3 +105,81 @@ pub fn set_account_agent_state(
     Ok(profile)
 }
 
+#[tauri::command]
+pub fn confirm_account_large_delete(
+    state: tauri::State<'_, AppState>,
+    profile_id: String,
+) -> Result<(), String> {
+    sync_engine::confirm_large_delete_guard(&state, &profile_id)?;
+    let _ = activity_log::append_event(
+        &profile_id,
+        &log_context::account_identity(&profile_id),
+        "warning",
+        &format!(
+            "{} Large deletion confirmed by user",
+            log_context::account_prefix(&profile_id)
+        ),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn keep_cloud_files_after_large_delete(
+    state: tauri::State<'_, AppState>,
+    profile_id: String,
+) -> Result<(), String> {
+    sync_engine::keep_cloud_files_after_large_delete(&state, &profile_id)?;
+    let _ = activity_log::append_event(
+        &profile_id,
+        &log_context::account_identity(&profile_id),
+        "info",
+        &format!(
+            "{} Kept cloud files after large deletion warning",
+            log_context::account_prefix(&profile_id)
+        ),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_account_large_delete_preview(profile_id: String) -> Result<Vec<String>, String> {
+    sync_engine::get_large_delete_pending_paths(&profile_id)
+}
+
+#[tauri::command]
+pub fn export_account_large_delete_preview(
+    profile_id: String,
+    destination_path: String,
+) -> Result<String, String> {
+    let pending_paths = sync_engine::get_large_delete_pending_paths(&profile_id)?;
+    if pending_paths.is_empty() {
+        return Err("No pending large deletion paths to export".to_string());
+    }
+
+    let mut output = String::new();
+    output.push_str("SomeDrive Large Deletion Review\n");
+    output.push_str(&format!("Profile: {}\n", profile_id));
+    output.push_str(&format!("Generated: {}\n", chrono::Local::now().to_rfc3339()));
+    output.push_str(&format!("Items: {}\n\n", pending_paths.len()));
+    for path in pending_paths {
+        output.push_str(&path);
+        output.push('\n');
+    }
+
+    let destination = std::path::PathBuf::from(destination_path.clone());
+    if let Some(parent) = destination.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("Failed creating export directory: {}", error))?;
+        }
+    }
+    fs::write(&destination, output).map_err(|error| {
+        format!(
+            "Failed writing large deletion export '{}': {}",
+            destination.display(),
+            error
+        )
+    })?;
+
+    Ok(destination_path)
+}

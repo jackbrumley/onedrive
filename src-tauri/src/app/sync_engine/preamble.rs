@@ -57,3 +57,55 @@ pub fn on_agent_state_changed(
     }
     Ok(())
 }
+
+pub fn confirm_large_delete_guard(
+    state: &tauri::State<'_, AppState>,
+    profile_id: &str,
+) -> Result<(), String> {
+    let mut sync_state = load_sync_state(profile_id)?;
+    if sync_state.large_delete_pending_paths.is_empty() {
+        return Err("No pending large deletion to confirm".to_string());
+    }
+    sync_state.large_delete_guard_approved = true;
+    save_sync_state(profile_id, &sync_state)?;
+
+    if let Ok(mut runtime_map) = state.sync_runtime.lock() {
+        sync_runtime::clear_issue(&mut runtime_map, profile_id);
+        sync_runtime::set_phase(
+            &mut runtime_map,
+            profile_id,
+            "applying_local",
+            "Large deletion confirmed - applying changes",
+        );
+    }
+    Ok(())
+}
+
+pub fn keep_cloud_files_after_large_delete(
+    state: &tauri::State<'_, AppState>,
+    profile_id: &str,
+) -> Result<(), String> {
+    let mut sync_state = load_sync_state(profile_id)?;
+    sync_state.large_delete_guard_approved = false;
+    sync_state.large_delete_pending_paths.clear();
+    sync_state.two_way_ready = false;
+    sync_state.delta_link = None;
+    sync_state.active_delta_next_link = None;
+    save_sync_state(profile_id, &sync_state)?;
+
+    if let Ok(mut runtime_map) = state.sync_runtime.lock() {
+        sync_runtime::clear_issue(&mut runtime_map, profile_id);
+        sync_runtime::set_phase(
+            &mut runtime_map,
+            profile_id,
+            "syncing",
+            "Initial sync in progress - downloading cloud files only",
+        );
+    }
+    Ok(())
+}
+
+pub fn get_large_delete_pending_paths(profile_id: &str) -> Result<Vec<String>, String> {
+    let sync_state = load_sync_state(profile_id)?;
+    Ok(sync_state.large_delete_pending_paths)
+}
