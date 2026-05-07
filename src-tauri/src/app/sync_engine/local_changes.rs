@@ -60,6 +60,20 @@ async fn apply_local_changes(
                 .map(|item| item.modified_ts)
                 .unwrap_or(0);
             if local_entry.modified_ts >= remote_modified {
+                let now = current_unix_seconds();
+                if let Some(remaining_seconds) =
+                    upload_cooldown_remaining_seconds(sync_state, &path, now)
+                {
+                    stats.upload_cooldown_skips += 1;
+                    log::info!(
+                        "{} [cycle:{}] LOCAL_UPLOAD_COOLDOWN_SKIP path={} retry_in={}s",
+                        graph.account_prefix,
+                        graph.cycle_id,
+                        path,
+                        remaining_seconds
+                    );
+                    continue;
+                }
                 log::info!(
                     "{} [cycle:{}] LOCAL_UPLOAD_EXISTING path={} remote_id={} local_ts={} remote_ts={}",
                     graph.account_prefix,
@@ -73,21 +87,39 @@ async fn apply_local_changes(
                     Ok(uploaded) => {
                         let known = remote_known_item_from_drive_item(uploaded, &path)?;
                         upsert_remote_known_item(sync_state, known);
+                        clear_upload_failure_cooldown(sync_state, &path);
                         stats.uploaded_files += 1;
                     }
                     Err(error) => {
+                        let (failure_count, cooldown_seconds) =
+                            record_upload_failure_cooldown(sync_state, &path, now);
                         stats.upload_failures += 1;
                         log::warn!(
-                            "{} [cycle:{}] LOCAL_UPLOAD_FAILED path={} reason={}",
+                            "{} [cycle:{}] LOCAL_UPLOAD_FAILED path={} reason={} failures={} cooldown={}s",
                             graph.account_prefix,
                             graph.cycle_id,
                             path,
-                            error
+                            error,
+                            failure_count,
+                            cooldown_seconds
                         );
                     }
                 }
             }
         } else {
+            let now = current_unix_seconds();
+            if let Some(remaining_seconds) = upload_cooldown_remaining_seconds(sync_state, &path, now)
+            {
+                stats.upload_cooldown_skips += 1;
+                log::info!(
+                    "{} [cycle:{}] LOCAL_UPLOAD_COOLDOWN_SKIP path={} retry_in={}s",
+                    graph.account_prefix,
+                    graph.cycle_id,
+                    path,
+                    remaining_seconds
+                );
+                continue;
+            }
             log::info!(
                 "{} [cycle:{}] LOCAL_UPLOAD_NEW path={}",
                 graph.account_prefix,
@@ -98,16 +130,21 @@ async fn apply_local_changes(
                 Ok(uploaded) => {
                     let known = remote_known_item_from_drive_item(uploaded, &path)?;
                     upsert_remote_known_item(sync_state, known);
+                    clear_upload_failure_cooldown(sync_state, &path);
                     stats.uploaded_files += 1;
                 }
                 Err(error) => {
+                    let (failure_count, cooldown_seconds) =
+                        record_upload_failure_cooldown(sync_state, &path, now);
                     stats.upload_failures += 1;
                     log::warn!(
-                        "{} [cycle:{}] LOCAL_UPLOAD_FAILED path={} reason={}",
+                        "{} [cycle:{}] LOCAL_UPLOAD_FAILED path={} reason={} failures={} cooldown={}s",
                         graph.account_prefix,
                         graph.cycle_id,
                         path,
-                        error
+                        error,
+                        failure_count,
+                        cooldown_seconds
                     );
                 }
             }
@@ -163,6 +200,38 @@ fn has_local_changed(current: &LocalSnapshotEntry, previous: Option<&LocalSnapsh
         Some(entry) => entry != current,
         None => true,
     }
+}
+
+fn current_unix_seconds() -> i64 {
+    chrono::Utc::now().timestamp()
+}
+
+fn upload_cooldown_remaining_seconds(sync_state: &PersistedSyncState, path: &str, now: i64) -> Option<i64> {
+    let retry_after = *sync_state.upload_retry_after_by_path.get(path)?;
+    if retry_after <= now {
+        return None;
+    }
+    Some(retry_after - now)
+}
+
+fn clear_upload_failure_cooldown(sync_state: &mut PersistedSyncState, path: &str) {
+    sync_state.upload_failure_counts_by_path.remove(path);
+    sync_state.upload_retry_after_by_path.remove(path);
+}
+
+fn record_upload_failure_cooldown(sync_state: &mut PersistedSyncState, path: &str, now: i64) -> (u32, i64) {
+    let failure_count = sync_state
+        .upload_failure_counts_by_path
+        .entry(path.to_string())
+        .and_modify(|value| *value = value.saturating_add(1))
+        .or_insert(1);
+    let exponent = failure_count.saturating_sub(1).min(10);
+    let cooldown_seconds = 2_i64.saturating_pow(exponent).min(1800);
+    let retry_after = now.saturating_add(cooldown_seconds);
+    sync_state
+        .upload_retry_after_by_path
+        .insert(path.to_string(), retry_after);
+    (*failure_count, cooldown_seconds)
 }
 
 fn remove_local_path(sync_root: &Path, relative_path: &str) -> Result<(), String> {

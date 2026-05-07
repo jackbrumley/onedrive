@@ -324,6 +324,20 @@ async fn process_remote_page_items(
                     .unwrap_or(false);
 
                 if local_changed && !existing.is_dir {
+                    let now = current_unix_seconds();
+                    if let Some(remaining_seconds) =
+                        upload_cooldown_remaining_seconds(sync_state, &existing.path, now)
+                    {
+                        stats.upload_cooldown_skips += 1;
+                        log::info!(
+                            "{} [cycle:{}] REMOTE_DELETE_LOCAL_UPLOAD_COOLDOWN_SKIP path={} retry_in={}s",
+                            graph.account_prefix,
+                            graph.cycle_id,
+                            existing.path,
+                            remaining_seconds
+                        );
+                        continue;
+                    }
                     log::info!(
                         "{} [cycle:{}] REMOTE_DELETE_LOCAL_CHANGED_UPLOAD path={}",
                         graph.account_prefix,
@@ -334,16 +348,21 @@ async fn process_remote_page_items(
                         Ok(uploaded) => {
                             let known = remote_known_item_from_drive_item(uploaded, &existing.path)?;
                             upsert_remote_known_item(sync_state, known);
+                            clear_upload_failure_cooldown(sync_state, &existing.path);
                             stats.uploaded_files += 1;
                         }
                         Err(error) => {
+                            let (failure_count, cooldown_seconds) =
+                                record_upload_failure_cooldown(sync_state, &existing.path, now);
                             stats.upload_failures += 1;
                             log::warn!(
-                                "{} [cycle:{}] REMOTE_DELETE_LOCAL_UPLOAD_FAILED path={} reason={}",
+                                "{} [cycle:{}] REMOTE_DELETE_LOCAL_UPLOAD_FAILED path={} reason={} failures={} cooldown={}s",
                                 graph.account_prefix,
                                 graph.cycle_id,
                                 existing.path,
-                                error
+                                error,
+                                failure_count,
+                                cooldown_seconds
                             );
                         }
                     }
@@ -413,6 +432,20 @@ async fn process_remote_page_items(
             if local_changed {
                 let local_entry = local_current.expect("local_changed implies local entry exists");
                 if local_entry.modified_ts > remote_entry.modified_ts {
+                    let now = current_unix_seconds();
+                    if let Some(remaining_seconds) =
+                        upload_cooldown_remaining_seconds(sync_state, &path, now)
+                    {
+                        stats.upload_cooldown_skips += 1;
+                        log::info!(
+                            "{} [cycle:{}] REMOTE_OLDER_UPLOAD_COOLDOWN_SKIP path={} retry_in={}s",
+                            graph.account_prefix,
+                            graph.cycle_id,
+                            path,
+                            remaining_seconds
+                        );
+                        continue;
+                    }
                     log::info!(
                         "{} [cycle:{}] REMOTE_OLDER_UPLOAD_LOCAL path={} local_ts={} remote_ts={}",
                         graph.account_prefix,
@@ -425,16 +458,21 @@ async fn process_remote_page_items(
                         Ok(uploaded) => {
                             let known = remote_known_item_from_drive_item(uploaded, &path)?;
                             upsert_remote_known_item(sync_state, known);
+                            clear_upload_failure_cooldown(sync_state, &path);
                             stats.uploaded_files += 1;
                         }
                         Err(error) => {
+                            let (failure_count, cooldown_seconds) =
+                                record_upload_failure_cooldown(sync_state, &path, now);
                             stats.upload_failures += 1;
                             log::warn!(
-                                "{} [cycle:{}] REMOTE_OLDER_UPLOAD_FAILED path={} reason={}",
+                                "{} [cycle:{}] REMOTE_OLDER_UPLOAD_FAILED path={} reason={} failures={} cooldown={}s",
                                 graph.account_prefix,
                                 graph.cycle_id,
                                 path,
-                                error
+                                error,
+                                failure_count,
+                                cooldown_seconds
                             );
                         }
                     }

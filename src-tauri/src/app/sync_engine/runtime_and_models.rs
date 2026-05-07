@@ -5,6 +5,7 @@ struct SyncCycleStats {
     downloaded_files: usize,
     uploaded_files: usize,
     upload_failures: usize,
+    upload_cooldown_skips: usize,
     deleted_local: usize,
     deleted_remote: usize,
     created_remote_folders: usize,
@@ -337,6 +338,8 @@ struct PersistedSyncState {
     remote_by_id: HashMap<String, RemoteKnownItem>,
     remote_path_to_id: HashMap<String, String>,
     local_snapshot: HashMap<String, LocalSnapshotEntry>,
+    upload_failure_counts_by_path: HashMap<String, u32>,
+    upload_retry_after_by_path: HashMap<String, i64>,
     last_cycle_at: Option<String>,
 }
 

@@ -97,10 +97,11 @@ async fn tick_sync_cycle(
     update_profile_last_sync(profiles_lock, profile_id)?;
 
     let summary = format!(
-        "Sync cycle complete (downloaded {}, uploaded {}, upload failures {}, remote deletes {}, local deletes {}, remote pages {}, remote items {}, remote missing skips {}, local items {})",
+        "Sync cycle complete (downloaded {}, uploaded {}, upload failures {}, upload cooldown skips {}, remote deletes {}, local deletes {}, remote pages {}, remote items {}, remote missing skips {}, local items {})",
         stats.downloaded_files,
         stats.uploaded_files,
         stats.upload_failures,
+        stats.upload_cooldown_skips,
         stats.deleted_remote,
         stats.deleted_local,
         stats.remote_pages,
