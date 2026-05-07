@@ -1,0 +1,52 @@
+.page h2 {
+  margin: 0 0 4px;
+  color: var(--titlebar-solid);
+  text-align: center;
+}
+
+.page-header {
+  position: relative;
+  margin: 0 0 10px;
+}
+
+.page-header h2 {
+  margin: 0;
+  text-align: center;
+}
+
+.page-header-action {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.settings-title {
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.page-subtitle {
+  margin: 0 0 12px;
+  color: var(--text-muted);
+}
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+  box-shadow: 0 8px 20px rgba(24, 39, 75, 0.08);
+}
+
+.card h3,
+.card h4 {
+  margin-top: 0;
+  color: var(--titlebar-solid);
+}
+
+.card-error {
+  border-color: #e8a8b7;
+  background: #fff1f4;
+}

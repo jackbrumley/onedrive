@@ -1,0 +1,49 @@
+:root {
+  --font-main: "IBM Plex Sans", "Noto Sans", sans-serif;
+  --bg-page: #e9edf3;
+  --bg-surface: #f4f7fb;
+  --bg-card: #f7f9fc;
+  --bg-elevated: #eef3f9;
+  --line-soft: #cfd9e5;
+  --line-strong: #bdc9d8;
+  --text-main: #1d2735;
+  --text-muted: #667a92;
+
+  --brand-primary: #1d4ed8;
+  --brand-strong: #1a57d3;
+  --brand-highlight: #22c1c3;
+  --brand-soft: #0891b2;
+  --brand-on-color: #ffffff;
+  --brand-gradient: linear-gradient(to top right, #0891b2 0%, #1a57d3 54%, #1d4ed8 100%);
+  --success-gradient: linear-gradient(145deg, #28c268 0%, #22a857 100%);
+
+  --titlebar-bg-start: #141a24;
+  --titlebar-bg-end: #0d121b;
+  --titlebar-solid: #1475c6;
+  --titlebar-text: #ffffff;
+
+  --top-control-bg: rgba(255, 255, 255, 0.18);
+  --top-control-bg-hover: rgba(255, 255, 255, 0.3);
+  --top-control-border: rgba(255, 255, 255, 0.32);
+  --top-control-text: #ffffff;
+  --top-control-active-border: rgba(255, 255, 255, 0.3);
+
+  --control-muted-bg: #eef3f9;
+  --control-muted-bg-hover: #e5edf7;
+  --control-muted-border: #c7d3e2;
+  --control-muted-text: #2b3c54;
+  --control-selected-border: rgba(29, 78, 216, 0.35);
+  --focus-ring: rgba(34, 193, 195, 0.25);
+
+  --field-bg: #f9fbfe;
+  --field-bg-elevated: #ffffff;
+  --field-border: #c7d3e2;
+  --field-border-hover: #9fb3cc;
+
+  --danger-strong: #ba3a58;
+  --danger-border: #b43853;
+
+  --success: #28c268;
+  --success-strong: #22a857;
+  --danger: #d54d69;
+}
