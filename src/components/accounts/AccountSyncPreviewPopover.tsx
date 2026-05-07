@@ -10,7 +10,14 @@ import type { SyncRuntimeAccountStatus } from "../../types/somedrive";
 interface AccountSyncPreviewPopoverProps {
   runtimeStatus: SyncRuntimeAccountStatus | null;
   errorMessage: string | null;
+  issueKind: "auth_required" | "sync_error" | null;
+  issueActions: string[];
+  issuePath: string | null;
+  issueSecondaryPath: string | null;
   onOpenItemFolder: (relativePath: string) => Promise<void>;
+  onOpenSyncRootFolder: () => Promise<void>;
+  onReauthenticate: () => Promise<unknown>;
+  onRetrySync: () => Promise<void>;
   placement: "top" | "bottom";
   visible: boolean;
 }
@@ -61,7 +68,14 @@ function relativeUpdatedAt(updatedAt: string): string {
 export function AccountSyncPreviewPopover({
   runtimeStatus,
   errorMessage,
+  issueKind,
+  issueActions,
+  issuePath,
+  issueSecondaryPath,
   onOpenItemFolder,
+  onOpenSyncRootFolder,
+  onReauthenticate,
+  onRetrySync,
   placement,
   visible,
 }: AccountSyncPreviewPopoverProps) {
@@ -118,21 +132,109 @@ export function AccountSyncPreviewPopover({
     return <IconDownload size={14} class={className} />;
   };
 
+  const conflictTargetPath = issueSecondaryPath ?? issuePath;
+  const hasConflictAction = issueActions.includes("open_conflict") && Boolean(conflictTargetPath);
+  const popoverClassName = `account-sync-preview-popover ${
+    placement === "top" ? "account-sync-preview-popover-top" : "account-sync-preview-popover-bottom"
+  }${visible ? " account-sync-preview-popover-visible" : ""}${hasConflictAction ? " account-sync-preview-popover-conflict" : ""}`;
+
   if (errorMessage) {
     return (
       <div
-        class={`account-sync-preview-popover ${placement === "top" ? "account-sync-preview-popover-top" : "account-sync-preview-popover-bottom"}${visible ? " account-sync-preview-popover-visible" : ""}`}
+        class={popoverClassName}
         role="dialog"
         aria-label="Sync activity preview"
       >
         <p class="account-sync-preview-subtitle">{errorMessage}</p>
+        <div class="account-sync-preview-actions">
+          {issueActions.includes("reauthenticate") && issueKind === "auth_required" && (
+            <button
+              type="button"
+              class="account-sync-preview-action-btn"
+              onClick={(event) => {
+                event.stopPropagation();
+                void onReauthenticate();
+              }}
+            >
+              Re-authenticate
+            </button>
+          )}
+          {issueActions.includes("open_sync_root") && (
+            <button
+              type="button"
+              class="account-sync-preview-action-btn"
+              onClick={(event) => {
+                event.stopPropagation();
+                void onOpenSyncRootFolder();
+              }}
+            >
+              Open Sync Folder
+            </button>
+          )}
+          {hasConflictAction && (
+            <button
+              type="button"
+              class="account-sync-preview-action-btn account-sync-preview-action-btn-conflict"
+              onClick={(event) => {
+                event.stopPropagation();
+                void onOpenItemFolder(conflictTargetPath!);
+              }}
+            >
+              Open Conflict
+            </button>
+          )}
+          {issueActions.includes("retry_sync") && (
+            <button
+              type="button"
+              class="account-sync-preview-action-btn"
+              onClick={(event) => {
+                event.stopPropagation();
+                void onRetrySync();
+              }}
+            >
+              Retry Sync
+            </button>
+          )}
+        </div>
+        {recentFailed.length > 0 && (
+          <div class="account-sync-preview-list account-sync-preview-list-errors">
+            {recentFailed.map((item) => (
+              <article key={item.id} class="account-sync-preview-item">
+                <button
+                  type="button"
+                  class="account-sync-preview-item-button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void onOpenItemFolder(item.path);
+                  }}
+                >
+                  <div class="account-sync-preview-row">
+                    <span class="account-sync-preview-status-icon">
+                      <IconAlertCircle size={14} class="sync-preview-icon-error" />
+                    </span>
+                    <span class="account-sync-preview-direction-icon">
+                      {iconForDirection(item.direction)}
+                    </span>
+                    <div class="account-sync-preview-content">
+                      <p class="account-sync-preview-path">{item.path}</p>
+                      <p class="account-sync-preview-meta">
+                        <span>{item.error ?? "Transfer failed"}</span>
+                        <span>{new Date(item.finishedAt).toLocaleTimeString()}</span>
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              </article>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
 
   return (
     <div
-      class={`account-sync-preview-popover ${placement === "top" ? "account-sync-preview-popover-top" : "account-sync-preview-popover-bottom"}${visible ? " account-sync-preview-popover-visible" : ""}`}
+      class={popoverClassName}
       role="dialog"
       aria-label="Sync activity preview"
     >

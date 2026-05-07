@@ -456,6 +456,15 @@ body {
   transform: translateY(0);
 }
 
+.account-sync-preview-popover-conflict {
+  border-color: #e3b76d;
+  box-shadow: 0 14px 28px rgba(125, 86, 26, 0.22);
+}
+
+.account-sync-preview-popover-conflict .account-sync-preview-subtitle {
+  color: #8a5a12;
+}
+
 .account-sync-preview-subtitle {
   margin: 0 0 6px;
   color: var(--text-muted);
@@ -468,18 +477,45 @@ body {
   font-size: 0.8rem;
 }
 
+.account-sync-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.account-sync-preview-action-btn {
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 0.74rem;
+  line-height: 1;
+}
+
+.account-sync-preview-action-btn-conflict {
+  background: #d88924;
+}
+
+.account-sync-preview-action-btn-conflict:hover {
+  background: #c47719;
+}
+
 .account-sync-preview-list {
   display: grid;
-  gap: 4px;
+  gap: 0;
   max-height: 250px;
   overflow: auto;
 }
 
+.account-sync-preview-list-errors {
+  max-height: 150px;
+}
+
 .account-sync-preview-item {
-  border: 1px solid #d6e2f1;
-  border-radius: 7px;
-  background: #f7fbff;
-  padding: 5px 6px;
+  margin: 0;
+}
+
+.account-sync-preview-item:not(:last-child) {
+  border-bottom: 1px solid #d9e5f3;
 }
 
 .account-sync-preview-item-button {
@@ -488,12 +524,12 @@ body {
   border: none;
   background: transparent;
   color: inherit;
-  padding: 0;
-  border-radius: 6px;
+  padding: 5px 2px;
+  border-radius: 4px;
 }
 
 .account-sync-preview-item-button:hover {
-  background: rgba(29, 78, 216, 0.06);
+  background: rgba(29, 78, 216, 0.08);
 }
 
 .account-sync-preview-item-button:focus-visible {

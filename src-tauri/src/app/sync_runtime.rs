@@ -35,6 +35,11 @@ pub struct SyncRuntimeAccountStatus {
     pub profile_id: String,
     pub phase: String,
     pub phase_message: String,
+    pub issue_code: Option<String>,
+    pub issue_message: Option<String>,
+    pub issue_actions: Vec<String>,
+    pub issue_path: Option<String>,
+    pub issue_secondary_path: Option<String>,
     pub in_progress: Vec<SyncRuntimeTransfer>,
     pub recent_completed: Vec<SyncRuntimeRecentItem>,
     pub recent_failed: Vec<SyncRuntimeRecentItem>,
@@ -48,6 +53,11 @@ impl SyncRuntimeAccountStatus {
             profile_id: profile_id.to_string(),
             phase: "idle".to_string(),
             phase_message: "Idle".to_string(),
+            issue_code: None,
+            issue_message: None,
+            issue_actions: Vec::new(),
+            issue_path: None,
+            issue_secondary_path: None,
             in_progress: Vec::new(),
             recent_completed: Vec::new(),
             recent_failed: Vec::new(),
@@ -83,6 +93,37 @@ pub fn set_phase(
     let status = ensure_account_status(runtime_map, profile_id);
     status.phase = phase.to_string();
     status.phase_message = phase_message.to_string();
+    status.updated_at = now_rfc3339();
+}
+
+pub fn set_issue(
+    runtime_map: &mut SyncRuntimeMap,
+    profile_id: &str,
+    issue_code: &str,
+    issue_message: &str,
+    issue_actions: &[&str],
+    issue_path: Option<&str>,
+    issue_secondary_path: Option<&str>,
+) {
+    let status = ensure_account_status(runtime_map, profile_id);
+    status.issue_code = Some(issue_code.to_string());
+    status.issue_message = Some(issue_message.to_string());
+    status.issue_actions = issue_actions
+        .iter()
+        .map(|action| (*action).to_string())
+        .collect();
+    status.issue_path = issue_path.map(|value| value.to_string());
+    status.issue_secondary_path = issue_secondary_path.map(|value| value.to_string());
+    status.updated_at = now_rfc3339();
+}
+
+pub fn clear_issue(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
+    let status = ensure_account_status(runtime_map, profile_id);
+    status.issue_code = None;
+    status.issue_message = None;
+    status.issue_actions.clear();
+    status.issue_path = None;
+    status.issue_secondary_path = None;
     status.updated_at = now_rfc3339();
 }
 

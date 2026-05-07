@@ -35,6 +35,8 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
           onOpenAccount={runtime.openAccount}
           onOpenSyncRootFolder={runtime.openAccountSyncRootFolder}
           onOpenItemFolder={runtime.openAccountItemFolder}
+          onReauthenticate={runtime.startInteractiveAuth}
+          onRetrySync={runtime.retryAccountSync}
         />
       )}
       renderAccountDetail={() => (

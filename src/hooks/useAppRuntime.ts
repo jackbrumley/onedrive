@@ -293,6 +293,16 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     }
   };
 
+  const retryAccountSync = async (profileId: string) => {
+    const input: SetAccountAgentStateInput = { id: profileId, agentState: "syncing" };
+    try {
+      await invoke("set_account_agent_state", { input });
+      await Promise.all([refreshStatus(), refreshActivity(), refreshSyncRuntime()]);
+    } catch (error) {
+      showToast(`Failed to retry sync: ${error}`, "error", 3200);
+    }
+  };
+
   useEffect(() => {
     const syncRoute = () => setRouteState(routeStateFromHash(window.location.hash));
     let isDisposed = false;
@@ -355,5 +365,6 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     openSessionLog,
     openAccountSyncRootFolder,
     openAccountItemFolder,
+    retryAccountSync,
   };
 }

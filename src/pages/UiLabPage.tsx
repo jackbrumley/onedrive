@@ -123,6 +123,11 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
         profileId: "lab-1",
         phase: "syncing",
         phaseMessage: "Syncing 2 files",
+        issueCode: null,
+        issueMessage: null,
+        issueActions: [],
+        issuePath: null,
+        issueSecondaryPath: null,
         updatedAt: new Date().toISOString(),
         inProgress: [
           {
@@ -170,6 +175,11 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
         profileId: "lab-2",
         phase: "paused",
         phaseMessage: "Synchronization paused",
+        issueCode: null,
+        issueMessage: null,
+        issueActions: [],
+        issuePath: null,
+        issueSecondaryPath: null,
         updatedAt: new Date().toISOString(),
         inProgress: [],
         recentCompleted: [],
@@ -179,6 +189,11 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
         profileId: "lab-3",
         phase: "error",
         phaseMessage: "Sync error: authentication required",
+        issueCode: "auth_required",
+        issueMessage: "Authentication required",
+        issueActions: ["reauthenticate", "retry_sync"],
+        issuePath: null,
+        issueSecondaryPath: null,
         updatedAt: new Date().toISOString(),
         inProgress: [],
         recentCompleted: [],
@@ -233,6 +248,8 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
                   }}
                   onOpenSyncRootFolder={async () => undefined}
                   onOpenItemFolder={async () => undefined}
+                  onReauthenticate={async () => undefined}
+                  onRetrySync={async () => undefined}
                 />
               ))}
             </div>

@@ -100,6 +100,11 @@ export interface SyncRuntimeAccountStatus {
   profileId: string;
   phase: string;
   phaseMessage: string;
+  issueCode: string | null;
+  issueMessage: string | null;
+  issueActions: string[];
+  issuePath: string | null;
+  issueSecondaryPath: string | null;
   inProgress: SyncRuntimeTransfer[];
   recentCompleted: SyncRuntimeRecentItem[];
   recentFailed: SyncRuntimeRecentItem[];

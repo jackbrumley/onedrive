@@ -34,12 +34,14 @@ pub fn on_agent_state_changed(
     );
     if agent_state == "syncing" {
         let _ = set_cancel_flag(state, profile_id, false)?;
+        runtime_clear_issue(&state.sync_runtime, profile_id);
         start_sync_worker(state, profile_id)?;
     } else {
         let _ = set_cancel_flag(state, profile_id, true)?;
         stop_sync_worker(state, profile_id)?;
         if let Ok(mut runtime_map) = state.sync_runtime.lock() {
             sync_runtime::clear_in_progress(&mut runtime_map, profile_id);
+            sync_runtime::clear_issue(&mut runtime_map, profile_id);
             let (phase, message) = if agent_state == "paused" {
                 ("paused", "Synchronization paused")
             } else {
@@ -82,6 +84,7 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                 "syncing",
                 "Preparing next sync cycle",
             );
+            sync_runtime::clear_issue(&mut runtime_map, &profile_id_owned);
         }
         tauri::async_runtime::spawn(async move {
             let mut ticker = tokio::time::interval(std::time::Duration::from_secs(15));
@@ -156,6 +159,7 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                                     }
                                     continue;
                                 }
+                                let (issue_code, issue_actions) = classify_sync_issue(&error);
                                 log::error!(
                                     "{} SYNC_CYCLE_FAILED {}",
                                     log_context::account_prefix(&profile_id_owned),
@@ -168,6 +172,15 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                                         &profile_id_owned,
                                         "error",
                                         &format!("Sync error: {}", error),
+                                    );
+                                    sync_runtime::set_issue(
+                                        &mut runtime_map,
+                                        &profile_id_owned,
+                                        issue_code,
+                                        &error,
+                                        issue_actions,
+                                        None,
+                                        None,
                                     );
                                 }
                                 let _ = activity_log::append_event(
@@ -350,6 +363,67 @@ fn runtime_set_phase(
 ) {
     if let Ok(mut runtime_map) = runtime.lock() {
         sync_runtime::set_phase(&mut runtime_map, profile_id, phase, phase_message);
+    }
+}
+
+fn runtime_clear_issue(runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>, profile_id: &str) {
+    if let Ok(mut runtime_map) = runtime.lock() {
+        sync_runtime::clear_issue(&mut runtime_map, profile_id);
+    }
+}
+
+fn classify_sync_issue(error: &str) -> (&'static str, &'static [&'static str]) {
+    let normalized = error.to_lowercase();
+    if normalized.contains("re-authentication")
+        || normalized.contains("not authenticated")
+        || normalized.contains("access token is empty")
+        || normalized.contains("401")
+    {
+        return ("auth_required", &["reauthenticate", "retry_sync"]);
+    }
+    if normalized.contains("429") || normalized.contains("too many requests") {
+        return ("rate_limited", &["retry_sync"]);
+    }
+    if normalized.contains("permission denied") || normalized.contains("403") {
+        return ("permission_denied", &["open_sync_root", "retry_sync"]);
+    }
+    if normalized.contains("no space left") || normalized.contains("disk full") {
+        return ("disk_full", &["open_sync_root", "retry_sync"]);
+    }
+    if normalized.contains("sync root") {
+        return ("sync_root_unavailable", &["open_sync_root", "retry_sync"]);
+    }
+    if normalized.contains("conflict") || normalized.contains("safebackup") {
+        return (
+            "conflict_detected",
+            &["open_conflict", "open_sync_root", "retry_sync"],
+        );
+    }
+    if normalized.contains("network")
+        || normalized.contains("connection")
+        || normalized.contains("timed out")
+        || normalized.contains("dns")
+    {
+        return ("network_unavailable", &["retry_sync"]);
+    }
+    ("unknown_error", &["retry_sync"])
+}
+
+fn relative_path_for_issue(sync_root: &Path, candidate: &Path) -> Option<String> {
+    let relative = candidate.strip_prefix(sync_root).ok()?;
+    let mut output = String::new();
+    for component in relative.components() {
+        if let std::path::Component::Normal(segment) = component {
+            if !output.is_empty() {
+                output.push('/');
+            }
+            output.push_str(&segment.to_string_lossy());
+        }
+    }
+    if output.is_empty() {
+        None
+    } else {
+        Some(output)
     }
 }
 
@@ -867,6 +941,18 @@ async fn apply_remote_changes(
                         local_abs.display(),
                         backup_path.display()
                     );
+                    let conflict_backup_relative = relative_path_for_issue(sync_root, &backup_path);
+                    if let Ok(mut runtime_map) = graph.sync_runtime.lock() {
+                        sync_runtime::set_issue(
+                            &mut runtime_map,
+                            &graph.profile_id,
+                            "conflict_detected",
+                            "Conflict detected. A safe backup was created.",
+                            &["open_conflict", "open_sync_root", "retry_sync"],
+                            Some(&path),
+                            conflict_backup_relative.as_deref(),
+                        );
+                    }
                 }
             }
 

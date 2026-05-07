@@ -21,6 +21,8 @@ interface AccountCardProps {
   onOpenDetails: (accountId: string) => void;
   onOpenSyncRootFolder: (accountId: string) => Promise<void>;
   onOpenItemFolder: (accountId: string, relativePath: string) => Promise<void>;
+  onReauthenticate: (accountId: string) => Promise<unknown>;
+  onRetrySync: (accountId: string) => Promise<void>;
 }
 
 export function AccountCard({
@@ -29,6 +31,8 @@ export function AccountCard({
   onOpenDetails,
   onOpenSyncRootFolder,
   onOpenItemFolder,
+  onReauthenticate,
+  onRetrySync,
 }: AccountCardProps) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewPosition, setPreviewPosition] = useState<{
@@ -130,10 +134,21 @@ export function AccountCard({
 
   const lastSyncLabel = account.lastSyncAt ? new Date(account.lastSyncAt).toLocaleString() : "Never";
   const accountIcon = account.kind === "business" ? <IconBuildingBank size={16} /> : <IconUser size={16} />;
-  const hasSyncIssue = !account.authConfigured || account.agentState === "error" || runtimeStatus?.phase === "error";
-  const syncIssueMessage = !account.authConfigured
-    ? "Authentication required"
-    : runtimeStatus?.phaseMessage ?? "Synchronization blocked";
+  const runtimeIssueCode = runtimeStatus?.issueCode ?? null;
+  const hasSyncIssue =
+    !account.authConfigured || runtimeIssueCode !== null || account.agentState === "error" || runtimeStatus?.phase === "error";
+  const syncIssueMessage =
+    runtimeStatus?.issueMessage ??
+    (!account.authConfigured ? "Authentication required" : runtimeStatus?.phaseMessage ?? "Synchronization blocked");
+  const issueKind = !account.authConfigured || runtimeIssueCode === "auth_required" ? "auth_required" : hasSyncIssue ? "sync_error" : null;
+  const issueActions =
+    runtimeStatus?.issueActions.length
+      ? runtimeStatus.issueActions
+      : issueKind === "auth_required"
+        ? ["reauthenticate", "retry_sync"]
+        : issueKind === "sync_error"
+          ? ["retry_sync"]
+          : [];
   const syncButtonClass = hasSyncIssue
     ? "account-sync-nav-btn account-sync-nav-btn-warning"
     : account.agentState === "syncing"
@@ -236,7 +251,14 @@ export function AccountCard({
             <AccountSyncPreviewPopover
               runtimeStatus={runtimeStatus}
               errorMessage={hasSyncIssue ? syncIssueMessage : null}
+              issueKind={issueKind}
+              issueActions={issueActions}
+              issuePath={runtimeStatus?.issuePath ?? null}
+              issueSecondaryPath={runtimeStatus?.issueSecondaryPath ?? null}
               onOpenItemFolder={(relativePath) => onOpenItemFolder(account.id, relativePath)}
+              onOpenSyncRootFolder={() => onOpenSyncRootFolder(account.id)}
+              onReauthenticate={() => onReauthenticate(account.id)}
+              onRetrySync={() => onRetrySync(account.id)}
               placement={previewPosition?.placement ?? "bottom"}
               visible={previewPosition !== null}
             />
