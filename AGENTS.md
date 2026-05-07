@@ -68,14 +68,14 @@ Managed via **npm** scripts and the Tauri CLI.
 - **Tauri CLI:** `npm run tauri -- <command>`
   - Use for tauri-specific tasks like `tauri icon` or `tauri info`.
 
-### Backend (src/)
+### Backend (`src-tauri/`)
 - **Lint:** `cargo clippy` (Static analysis) and `cargo fmt` (Formatting).
 - **Check:** `cargo check` (Fast compilation check).
 - **Test:** `cargo test` (Run all tests).
 - **Single Test:** `cargo test -- <name>` (Execute a specific test function).
 - **Doc:** `cargo doc --open` (Generate and view crate documentation).
 
-### Frontend (src/ui/)
+### Frontend (`src/`)
 - **Type Check:** `npm run typecheck`
   - Essential for verifying TypeScript integrity.
 - **Lint:** `npm run lint`
@@ -98,10 +98,18 @@ Managed via **npm** scripts and the Tauri CLI.
 
 ### 2. Frontend (Preact)
 - **Strict TypeScript:** No `any`. Explicit interfaces for all data structures (API responses, State slices).
-- **Hooks over Classes:** Use functional components and custom hooks (in `src/ui/src/hooks/`) for logic isolation.
-- **Styles (Current Convention):** Prefer component-local inline style objects with design tokens for layout, spacing, and color. Use global CSS (`index.css`) for resets, root-level variables, and truly global concerns only.
-- **Style Consistency:** When touching existing UI, follow the style approach already used in that component/file. Do not introduce a separate styling pattern unless there is a clear architectural reason.
+- **Hooks over Classes:** Use functional components and custom hooks (in `src/hooks/`) for logic isolation.
+- **Styles:** Keep `src/styles.css` as an import aggregator only. Split style concerns into focused files under `src/styles/` (shell, pages, accounts, forms, sync, toast, etc.).
+- **Component Styling:** Prefer local style ownership by concern; avoid adding new rules to a giant catch-all stylesheet.
 - **Tauri Core:** Use `@tauri-apps/api` for communication with the backend.
+
+### 3. Structure Contracts (Enforced)
+- **File Size Ceiling:** No `.rs`, `.ts`, `.tsx`, or `.css` source file may exceed **1000 lines**.
+- **Soft Size Target:** Most files should stay below 400-600 lines unless there is a clear, justified reason.
+- **Main Wiring Only (Rust):** `src-tauri/src/main.rs` is bootstrap-only and must contain no domain/business logic.
+- **Main Wiring Only (Frontend Entry):** `src/main.tsx` is entry wiring only.
+- **App Composition Only:** `src/App.tsx` composes shell/layout/hooks and should not hold feature/business logic.
+- **Backend Composition Point:** Register Tauri commands in `src-tauri/src/lib.rs`; keep command implementations in `src-tauri/src/app/commands/` and domain logic in focused app modules.
 
 ---
 
@@ -122,7 +130,7 @@ On Wayland, the app should trigger standard XDG Portal prompts for microphone, g
 When adding a new feature, follow this sequence:
 1.  **Analyze Environment:** Check for platform-specific constraints (Wayland and X11 where relevant).
 2.  **Scaffold Backend:** Implement the logic in a new or existing Rust module.
-3.  **Expose Command:** Create a `#[tauri::command]` and register it in `main.rs`.
+3.  **Expose Command:** Create a `#[tauri::command]` in `src-tauri/src/app/commands/` and register it in `src-tauri/src/lib.rs`.
 4.  **Implement UI:** Create the Preact component and hook it up to the command using `invoke`.
 5.  **Verify Integrity:** Run `cargo clippy`, `npm run typecheck`, and `npm run lint`.
 6.  **Test Platform Parity:** Verify the feature works on Linux (Wayland and X11) and Windows.
@@ -132,9 +140,9 @@ When adding a new feature, follow this sequence:
 ## 🚧 High-Priority Architectural Fixes (Current Debt)
 
 Any agent working on this repo should prioritize the following cleanups:
-1.  **Redundant Nesting:** The `src/src` structure is messy and redundant. We aim to flatten this into a logical `/backend` and `/frontend` structure while keeping the Tauri root clean.
-2.  **NPM/Cargo Synergy:** Keep frontend and Tauri script orchestration in npm, and Rust build logic in Cargo/Tauri.
-3.  **Local Whisper Integration:** Follow the roadmap in `src/LOCAL_WHISPER_INTEGRATION_PLAN.md` if working on transcription features. Ensure model management is clean and asynchronous.
+1.  **Large Backend Module Split:** Break down `src-tauri/src/app/sync_engine.rs` into focused modules (worker, cycle, graph client, remote/local apply, runtime updates, state persistence).
+2.  **Large Stylesheet Split:** Keep `src/styles.css` as an import-only entry and move rules into focused style files under `src/styles/`.
+3.  **Runtime Hook Decomposition:** Keep `src/hooks/useAppRuntime.ts` as an orchestrator facade while moving concerns into focused hooks/modules.
 
 ---
 
