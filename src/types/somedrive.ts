@@ -116,6 +116,7 @@ export interface SyncRuntimeAccountStatus {
 
 export interface SyncRuntimeSnapshot {
   generatedAt: string;
+  revision: number;
   accounts: SyncRuntimeAccountStatus[];
 }
 

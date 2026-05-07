@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import { routeStateFromHash, type AppRouteState } from "../routes/appRoutes";
 import type {
   ActivityEvent,
@@ -30,6 +30,7 @@ const initialStatus: AppStatusSnapshot = {
 
 const initialSyncRuntime: SyncRuntimeSnapshot = {
   generatedAt: new Date(0).toISOString(),
+  revision: 0,
   accounts: [],
 };
 
@@ -56,25 +57,33 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
   const [autostartEnabled, setAutostartEnabled] = useState(false);
   const [rawLoggerMode, setRawLoggerMode] = useState(false);
 
-  const navigation = createNavigationActions({ setRouteState });
-  const refreshActions = createRefreshActions({
-    showToast,
-    setStatus,
-    setActivityEvents,
-    setSyncRuntime,
-    setCheckingUpdates,
-    setUpdateResult,
-    setUpdateError,
-    setLastCheckedAt,
-  });
-  const accountActions = createAccountActions({
-    showToast,
-    refreshStatus: refreshActions.refreshStatus,
-    refreshActivity: refreshActions.refreshActivity,
-    refreshSyncRuntime: refreshActions.refreshSyncRuntime,
-    openAccount: navigation.openAccount,
-  });
-  const systemActions = createSystemActions({ showToast });
+  const navigation = useMemo(() => createNavigationActions({ setRouteState }), [setRouteState]);
+  const refreshActions = useMemo(
+    () =>
+      createRefreshActions({
+        showToast,
+        setStatus,
+        setActivityEvents,
+        setSyncRuntime,
+        setCheckingUpdates,
+        setUpdateResult,
+        setUpdateError,
+        setLastCheckedAt,
+      }),
+    [showToast]
+  );
+  const accountActions = useMemo(
+    () =>
+      createAccountActions({
+        showToast,
+        refreshStatus: refreshActions.refreshStatus,
+        refreshActivity: refreshActions.refreshActivity,
+        refreshSyncRuntime: refreshActions.refreshSyncRuntime,
+        openAccount: navigation.openAccount,
+      }),
+    [navigation.openAccount, refreshActions.refreshActivity, refreshActions.refreshStatus, refreshActions.refreshSyncRuntime, showToast]
+  );
+  const systemActions = useMemo(() => createSystemActions({ showToast }), [showToast]);
 
   useEffect(() => {
     const syncRoute = () => setRouteState(routeStateFromHash(window.location.hash));

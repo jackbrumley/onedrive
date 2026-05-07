@@ -1,9 +1,11 @@
 use chrono::Local;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const RECENT_COMPLETED_LIMIT: usize = 120;
 const RECENT_FAILED_LIMIT: usize = 120;
+static SYNC_RUNTIME_REVISION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,6 +78,7 @@ impl SyncRuntimeAccountStatus {
 #[serde(rename_all = "camelCase")]
 pub struct SyncRuntimeSnapshot {
     pub generated_at: String,
+    pub revision: u64,
     pub accounts: Vec<SyncRuntimeAccountStatus>,
 }
 
@@ -86,6 +89,7 @@ pub fn snapshot(runtime_map: &SyncRuntimeMap) -> SyncRuntimeSnapshot {
     accounts.sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
     SyncRuntimeSnapshot {
         generated_at: now_rfc3339(),
+        revision: current_runtime_revision(),
         accounts,
     }
 }
@@ -100,6 +104,7 @@ pub fn set_phase(
     status.phase = phase.to_string();
     status.phase_message = phase_message.to_string();
     status.updated_at = now_rfc3339();
+    bump_runtime_revision();
 }
 
 pub fn set_issue(
@@ -121,6 +126,7 @@ pub fn set_issue(
     status.issue_path = issue_path.map(|value| value.to_string());
     status.issue_secondary_path = issue_secondary_path.map(|value| value.to_string());
     status.updated_at = now_rfc3339();
+    bump_runtime_revision();
 }
 
 pub fn clear_issue(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
@@ -131,6 +137,7 @@ pub fn clear_issue(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
     status.issue_path = None;
     status.issue_secondary_path = None;
     status.updated_at = now_rfc3339();
+    bump_runtime_revision();
 }
 
 pub fn set_remote_transfer_progress(
@@ -145,6 +152,7 @@ pub fn set_remote_transfer_progress(
     status.remote_download_queue_count = download_queue_count;
     status.remote_downloaded_count = downloaded_count;
     status.updated_at = now_rfc3339();
+    bump_runtime_revision();
 }
 
 pub fn start_transfer(
@@ -167,6 +175,7 @@ pub fn start_transfer(
         updated_at: now,
     });
     status.updated_at = now_rfc3339();
+    bump_runtime_revision();
     transfer_id
 }
 
@@ -190,6 +199,7 @@ pub fn update_transfer_progress(
         transfer.updated_at = now_rfc3339();
     }
     status.updated_at = now_rfc3339();
+    bump_runtime_revision();
 }
 
 pub fn finish_transfer_success(
@@ -215,6 +225,7 @@ pub fn finish_transfer_success(
             status.recent_completed.truncate(RECENT_COMPLETED_LIMIT);
         }
         status.updated_at = now_rfc3339();
+        bump_runtime_revision();
     }
 }
 
@@ -242,6 +253,7 @@ pub fn finish_transfer_error(
             status.recent_failed.truncate(RECENT_FAILED_LIMIT);
         }
         status.updated_at = now_rfc3339();
+        bump_runtime_revision();
     }
 }
 
@@ -249,10 +261,12 @@ pub fn clear_in_progress(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
     let status = ensure_account_status(runtime_map, profile_id);
     status.in_progress.clear();
     status.updated_at = now_rfc3339();
+    bump_runtime_revision();
 }
 
 pub fn remove_account(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
     runtime_map.remove(profile_id);
+    bump_runtime_revision();
 }
 
 fn remove_transfer(
@@ -284,4 +298,12 @@ fn now_rfc3339() -> String {
 fn new_runtime_id(prefix: &str) -> String {
     let nanos = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
     format!("{}-{}", prefix, nanos)
+}
+
+fn bump_runtime_revision() {
+    SYNC_RUNTIME_REVISION.fetch_add(1, Ordering::Relaxed);
+}
+
+fn current_runtime_revision() -> u64 {
+    SYNC_RUNTIME_REVISION.load(Ordering::Relaxed)
 }

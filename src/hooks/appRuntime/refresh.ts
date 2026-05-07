@@ -18,13 +18,6 @@ interface RefreshFactoryParams {
   setLastCheckedAt: (value: number | null) => void;
 }
 
-function syncRuntimeAccountsEqual(left: SyncRuntimeSnapshot, right: SyncRuntimeSnapshot): boolean {
-  if (left.accounts.length !== right.accounts.length) {
-    return false;
-  }
-  return JSON.stringify(left.accounts) === JSON.stringify(right.accounts);
-}
-
 export function createRefreshActions({
   showToast,
   setStatus,
@@ -56,7 +49,7 @@ export function createRefreshActions({
   const refreshSyncRuntime = async () => {
     try {
       const snapshot = await invoke<SyncRuntimeSnapshot>("get_sync_runtime_snapshot");
-      setSyncRuntime((current) => (syncRuntimeAccountsEqual(current, snapshot) ? current : snapshot));
+      setSyncRuntime((current) => (current.revision === snapshot.revision ? current : snapshot));
     } catch {
       // runtime telemetry is best-effort for now
     }
