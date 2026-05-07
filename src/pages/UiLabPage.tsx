@@ -246,6 +246,9 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
                   onOpenDetails={(accountId) => {
                     setSelectedLabAccountId(accountId);
                   }}
+                  onSetAgentState={async (accountId, nextState) => {
+                    setLabAgentStateById((current) => ({ ...current, [accountId]: nextState }));
+                  }}
                   onOpenSyncRootFolder={async () => undefined}
                   onOpenItemFolder={async () => undefined}
                   onReauthenticate={async () => undefined}

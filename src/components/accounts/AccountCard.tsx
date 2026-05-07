@@ -3,6 +3,7 @@ import {
   IconBuildingBank,
   IconFolder,
   IconPlayerPauseFilled,
+  IconPlayerPlayFilled,
   IconRefresh,
   IconUser,
 } from "@tabler/icons-preact";
@@ -44,6 +45,7 @@ interface AccountCardProps {
   account: AccountProfile;
   runtimeStatus: SyncRuntimeAccountStatus | null;
   onOpenDetails: (accountId: string) => void;
+  onSetAgentState: (accountId: string, state: "syncing" | "paused") => Promise<void>;
   onOpenSyncRootFolder: (accountId: string) => Promise<void>;
   onOpenItemFolder: (accountId: string, relativePath: string) => Promise<void>;
   onReauthenticate: (accountId: string) => Promise<unknown>;
@@ -54,6 +56,7 @@ export function AccountCard({
   account,
   runtimeStatus,
   onOpenDetails,
+  onSetAgentState,
   onOpenSyncRootFolder,
   onOpenItemFolder,
   onReauthenticate,
@@ -68,6 +71,7 @@ export function AccountCard({
   const closePreviewTimerRef = useRef<number | null>(null);
   const previewAnchorRef = useRef<HTMLDivElement | null>(null);
   const previewFloatingRef = useRef<HTMLDivElement | null>(null);
+  const [syncButtonHovered, setSyncButtonHovered] = useState(false);
 
   const clearClosePreviewTimer = () => {
     if (closePreviewTimerRef.current !== null) {
@@ -181,9 +185,20 @@ export function AccountCard({
     isSyncPhaseActive(runtimeStatus?.phase);
   const issueCount = recentIssueCount(runtimeStatus) + (hasBlockingIssue ? 1 : 0);
   const showIssueBadge = issueCount > 0;
-  const syncButtonClass = hasBlockingIssue && !syncActive
+  const showBlockingIssueWarning = hasBlockingIssue && !syncActive;
+  const syncButtonClass = showBlockingIssueWarning
     ? "account-sync-nav-btn account-sync-nav-btn-warning"
     : "account-sync-nav-btn";
+  const nextSyncState: "syncing" | "paused" = syncActive ? "paused" : "syncing";
+  const syncButtonTitle = showBlockingIssueWarning
+    ? "Open synchronization details"
+    : syncActive
+      ? syncButtonHovered
+        ? "Pause synchronization"
+        : "Synchronizing"
+      : syncButtonHovered
+        ? "Resume synchronization"
+        : "Synchronization paused";
 
   return (
     <AccountHomeCardButton
@@ -227,9 +242,14 @@ export function AccountCard({
             <button
               class={syncButtonClass}
               type="button"
-              aria-label="Open synchronization details"
+              aria-label={syncButtonTitle}
+              title={syncButtonTitle}
               onClick={(event) => {
                 event.stopPropagation();
+                if (!showBlockingIssueWarning) {
+                  void onSetAgentState(account.id, nextSyncState);
+                  return;
+                }
                 const isTouchLikePointer =
                   typeof window !== "undefined" && window.matchMedia("(hover: none), (pointer: coarse)").matches;
                 if (isTouchLikePointer) {
@@ -245,11 +265,19 @@ export function AccountCard({
                   setPreviewOpen(false);
                 }
               }}
+              onMouseEnter={() => setSyncButtonHovered(true)}
+              onMouseLeave={() => setSyncButtonHovered(false)}
             >
-              {syncActive ? (
-                <IconRefresh class="sync-icon-spinning" size={24} />
-              ) : hasBlockingIssue ? (
+              {showBlockingIssueWarning ? (
                 <IconAlertCircle class="sync-icon-warning-pulse" size={24} />
+              ) : syncActive ? (
+                syncButtonHovered ? (
+                  <IconPlayerPauseFilled size={24} />
+                ) : (
+                  <IconRefresh class="sync-icon-spinning" size={24} />
+                )
+              ) : syncButtonHovered ? (
+                <IconPlayerPlayFilled size={24} />
               ) : (
                 <IconPlayerPauseFilled size={24} />
               )}

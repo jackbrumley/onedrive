@@ -9,6 +9,7 @@ interface AccountsHomePageProps {
   syncRuntimeByAccountId: Record<string, SyncRuntimeAccountStatus>;
   onCreateAccount: (displayName: string, kind: AccountKind) => Promise<boolean>;
   onOpenAccount: (accountId: string) => void;
+  onSetAgentState: (accountId: string, state: "syncing" | "paused") => Promise<void>;
   onOpenSyncRootFolder: (accountId: string) => Promise<void>;
   onOpenItemFolder: (accountId: string, relativePath: string) => Promise<void>;
   onReauthenticate: (accountId: string) => Promise<unknown>;
@@ -20,6 +21,7 @@ export function AccountsHomePage({
   syncRuntimeByAccountId,
   onCreateAccount,
   onOpenAccount,
+  onSetAgentState,
   onOpenSyncRootFolder,
   onOpenItemFolder,
   onReauthenticate,
@@ -39,6 +41,7 @@ export function AccountsHomePage({
             account={account}
             runtimeStatus={syncRuntimeByAccountId[account.id] ?? null}
             onOpenDetails={onOpenAccount}
+            onSetAgentState={onSetAgentState}
             onOpenSyncRootFolder={onOpenSyncRootFolder}
             onOpenItemFolder={onOpenItemFolder}
             onReauthenticate={onReauthenticate}

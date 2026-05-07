@@ -34,6 +34,7 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
           syncRuntimeByAccountId={syncRuntimeByAccountId}
           onCreateAccount={runtime.createAccountProfile}
           onOpenAccount={runtime.openAccount}
+          onSetAgentState={runtime.setAccountAgentState}
           onOpenSyncRootFolder={runtime.openAccountSyncRootFolder}
           onOpenItemFolder={runtime.openAccountItemFolder}
           onReauthenticate={runtime.startInteractiveAuth}
