@@ -1,3 +1,86 @@
+async fn graph_get_text(
+    graph: &mut GraphContext,
+    url: &str,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let mut refreshed = false;
+    loop {
+        ensure_not_cancelled(cancel_flag)?;
+        let response = tokio::select! {
+            _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
+                return Err(SYNC_CANCELLED_ERROR.to_string());
+            }
+            value = client
+                .get(url)
+                .bearer_auth(&graph.access_token)
+                .send() => {
+                value.map_err(|error| format!("Graph GET failed: {error}"))?
+            }
+        };
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .map_err(|error| format!("Failed reading Graph response: {error}"))?;
+
+        if status.as_u16() == 401 && !refreshed {
+            log::warn!(
+                "{} [cycle:{}] GRAPH_GET_401_REFRESH",
+                graph.account_prefix,
+                graph.cycle_id
+            );
+            graph.refresh_token().await?;
+            refreshed = true;
+            continue;
+        }
+
+        if !status.is_success() {
+            let snippet: String = text.chars().take(400).collect();
+            return Err(format!(
+                "Graph GET {} failed with status {}: {}",
+                url, status, snippet
+            ));
+        }
+        return Ok(text);
+    }
+}
+
+async fn graph_delete(graph: &mut GraphContext, url: &str) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let mut refreshed = false;
+    loop {
+        let response = client
+            .delete(url)
+            .bearer_auth(&graph.access_token)
+            .send()
+            .await
+            .map_err(|error| format!("Graph DELETE failed: {error}"))?;
+        let status = response.status();
+        if status.as_u16() == 401 && !refreshed {
+            log::warn!(
+                "{} [cycle:{}] GRAPH_DELETE_401_REFRESH",
+                graph.account_prefix,
+                graph.cycle_id
+            );
+            graph.refresh_token().await?;
+            refreshed = true;
+            continue;
+        }
+
+        if status.is_success() || status.as_u16() == 404 {
+            return Ok(());
+        }
+
+        let text = response.text().await.unwrap_or_default();
+        let snippet: String = text.chars().take(400).collect();
+        return Err(format!(
+            "Graph DELETE {} failed with status {}: {}",
+            url, status, snippet
+        ));
+    }
+}
+
 async fn download_remote_item_content(
     graph: &GraphContext,
     item_id: &str,
@@ -418,5 +501,115 @@ async fn upload_file_by_path(
         );
         return Ok(parsed);
     }
+}
+
+async fn create_remote_folder(
+    graph: &mut GraphContext,
+    relative_path: &str,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<DriveItemResponse, String> {
+    ensure_not_cancelled(cancel_flag)?;
+    let (parent, name) = split_parent_and_name(relative_path)?;
+    let endpoint = if parent.is_empty() {
+        format!("{GRAPH_ROOT}/me/drive/root/children")
+    } else {
+        format!(
+            "{GRAPH_ROOT}/me/drive/root:/{}:/children",
+            encode_graph_path(parent)
+        )
+    };
+    let payload = serde_json::json!({
+        "name": name,
+        "folder": {},
+        "@microsoft.graph.conflictBehavior": "replace"
+    });
+    log::info!(
+        "{} [cycle:{}] REMOTE_DIR_CREATE_REQUEST path={} parent={}",
+        graph.account_prefix,
+        graph.cycle_id,
+        relative_path,
+        parent
+    );
+
+    let client = reqwest::Client::new();
+    let mut refreshed = false;
+    loop {
+        ensure_not_cancelled(cancel_flag)?;
+        let response = tokio::select! {
+            _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
+                return Err(SYNC_CANCELLED_ERROR.to_string());
+            }
+            value = client
+                .post(&endpoint)
+                .bearer_auth(&graph.access_token)
+                .json(&payload)
+                .send() => {
+                value.map_err(|error| {
+                    format!(
+                        "Failed creating remote folder '{}': {}",
+                        relative_path, error
+                    )
+                })?
+            }
+        };
+
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .map_err(|error| format!("Failed reading create folder response: {error}"))?;
+
+        if status.as_u16() == 401 && !refreshed {
+            log::warn!(
+                "{} [cycle:{}] GRAPH_DIR_CREATE_401_REFRESH",
+                graph.account_prefix,
+                graph.cycle_id
+            );
+            graph.refresh_token().await?;
+            refreshed = true;
+            continue;
+        }
+
+        if !status.is_success() {
+            let snippet: String = text.chars().take(400).collect();
+            return Err(format!(
+                "Create folder failed for '{}' with status {}: {}",
+                relative_path, status, snippet
+            ));
+        }
+        let parsed = serde_json::from_str::<DriveItemResponse>(&text)
+            .map_err(|error| format!("Failed decoding create-folder response JSON: {error}"))?;
+        log::info!(
+            "{} [cycle:{}] REMOTE_DIR_CREATE_OK path={} remote_id={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            relative_path,
+            parsed.id
+        );
+        return Ok(parsed);
+    }
+}
+
+async fn delete_remote_item(
+    graph: &mut GraphContext,
+    item_id: &str,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<(), String> {
+    ensure_not_cancelled(cancel_flag)?;
+    let url = format!("{GRAPH_ROOT}/me/drive/items/{}", item_id);
+    log::info!(
+        "{} [cycle:{}] REMOTE_DELETE_REQUEST item_id={}",
+        graph.account_prefix,
+        graph.cycle_id,
+        item_id
+    );
+    graph_delete(graph, &url).await?;
+    log::info!(
+        "{} [cycle:{}] REMOTE_DELETE_RESULT item_id={} status=ok",
+        graph.account_prefix,
+        graph.cycle_id,
+        item_id
+    );
+    Ok(())
 }
 
