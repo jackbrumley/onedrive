@@ -108,13 +108,14 @@ async fn tick_sync_cycle(
     update_profile_last_sync(profiles_lock, profile_id)?;
 
     let summary = format!(
-        "Sync cycle complete (downloaded {}, uploaded {}, remote deletes {}, local deletes {}, remote pages {}, remote items {}, local items {})",
+        "Sync cycle complete (downloaded {}, uploaded {}, remote deletes {}, local deletes {}, remote pages {}, remote items {}, remote missing skips {}, local items {})",
         stats.downloaded_files,
         stats.uploaded_files,
         stats.deleted_remote,
         stats.deleted_local,
         stats.remote_pages,
         stats.remote_items_received,
+        stats.remote_items_skipped_missing,
         stats.local_items_seen
     );
     let _ = activity_log::append_event(
@@ -189,4 +190,3 @@ fn update_profile_last_sync(
     profile.last_sync_at = Some(chrono::Local::now().to_rfc3339());
     save_profiles(&profiles)
 }
-

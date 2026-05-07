@@ -285,7 +285,7 @@ async fn apply_remote_changes(
                 )
                 .await
                 {
-                    Ok(()) => Ok((item_id, path, remote_entry)),
+                    Ok(outcome) => Ok((item_id, path, remote_entry, outcome)),
                     Err(error) => Err(format!(
                         "Remote download failed item_id={} path={}: {}",
                         item_id, path, error
@@ -297,10 +297,27 @@ async fn apply_remote_changes(
 
         let mut completed_count: usize = 0;
         while let Some(task_result) = download_tasks.next().await {
-            let (_, _, remote_entry) = task_result?;
-            upsert_remote_known_item(sync_state, remote_entry);
-            stats.downloaded_files += 1;
-            completed_count += 1;
+            let (_, _, remote_entry, outcome) = task_result?;
+            match outcome {
+                RemoteDownloadOutcome::Downloaded => {
+                    upsert_remote_known_item(sync_state, remote_entry);
+                    stats.downloaded_files += 1;
+                    completed_count += 1;
+                }
+                RemoteDownloadOutcome::SkippedMissingRemote => {
+                    sync_state.remote_by_id.remove(&remote_entry.id);
+                    sync_state.remote_path_to_id.remove(&remote_entry.path);
+                    sync_state.local_snapshot.remove(&remote_entry.path);
+                    stats.remote_items_skipped_missing += 1;
+                    log::warn!(
+                        "{} [cycle:{}] REMOTE_ITEM_SKIP_MISSING path={} id={}",
+                        graph.account_prefix,
+                        graph.cycle_id,
+                        remote_entry.path,
+                        remote_entry.id
+                    );
+                }
+            }
         }
 
         log::info!(

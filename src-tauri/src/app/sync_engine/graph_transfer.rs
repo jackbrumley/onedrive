@@ -87,7 +87,7 @@ async fn download_remote_item_content(
     relative_path: &str,
     local_path: &Path,
     cancel_flag: &Arc<AtomicBool>,
-) -> Result<(), String> {
+) -> Result<RemoteDownloadOutcome, String> {
     ensure_not_cancelled(cancel_flag)?;
     log::info!(
         "{} [cycle:{}] DOWNLOAD_START item_id={} path={} local_path={}",
@@ -189,6 +189,24 @@ async fn download_remote_item_content(
             }
         }
         if !status.is_success() {
+            if status == StatusCode::NOT_FOUND || status == StatusCode::GONE {
+                if let Some(active_transfer_id) = &transfer_id {
+                    runtime_finish_transfer_success(
+                        &graph.sync_runtime,
+                        &graph.profile_id,
+                        active_transfer_id,
+                    );
+                }
+                log::warn!(
+                    "{} [cycle:{}] DOWNLOAD_SKIPPED_MISSING item_id={} path={} status={}",
+                    graph.account_prefix,
+                    graph.cycle_id,
+                    item_id,
+                    relative_path,
+                    status
+                );
+                return Ok(RemoteDownloadOutcome::SkippedMissingRemote);
+            }
             let text = response.text().await.unwrap_or_default();
             let snippet: String = text.chars().take(400).collect();
             if let Some(active_transfer_id) = &transfer_id {
@@ -366,10 +384,8 @@ async fn download_remote_item_content(
             relative_path,
             downloaded_bytes
         );
-        break;
+        return Ok(RemoteDownloadOutcome::Downloaded);
     }
-
-    Ok(())
 }
 
 async fn upload_file_by_path(
@@ -612,4 +628,3 @@ async fn delete_remote_item(
     );
     Ok(())
 }
-

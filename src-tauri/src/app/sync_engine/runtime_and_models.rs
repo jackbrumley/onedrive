@@ -9,7 +9,13 @@ struct SyncCycleStats {
     created_remote_folders: usize,
     remote_pages: usize,
     remote_items_received: usize,
+    remote_items_skipped_missing: usize,
     local_items_seen: usize,
+}
+
+enum RemoteDownloadOutcome {
+    Downloaded,
+    SkippedMissingRemote,
 }
 
 #[derive(Clone)]
