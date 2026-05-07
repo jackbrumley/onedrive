@@ -31,6 +31,7 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
       renderAccountsHome={() => (
         <AccountsHomePage
           accounts={runtime.status.accounts}
+          appVersion={runtime.status.appVersion}
           syncRuntimeByAccountId={syncRuntimeByAccountId}
           onCreateAccount={runtime.createAccountProfile}
           onOpenAccount={runtime.openAccount}
