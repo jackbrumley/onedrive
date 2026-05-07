@@ -45,6 +45,10 @@ function transferProgressPercent(bytesDone: number, bytesTotal: number | null): 
   return Math.min(100, Math.max(0, (bytesDone / bytesTotal) * 100));
 }
 
+function shouldShowTransferBytes(bytesDone: number, bytesTotal: number | null): boolean {
+  return bytesTotal !== null || bytesDone > 0;
+}
+
 function relativeUpdatedAt(updatedAt: string): string {
   const updated = new Date(updatedAt).getTime();
   if (Number.isNaN(updated)) {
@@ -111,6 +115,12 @@ export function AccountSyncPreviewPopover({
   const inProgress = runtimeStatus?.inProgress ?? [];
   const recentCompleted = runtimeStatus?.recentCompleted ?? [];
   const recentFailed = runtimeStatus?.recentFailed ?? [];
+  const remoteDiscoveredCount = runtimeStatus?.remoteDiscoveredCount ?? 0;
+  const remoteDownloadQueueCount = runtimeStatus?.remoteDownloadQueueCount ?? 0;
+  const remoteDownloadedCount = runtimeStatus?.remoteDownloadedCount ?? 0;
+  const activeUploadCount = inProgress.filter((item) => item.direction.toLowerCase() === "upload").length;
+  const showTransferStats =
+    remoteDiscoveredCount > 0 || remoteDownloadQueueCount > 0 || remoteDownloadedCount > 0 || activeUploadCount > 0;
   const isRemoteScanActive = runtimeStatus?.phase === "scanning_remote";
   const uploadCooldownHint = extractUploadCooldownHint(runtimeStatus?.phaseMessage ?? null);
   const hasIssueSummary = Boolean(issueMessage);
@@ -182,6 +192,14 @@ export function AccountSyncPreviewPopover({
         </span>
         {runtimeStatus ? <span class="account-sync-preview-updated">updated {relativeUpdatedAt(runtimeStatus.updatedAt)}</span> : null}
       </p>
+      {showTransferStats && (
+        <p class="account-sync-preview-stats-line">
+          <span>Discovered {remoteDiscoveredCount}</span>
+          <span>Queued {remoteDownloadQueueCount}</span>
+          <span>Downloaded {remoteDownloadedCount}</span>
+          <span>Uploading {activeUploadCount}</span>
+        </p>
+      )}
       {hasIssueSection && (
         <section class={issuesClassName}>
           <p class="account-sync-preview-section-label">{hasBlockingIssue ? "Issues" : "Warnings"}</p>
@@ -325,10 +343,14 @@ export function AccountSyncPreviewPopover({
                     <p class="account-sync-preview-path">{item.path}</p>
                     <p class="account-sync-preview-meta">
                       {item.kind === "active" ? (
-                        <span>
-                          {formatBytes(item.bytesDone ?? 0)}
-                          {item.bytesTotal ? ` / ${formatBytes(item.bytesTotal)}` : ""}
-                        </span>
+                        shouldShowTransferBytes(item.bytesDone ?? 0, item.bytesTotal) ? (
+                          <span>
+                            {formatBytes(item.bytesDone ?? 0)}
+                            {item.bytesTotal ? ` / ${formatBytes(item.bytesTotal)}` : ""}
+                          </span>
+                        ) : (
+                          <span />
+                        )
                       ) : (
                         <span>{formatBytes(item.bytesTotal)}</span>
                       )}

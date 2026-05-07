@@ -291,6 +291,15 @@
   color: #6c7f95;
 }
 
+.account-sync-preview-stats-line {
+  margin: -2px 0 7px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 0.71rem;
+  color: #4a6685;
+}
+
 .account-sync-preview-empty {
   margin: 0;
   color: var(--text-muted);
@@ -409,6 +418,10 @@
 .account-sync-preview-item-button {
   width: 100%;
   text-align: left;
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  font-weight: 400;
   border: none;
   background: transparent;
   color: inherit;

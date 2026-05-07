@@ -49,6 +49,7 @@ pub fn on_agent_state_changed(
                 ("idle", "Idle")
             };
             sync_runtime::set_phase(&mut runtime_map, profile_id, phase, message);
+            sync_runtime::set_remote_transfer_progress(&mut runtime_map, profile_id, 0, 0, 0);
         }
     }
     Ok(())

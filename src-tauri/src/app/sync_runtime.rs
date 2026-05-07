@@ -43,6 +43,9 @@ pub struct SyncRuntimeAccountStatus {
     pub in_progress: Vec<SyncRuntimeTransfer>,
     pub recent_completed: Vec<SyncRuntimeRecentItem>,
     pub recent_failed: Vec<SyncRuntimeRecentItem>,
+    pub remote_discovered_count: usize,
+    pub remote_download_queue_count: usize,
+    pub remote_downloaded_count: usize,
     pub updated_at: String,
 }
 
@@ -61,6 +64,9 @@ impl SyncRuntimeAccountStatus {
             in_progress: Vec::new(),
             recent_completed: Vec::new(),
             recent_failed: Vec::new(),
+            remote_discovered_count: 0,
+            remote_download_queue_count: 0,
+            remote_downloaded_count: 0,
             updated_at: now,
         }
     }
@@ -124,6 +130,20 @@ pub fn clear_issue(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
     status.issue_actions.clear();
     status.issue_path = None;
     status.issue_secondary_path = None;
+    status.updated_at = now_rfc3339();
+}
+
+pub fn set_remote_transfer_progress(
+    runtime_map: &mut SyncRuntimeMap,
+    profile_id: &str,
+    discovered_count: usize,
+    download_queue_count: usize,
+    downloaded_count: usize,
+) {
+    let status = ensure_account_status(runtime_map, profile_id);
+    status.remote_discovered_count = discovered_count;
+    status.remote_download_queue_count = download_queue_count;
+    status.remote_downloaded_count = downloaded_count;
     status.updated_at = now_rfc3339();
 }
 

@@ -45,6 +45,10 @@ function transferProgressPercent(transfer: SyncRuntimeTransfer): number | null {
   return Math.min(100, Math.max(0, (transfer.bytesDone / transfer.bytesTotal) * 100));
 }
 
+function shouldShowTransferBytes(bytesDone: number, bytesTotal: number | null): boolean {
+  return bytesTotal !== null || bytesDone > 0;
+}
+
 function recentItemSummary(item: SyncRuntimeRecentItem): string {
   if (!item.bytesTotal) {
     return item.direction;
@@ -138,8 +142,9 @@ export function AccountDetailUnifiedPanel({
                     <p class="sync-runtime-item-meta">
                       <span class="pill">{transfer.direction}</span>
                       <span>
-                        {formatBytes(transfer.bytesDone)}
-                        {transfer.bytesTotal ? ` / ${formatBytes(transfer.bytesTotal)}` : ""}
+                        {shouldShowTransferBytes(transfer.bytesDone, transfer.bytesTotal)
+                          ? `${formatBytes(transfer.bytesDone)}${transfer.bytesTotal ? ` / ${formatBytes(transfer.bytesTotal)}` : ""}`
+                          : ""}
                       </span>
                     </p>
                     {progressPercent !== null ? (

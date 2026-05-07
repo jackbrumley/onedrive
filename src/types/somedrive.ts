@@ -108,6 +108,9 @@ export interface SyncRuntimeAccountStatus {
   inProgress: SyncRuntimeTransfer[];
   recentCompleted: SyncRuntimeRecentItem[];
   recentFailed: SyncRuntimeRecentItem[];
+  remoteDiscoveredCount?: number;
+  remoteDownloadQueueCount?: number;
+  remoteDownloadedCount?: number;
   updatedAt: string;
 }
 

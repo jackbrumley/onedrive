@@ -7,6 +7,7 @@ async fn fetch_and_apply_delta_changes(
 ) -> Result<HashSet<String>, String> {
     const PHASE_PROGRESS_UPDATE_INTERVAL: Duration = Duration::from_millis(750);
     const PHASE_PROGRESS_ITEM_STEP: usize = 250;
+    const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 
     let delta_page_queue_capacity = resolve_delta_page_queue_capacity();
     let download_queue_capacity = resolve_download_queue_capacity();
@@ -17,8 +18,9 @@ async fn fetch_and_apply_delta_changes(
         &graph.sync_runtime,
         &graph.profile_id,
         "scanning_remote",
-        "Fetching remote file list",
+        "Fetching remote files",
     );
+    runtime_set_remote_transfer_progress(&graph.sync_runtime, &graph.profile_id, 0, 0, 0);
     log::info!(
         "{} [cycle:{}] REMOTE_PIPELINE_START delta_queue_capacity={} download_queue_capacity={} download_concurrency={} checkpoint_flush_step={}",
         graph.account_prefix,
@@ -37,6 +39,7 @@ async fn fetch_and_apply_delta_changes(
     let scan_started_at = std::time::Instant::now();
     let mut last_phase_update_at = scan_started_at;
     let mut last_phase_update_items: usize = 0;
+    let mut last_heartbeat_at = scan_started_at;
 
     let (page_tx, mut page_rx) =
         mpsc::channel::<Result<DeltaPageWorkItem, String>>(delta_page_queue_capacity);
@@ -158,6 +161,19 @@ async fn fetch_and_apply_delta_changes(
             break;
         }
 
+        if last_heartbeat_at.elapsed() >= HEARTBEAT_INTERVAL {
+            log::info!(
+                "{} [cycle:{}] SYNC_HEARTBEAT phase=scanning_remote pages={} items={} pending_downloads={} staged_downloads={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                stats.remote_pages,
+                stats.remote_items_received,
+                pending_download_count,
+                staged_download_jobs.len()
+            );
+            last_heartbeat_at = std::time::Instant::now();
+        }
+
         tokio::select! {
             maybe_page = page_rx.recv(), if !producer_done => {
                 let page_payload = match maybe_page {
@@ -181,29 +197,44 @@ async fn fetch_and_apply_delta_changes(
                     || !has_next_link;
                 if should_update_phase {
                     let elapsed_seconds = scan_started_at.elapsed().as_secs_f64();
-                    let progress_message = if elapsed_seconds > 0.0 {
-                        format!(
-                            "Fetching remote file list - {} items across {} pages ({:.0} items/s)",
-                            stats.remote_items_received,
-                            stats.remote_pages,
-                            stats.remote_items_received as f64 / elapsed_seconds
-                        )
-                    } else {
-                        format!(
-                            "Fetching remote file list - {} items across {} pages",
-                            stats.remote_items_received,
-                            stats.remote_pages
-                        )
-                    };
+                    let progress_message = format!(
+                        "Fetching remote files - {} discovered",
+                        stats.remote_items_received
+                    );
                     runtime_set_phase(
                         &graph.sync_runtime,
                         &graph.profile_id,
                         "scanning_remote",
                         &progress_message,
                     );
+                    if elapsed_seconds > 0.0 {
+                        log::info!(
+                            "{} [cycle:{}] REMOTE_SCAN_PROGRESS pages={} items={} rate_items_per_sec={:.0}",
+                            graph.account_prefix,
+                            graph.cycle_id,
+                            stats.remote_pages,
+                            stats.remote_items_received,
+                            stats.remote_items_received as f64 / elapsed_seconds
+                        );
+                    } else {
+                        log::info!(
+                            "{} [cycle:{}] REMOTE_SCAN_PROGRESS pages={} items={}",
+                            graph.account_prefix,
+                            graph.cycle_id,
+                            stats.remote_pages,
+                            stats.remote_items_received
+                        );
+                    }
                     last_phase_update_at = std::time::Instant::now();
                     last_phase_update_items = stats.remote_items_received;
                 }
+                runtime_set_remote_transfer_progress(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    stats.remote_items_received,
+                    pending_download_count,
+                    stats.downloaded_files,
+                );
 
                 log::info!(
                     "{} [cycle:{}] DELTA_PAGE_RECEIVED page={} items={}",
@@ -271,6 +302,14 @@ async fn fetch_and_apply_delta_changes(
                     download_results_since_flush = 0;
                 }
 
+                runtime_set_remote_transfer_progress(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    stats.remote_items_received,
+                    pending_download_count,
+                    stats.downloaded_files,
+                );
+
                 if producer_done && pending_download_count > 0 {
                     runtime_set_phase(
                         &graph.sync_runtime,
@@ -289,6 +328,13 @@ async fn fetch_and_apply_delta_changes(
     }
     sync_state.active_delta_next_link = None;
     save_sync_state(&graph.profile_id, sync_state)?;
+    runtime_set_remote_transfer_progress(
+        &graph.sync_runtime,
+        &graph.profile_id,
+        stats.remote_items_received,
+        0,
+        stats.downloaded_files,
+    );
 
     Ok(remote_applied_paths)
 }

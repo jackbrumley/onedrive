@@ -201,6 +201,24 @@ fn runtime_clear_issue(runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>, profile_
     }
 }
 
+fn runtime_set_remote_transfer_progress(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    discovered_count: usize,
+    download_queue_count: usize,
+    downloaded_count: usize,
+) {
+    if let Ok(mut runtime_map) = runtime.lock() {
+        sync_runtime::set_remote_transfer_progress(
+            &mut runtime_map,
+            profile_id,
+            discovered_count,
+            download_queue_count,
+            downloaded_count,
+        );
+    }
+}
+
 fn classify_sync_issue(error: &str) -> (&'static str, &'static [&'static str]) {
     let normalized = error.to_lowercase();
     if normalized.contains("re-authentication")
