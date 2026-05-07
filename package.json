@@ -17,6 +17,7 @@
   "dependencies": {
     "@tabler/icons-preact": "^3.41.1",
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-autostart": "^2",
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "preact": "^10.28.2"

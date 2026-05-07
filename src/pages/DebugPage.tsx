@@ -34,9 +34,9 @@ export function DebugPage({
   return (
     <section class="page">
       <div class="page-header">
-        <h2>Settings</h2>
+        <h2>Debug Tools</h2>
         <button class="page-header-action" onClick={onBack}>
-          Back
+          Settings
         </button>
       </div>
 

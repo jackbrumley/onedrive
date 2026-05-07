@@ -1,6 +1,7 @@
 import { AppPageRenderer } from "./AppPageRenderer";
 import { AccountsHomePage } from "../pages/AccountsHomePage";
 import { AccountDetailPage } from "../pages/AccountDetailPage";
+import { SettingsPage } from "../pages/SettingsPage";
 import { DebugPage } from "../pages/DebugPage";
 import { UiLabPage } from "../pages/UiLabPage";
 import type { useAppRuntime } from "../hooks/useAppRuntime";
@@ -53,10 +54,17 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
           onRemoveProfile={runtime.removeAccountProfile}
         />
       )}
+      renderSettings={() => (
+        <SettingsPage
+          autostartEnabled={runtime.autostartEnabled}
+          onToggleAutostart={runtime.toggleAutostart}
+          onGoDebug={runtime.goDebug}
+        />
+      )}
       renderDebug={() => (
         <DebugPage
           status={runtime.status}
-          onBack={runtime.goHome}
+          onBack={runtime.goSettings}
           onNavigateUiLab={runtime.goUiLab}
           onRefreshStatus={runtime.refreshStatus}
           onFetchSessionLogText={runtime.fetchSessionLogText}

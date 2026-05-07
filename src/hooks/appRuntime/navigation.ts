@@ -28,6 +28,13 @@ export function createNavigationActions({ setRouteState }: NavigationFactoryPara
     });
   };
 
+  const goSettings = () => {
+    navigate({
+      page: "settings",
+      accountId: null,
+    });
+  };
+
   const goDebug = () => {
     navigate({
       page: "debug",
@@ -46,6 +53,7 @@ export function createNavigationActions({ setRouteState }: NavigationFactoryPara
     navigate,
     goHome,
     openAccount,
+    goSettings,
     goDebug,
     goUiLab,
   };

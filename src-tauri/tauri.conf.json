@@ -34,7 +34,10 @@
             "core:window:allow-unmaximize",
             "core:window:allow-is-maximized",
             "core:window:allow-close",
-            "opener:default"
+            "opener:default",
+            "autostart:allow-enable",
+            "autostart:allow-disable",
+            "autostart:allow-is-enabled"
           ]
         }
       ]

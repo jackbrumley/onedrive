@@ -7,6 +7,7 @@ interface AppPageRendererProps {
   page: AppPage;
   renderAccountsHome: RenderPage;
   renderAccountDetail: RenderPage;
+  renderSettings: RenderPage;
   renderDebug: RenderPage;
   renderUiLab: RenderPage;
 }
@@ -15,6 +16,7 @@ export function AppPageRenderer({
   page,
   renderAccountsHome,
   renderAccountDetail,
+  renderSettings,
   renderDebug,
   renderUiLab,
 }: AppPageRendererProps) {
@@ -23,6 +25,9 @@ export function AppPageRenderer({
   }
   if (page === "accountDetail") {
     return <>{renderAccountDetail()}</>;
+  }
+  if (page === "settings") {
+    return <>{renderSettings()}</>;
   }
   if (page === "debug") {
     return <>{renderDebug()}</>;

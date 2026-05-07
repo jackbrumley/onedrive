@@ -5,6 +5,9 @@ async fn fetch_delta_changes(
     stats: &mut SyncCycleStats,
     cancel_flag: &Arc<AtomicBool>,
 ) -> Result<Vec<DeltaItem>, String> {
+    const PHASE_PROGRESS_UPDATE_INTERVAL: Duration = Duration::from_millis(750);
+    const PHASE_PROGRESS_ITEM_STEP: usize = 250;
+
     runtime_set_phase(
         &graph.sync_runtime,
         &graph.profile_id,
@@ -14,6 +17,9 @@ async fn fetch_delta_changes(
     let mut all_items: Vec<DeltaItem> = Vec::new();
     let mut current_url =
         initial_delta_link.unwrap_or_else(|| format!("{GRAPH_ROOT}/me/drive/root/delta"));
+    let scan_started_at = std::time::Instant::now();
+    let mut last_phase_update_at = scan_started_at;
+    let mut last_phase_update_items: usize = 0;
 
     loop {
         ensure_not_cancelled(cancel_flag)?;
@@ -29,6 +35,43 @@ async fn fetch_delta_changes(
 
         stats.remote_pages += 1;
         stats.remote_items_received += response.value.len();
+        let has_next_link = response.next_link.is_some();
+
+        let should_update_phase = stats.remote_pages == 1
+            || last_phase_update_at.elapsed() >= PHASE_PROGRESS_UPDATE_INTERVAL
+            || stats
+                .remote_items_received
+                .saturating_sub(last_phase_update_items)
+                >= PHASE_PROGRESS_ITEM_STEP
+            || !has_next_link;
+        if should_update_phase {
+            let elapsed_seconds = scan_started_at.elapsed().as_secs_f64();
+            let progress_message = if elapsed_seconds > 0.0 {
+                format!(
+                    "Fetching remote file list - {} items across {} pages ({:.0} items/s){}",
+                    stats.remote_items_received,
+                    stats.remote_pages,
+                    stats.remote_items_received as f64 / elapsed_seconds,
+                    if has_next_link { " - still scanning..." } else { "" }
+                )
+            } else {
+                format!(
+                    "Fetching remote file list - {} items across {} pages{}",
+                    stats.remote_items_received,
+                    stats.remote_pages,
+                    if has_next_link { " - still scanning..." } else { "" }
+                )
+            };
+            runtime_set_phase(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                "scanning_remote",
+                &progress_message,
+            );
+            last_phase_update_at = std::time::Instant::now();
+            last_phase_update_items = stats.remote_items_received;
+        }
+
         log::info!(
             "{} [cycle:{}] DELTA_PAGE_RECEIVED page={} items={}",
             graph.account_prefix,
@@ -272,4 +315,3 @@ async fn apply_remote_changes(
 
     Ok(())
 }
-

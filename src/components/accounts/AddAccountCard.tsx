@@ -14,7 +14,7 @@ export function AddAccountCard({ onClick }: AddAccountCardProps) {
       title="Add account"
     >
       <div class="add-account-icon-wrap">
-        <IconPlus size={40} stroke={2.6} />
+        <IconPlus size={22} stroke={2.5} />
       </div>
       <p class="add-account-title">Add Account</p>
     </AccountHomeCardButton>

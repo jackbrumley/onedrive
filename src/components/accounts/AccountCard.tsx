@@ -14,6 +14,31 @@ import type { AccountProfile, SyncRuntimeAccountStatus } from "../../types/somed
 
 const PREVIEW_VIEWPORT_MARGIN = 8;
 const PREVIEW_TRIGGER_GAP = 8;
+const ISSUE_BADGE_WINDOW_MS = 10 * 60 * 1000;
+
+function recentIssueCount(runtimeStatus: SyncRuntimeAccountStatus | null): number {
+  if (!runtimeStatus) {
+    return 0;
+  }
+  const now = Date.now();
+  return runtimeStatus.recentFailed.filter((item) => {
+    const finishedAt = new Date(item.finishedAt).getTime();
+    return Number.isFinite(finishedAt) && now - finishedAt <= ISSUE_BADGE_WINDOW_MS;
+  }).length;
+}
+
+function isSyncPhaseActive(phase: string | undefined): boolean {
+  if (!phase) {
+    return false;
+  }
+  return (
+    phase === "syncing" ||
+    phase === "scanning_remote" ||
+    phase === "applying_remote" ||
+    phase === "scanning_local" ||
+    phase === "applying_local"
+  );
+}
 
 interface AccountCardProps {
   account: AccountProfile;
@@ -135,12 +160,13 @@ export function AccountCard({
   const lastSyncLabel = account.lastSyncAt ? new Date(account.lastSyncAt).toLocaleString() : "Never";
   const accountIcon = account.kind === "business" ? <IconBuildingBank size={16} /> : <IconUser size={16} />;
   const runtimeIssueCode = runtimeStatus?.issueCode ?? null;
-  const hasSyncIssue =
+  const hasBlockingIssue =
     !account.authConfigured || runtimeIssueCode !== null || account.agentState === "error" || runtimeStatus?.phase === "error";
   const syncIssueMessage =
     runtimeStatus?.issueMessage ??
     (!account.authConfigured ? "Authentication required" : runtimeStatus?.phaseMessage ?? "Synchronization blocked");
-  const issueKind = !account.authConfigured || runtimeIssueCode === "auth_required" ? "auth_required" : hasSyncIssue ? "sync_error" : null;
+  const issueKind =
+    !account.authConfigured || runtimeIssueCode === "auth_required" ? "auth_required" : hasBlockingIssue ? "sync_error" : null;
   const issueActions =
     runtimeStatus?.issueActions.length
       ? runtimeStatus.issueActions
@@ -149,11 +175,15 @@ export function AccountCard({
         : issueKind === "sync_error"
           ? ["retry_sync"]
           : [];
-  const syncButtonClass = hasSyncIssue
+  const syncActive =
+    account.agentState === "syncing" ||
+    (runtimeStatus?.inProgress.length ?? 0) > 0 ||
+    isSyncPhaseActive(runtimeStatus?.phase);
+  const issueCount = recentIssueCount(runtimeStatus) + (hasBlockingIssue ? 1 : 0);
+  const showIssueBadge = issueCount > 0;
+  const syncButtonClass = hasBlockingIssue && !syncActive
     ? "account-sync-nav-btn account-sync-nav-btn-warning"
-    : account.agentState === "syncing"
-      ? "account-sync-nav-btn account-sync-nav-btn-syncing"
-      : "account-sync-nav-btn";
+    : "account-sync-nav-btn";
 
   return (
     <AccountHomeCardButton
@@ -216,12 +246,17 @@ export function AccountCard({
                 }
               }}
             >
-              {hasSyncIssue ? (
-                <IconAlertCircle class="sync-icon-warning-pulse" size={24} />
-              ) : account.agentState === "syncing" ? (
+              {syncActive ? (
                 <IconRefresh class="sync-icon-spinning" size={24} />
+              ) : hasBlockingIssue ? (
+                <IconAlertCircle class="sync-icon-warning-pulse" size={24} />
               ) : (
                 <IconPlayerPauseFilled size={24} />
+              )}
+              {showIssueBadge && (
+                <span class="account-sync-issue-badge" aria-label={`${issueCount} sync issue${issueCount === 1 ? "" : "s"}`}>
+                  {issueCount > 9 ? "9+" : issueCount}
+                </span>
               )}
             </button>
           </div>
@@ -248,11 +283,11 @@ export function AccountCard({
             onMouseDown={(event) => event.stopPropagation()}
             onTouchStart={(event) => event.stopPropagation()}
           >
-            <AccountSyncPreviewPopover
-              runtimeStatus={runtimeStatus}
-              errorMessage={hasSyncIssue ? syncIssueMessage : null}
-              issueKind={issueKind}
-              issueActions={issueActions}
+              <AccountSyncPreviewPopover
+                runtimeStatus={runtimeStatus}
+                issueMessage={hasBlockingIssue ? syncIssueMessage : null}
+                issueKind={issueKind}
+                issueActions={issueActions}
               issuePath={runtimeStatus?.issuePath ?? null}
               issueSecondaryPath={runtimeStatus?.issueSecondaryPath ?? null}
               onOpenItemFolder={(relativePath) => onOpenItemFolder(account.id, relativePath)}

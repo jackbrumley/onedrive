@@ -15,7 +15,7 @@ function App() {
       <AppShell
         page={runtime.routeState.page}
         onGoHome={runtime.goHome}
-        onGoDebug={runtime.goDebug}
+        onGoSettings={runtime.goSettings}
         syncingCount={runtime.syncingCount}
         pausedCount={runtime.pausedCount}
         onPauseAll={runtime.pauseAllAccounts}

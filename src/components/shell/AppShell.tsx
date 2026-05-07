@@ -8,7 +8,7 @@ import { WindowControls } from "./WindowControls";
 interface AppShellProps {
   page: AppPage;
   onGoHome: () => void;
-  onGoDebug: () => void;
+  onGoSettings: () => void;
   syncingCount: number;
   pausedCount: number;
   onPauseAll: () => Promise<void>;
@@ -19,7 +19,7 @@ interface AppShellProps {
 export function AppShell({
   page,
   onGoHome,
-  onGoDebug,
+  onGoSettings,
   syncingCount,
   pausedCount,
   onPauseAll,
@@ -35,7 +35,7 @@ export function AppShell({
     handleTitleBarDoubleClick,
   } = useWindowControls();
 
-  const isDebug = page === "debug" || page === "uiLab";
+  const isSettingsArea = page === "settings" || page === "debug" || page === "uiLab";
   const hasSyncAccounts = syncingCount > 0 || pausedCount > 0;
 
   return (
@@ -46,10 +46,10 @@ export function AppShell({
         </div>
         <div class="title-right-actions">
           <button
-            class={isDebug ? "window-control settings-nav-btn active" : "window-control settings-nav-btn"}
-            onClick={isDebug ? onGoHome : onGoDebug}
-            aria-label={isDebug ? "Back to accounts" : "Open settings"}
-            title={isDebug ? "Back to accounts" : "Open settings"}
+            class={isSettingsArea ? "window-control settings-nav-btn active" : "window-control settings-nav-btn"}
+            onClick={isSettingsArea ? onGoHome : onGoSettings}
+            aria-label={isSettingsArea ? "Back to accounts" : "Open settings"}
+            title={isSettingsArea ? "Back to accounts" : "Open settings"}
           >
             <IconSettings size={14} stroke={2.2} />
           </button>

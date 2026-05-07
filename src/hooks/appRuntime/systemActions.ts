@@ -1,4 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
+import {
+  disable as disableAutostart,
+  enable as enableAutostart,
+  isEnabled as isAutostartEnabled,
+} from "@tauri-apps/plugin-autostart";
 import type { ToastType } from "../../types/somedrive";
 
 interface SystemActionsFactoryParams {
@@ -6,6 +11,30 @@ interface SystemActionsFactoryParams {
 }
 
 export function createSystemActions({ showToast }: SystemActionsFactoryParams) {
+  const getAutostartEnabled = async () => {
+    try {
+      return await isAutostartEnabled();
+    } catch (error) {
+      showToast(`Failed to read auto-start state: ${error}`, "error", 4200);
+      return false;
+    }
+  };
+
+  const setAutostartEnabled = async (enabled: boolean) => {
+    try {
+      if (enabled) {
+        await enableAutostart();
+      } else {
+        await disableAutostart();
+      }
+      showToast(`Auto-start ${enabled ? "enabled" : "disabled"}.`, "success", 2600);
+      return enabled;
+    } catch (error) {
+      showToast(`Failed to update auto-start: ${error}`, "error", 4200);
+      return null;
+    }
+  };
+
   const fetchSessionLogText = async () => {
     try {
       return await invoke<string>("get_session_log_text");
@@ -56,6 +85,8 @@ export function createSystemActions({ showToast }: SystemActionsFactoryParams) {
   };
 
   return {
+    getAutostartEnabled,
+    setAutostartEnabled,
     fetchSessionLogText,
     copySessionLog,
     openSessionLog,

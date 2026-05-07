@@ -42,6 +42,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const [syncRuntime, setSyncRuntime] = useState<SyncRuntimeSnapshot>(initialSyncRuntime);
+  const [autostartEnabled, setAutostartEnabled] = useState(false);
 
   const navigation = createNavigationActions({ setRouteState });
   const refreshActions = createRefreshActions({
@@ -80,6 +81,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     void refreshActions.refreshStatus();
     void refreshActions.refreshActivity();
     void refreshActions.refreshSyncRuntime();
+    void systemActions.getAutostartEnabled().then(setAutostartEnabled);
     const runtimeInterval = window.setInterval(() => {
       void refreshActions.refreshSyncRuntime();
     }, 1500);
@@ -95,6 +97,13 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     };
   }, []);
 
+  const toggleAutostart = async (enabled: boolean) => {
+    const updated = await systemActions.setAutostartEnabled(enabled);
+    if (typeof updated === "boolean") {
+      setAutostartEnabled(updated);
+    }
+  };
+
   return {
     routeState,
     status,
@@ -109,6 +118,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     navigate: navigation.navigate,
     goHome: navigation.goHome,
     openAccount: navigation.openAccount,
+    goSettings: navigation.goSettings,
     goDebug: navigation.goDebug,
     goUiLab: navigation.goUiLab,
     refreshStatus: refreshActions.refreshStatus,
@@ -125,6 +135,8 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     pauseAllAccounts: accountActions.pauseAllAccounts,
     resumeAllAccounts: accountActions.resumeAllAccounts,
     retryAccountSync: accountActions.retryAccountSync,
+    autostartEnabled,
+    toggleAutostart,
     fetchSessionLogText: systemActions.fetchSessionLogText,
     copySessionLog: systemActions.copySessionLog,
     openSessionLog: systemActions.openSessionLog,

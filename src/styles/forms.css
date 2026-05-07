@@ -207,6 +207,97 @@ input::placeholder {
   background: #f1f5fa;
 }
 
+.settings-list {
+  display: grid;
+  gap: 10px;
+}
+
+.toggle-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: linear-gradient(145deg, #f8fbff 0%, #eef4fc 100%);
+  cursor: pointer;
+}
+
+.toggle-field.is-disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.toggle-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.toggle-label {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.toggle-description {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.toggle-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.toggle-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.toggle-track {
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid #a7b9cf;
+  background: #d7e0eb;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.toggle-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 2px 7px rgba(25, 42, 72, 0.22);
+  transform: translateX(0);
+  transition: transform 140ms ease;
+}
+
+.toggle-input:checked + .toggle-track {
+  background: linear-gradient(145deg, var(--success) 0%, var(--success-strong) 100%);
+  border-color: var(--success-strong);
+}
+
+.toggle-input:checked + .toggle-track .toggle-thumb {
+  transform: translateX(20px);
+}
+
+.toggle-input:focus-visible + .toggle-track {
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;

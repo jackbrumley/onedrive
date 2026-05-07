@@ -1,4 +1,4 @@
-export type AppPage = "accountsHome" | "accountDetail" | "debug" | "uiLab";
+export type AppPage = "accountsHome" | "accountDetail" | "settings" | "debug" | "uiLab";
 
 export interface AppRouteState {
   page: AppPage;
@@ -22,7 +22,14 @@ export function routeStateFromHash(hash: string): AppRouteState {
     return defaultState;
   }
 
-  if (segments[0] === "settings" || segments[0] === "debug") {
+  if (segments[0] === "settings") {
+    return {
+      page: "settings",
+      accountId: null,
+    };
+  }
+
+  if (segments[0] === "debug") {
     return {
       page: "debug",
       accountId: null,
@@ -46,8 +53,11 @@ export function hashFromRouteState(state: AppRouteState): string {
   if (state.page === "accountDetail" && state.accountId) {
     return `#/accounts/${encodeURIComponent(state.accountId)}`;
   }
-  if (state.page === "debug") {
+  if (state.page === "settings") {
     return "#/settings";
+  }
+  if (state.page === "debug") {
+    return "#/debug";
   }
   if (state.page === "uiLab") {
     return "#/ui-lab";

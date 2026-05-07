@@ -140,6 +140,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  position: relative;
   background: #dcecff;
   color: var(--titlebar-solid);
 }
@@ -158,6 +159,25 @@
 
 .account-sync-nav-btn-warning:hover {
   background: #fee8cb;
+}
+
+.account-sync-issue-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #cf3748;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  font-size: 0.64rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .account-sync-preview-popover {
@@ -205,10 +225,51 @@
   font-size: 0.76rem;
 }
 
+.account-sync-preview-phase-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #385875;
+}
+
+.account-sync-preview-updated {
+  margin-left: 6px;
+  color: #6c7f95;
+}
+
+.account-sync-preview-scan-note {
+  margin: 0 0 6px;
+  font-size: 0.72rem;
+  color: #526c88;
+}
+
 .account-sync-preview-empty {
   margin: 0;
   color: var(--text-muted);
   font-size: 0.8rem;
+}
+
+.account-sync-preview-section-label {
+  margin: 8px 0 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #476a8f;
+}
+
+.account-sync-preview-issues {
+  border: 1px solid #ebc4ca;
+  border-radius: 8px;
+  background: #fff4f6;
+  padding: 6px;
+  margin-bottom: 8px;
+}
+
+.account-sync-preview-issue-summary {
+  margin: 0;
+  color: #7d2734;
+  font-size: 0.74rem;
 }
 
 .account-sync-preview-actions {
@@ -523,33 +584,43 @@
 
 .add-account-card {
   width: 100%;
+  min-height: 88px;
+  height: 88px;
+  box-sizing: border-box;
   text-align: center;
-  color: var(--text-main);
+  color: #2e4f3f;
   border-style: dashed;
   border-width: 2px;
-  border-color: var(--control-muted-border);
+  border-color: #b7d8c3;
   cursor: pointer;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: linear-gradient(160deg, #f4fbf6 0%, #eef7f1 100%);
+}
+
+.add-account-card:hover {
+  border-color: #9fc9af;
+  background: linear-gradient(160deg, #edf8f0 0%, #e6f3ea 100%);
 }
 
 .add-account-icon-wrap {
-  width: 72px;
-  height: 72px;
+  width: 34px;
+  height: 34px;
   border-radius: 999px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: #ffffff;
-  background: linear-gradient(150deg, var(--success) 0%, var(--success-strong) 100%);
-  margin-bottom: 10px;
+  background: linear-gradient(150deg, #9fd3af 0%, #84c49a 100%);
 }
 
 .add-account-title {
-  margin: 0 0 4px;
+  margin: 0;
   font-weight: 700;
-  font-size: 1rem;
+  font-size: 0.95rem;
 }
 
 .add-account-subtitle {
