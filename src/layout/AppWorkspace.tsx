@@ -61,6 +61,7 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
           autostartEnabled={runtime.autostartEnabled}
           onToggleAutostart={runtime.toggleAutostart}
           onGoDebug={runtime.goDebug}
+          onBack={runtime.goHome}
         />
       )}
       renderDebug={() => (

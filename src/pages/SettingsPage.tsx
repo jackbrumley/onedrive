@@ -1,15 +1,31 @@
+import { IconChevronLeft } from "@tabler/icons-preact";
 import { ToggleSwitch } from "../components/ui/ToggleSwitch";
 
 interface SettingsPageProps {
   autostartEnabled: boolean;
   onToggleAutostart: (enabled: boolean) => Promise<void>;
   onGoDebug: () => void;
+  onBack: () => void;
 }
 
-export function SettingsPage({ autostartEnabled, onToggleAutostart, onGoDebug }: SettingsPageProps) {
+export function SettingsPage({ autostartEnabled, onToggleAutostart, onGoDebug, onBack }: SettingsPageProps) {
   return (
     <section class="page">
-      <h2 class="settings-title">Settings</h2>
+      <div class="page-header">
+        <a
+          class="page-header-back-link"
+          href="#/accounts"
+          onClick={(event) => {
+            event.preventDefault();
+            onBack();
+          }}
+          aria-label="Back to accounts"
+          title="Back to accounts"
+        >
+          <IconChevronLeft size={36} stroke={2.2} />
+        </a>
+        <h2>Settings</h2>
+      </div>
 
       <article class="card">
         <h3>General</h3>

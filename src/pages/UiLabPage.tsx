@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
+import { IconChevronLeft } from "@tabler/icons-preact";
 import { AccountCard } from "../components/accounts/AccountCard";
 import { AccountDetailUnifiedPanel } from "../components/accounts/AccountDetailUnifiedPanel";
 import { SyncStateControl } from "../components/sync/SyncStateControl";
@@ -227,10 +228,19 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
   return (
     <section class="page">
       <div class="page-header">
+        <a
+          class="page-header-back-link"
+          href="#/debug"
+          onClick={(event) => {
+            event.preventDefault();
+            onBack();
+          }}
+          aria-label="Back to debug tools"
+          title="Back to debug tools"
+        >
+          <IconChevronLeft size={36} stroke={2.2} />
+        </a>
         <h2>UI Lab</h2>
-        <button class="page-header-action" onClick={onBack}>
-          Back
-        </button>
       </div>
       {!selectedLabAccount ? (
         <>

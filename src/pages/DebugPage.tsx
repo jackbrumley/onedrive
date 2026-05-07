@@ -1,4 +1,5 @@
 import { useState } from "preact/hooks";
+import { IconChevronLeft } from "@tabler/icons-preact";
 import type { AppStatusSnapshot } from "../types/somedrive";
 
 interface DebugPageProps {
@@ -34,10 +35,19 @@ export function DebugPage({
   return (
     <section class="page">
       <div class="page-header">
+        <a
+          class="page-header-back-link"
+          href="#/settings"
+          onClick={(event) => {
+            event.preventDefault();
+            onBack();
+          }}
+          aria-label="Back to settings"
+          title="Back to settings"
+        >
+          <IconChevronLeft size={36} stroke={2.2} />
+        </a>
         <h2>Debug Tools</h2>
-        <button class="page-header-action" onClick={onBack}>
-          Settings
-        </button>
       </div>
 
       <article class="card">
