@@ -329,6 +329,16 @@ async fn process_remote_page_items(
                         upload_cooldown_remaining_seconds(sync_state, &existing.path, now)
                     {
                         stats.upload_cooldown_skips += 1;
+                        runtime_set_phase(
+                            &graph.sync_runtime,
+                            &graph.profile_id,
+                            "applying_remote",
+                            &format!(
+                                "Upload retry delayed for '{}' (retry in {})",
+                                existing.path,
+                                format_retry_in_text(remaining_seconds)
+                            ),
+                        );
                         log::info!(
                             "{} [cycle:{}] REMOTE_DELETE_LOCAL_UPLOAD_COOLDOWN_SKIP path={} retry_in={}s",
                             graph.account_prefix,
@@ -437,6 +447,16 @@ async fn process_remote_page_items(
                         upload_cooldown_remaining_seconds(sync_state, &path, now)
                     {
                         stats.upload_cooldown_skips += 1;
+                        runtime_set_phase(
+                            &graph.sync_runtime,
+                            &graph.profile_id,
+                            "applying_remote",
+                            &format!(
+                                "Upload retry delayed for '{}' (retry in {})",
+                                path,
+                                format_retry_in_text(remaining_seconds)
+                            ),
+                        );
                         log::info!(
                             "{} [cycle:{}] REMOTE_OLDER_UPLOAD_COOLDOWN_SKIP path={} retry_in={}s",
                             graph.account_prefix,

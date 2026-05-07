@@ -65,6 +65,20 @@ function relativeUpdatedAt(updatedAt: string): string {
   return `${deltaHours}h ago`;
 }
 
+function extractUploadCooldownHint(phaseMessage: string | null): { path: string; retryIn: string } | null {
+  if (!phaseMessage) {
+    return null;
+  }
+  const match = phaseMessage.match(/^Upload retry delayed for '(.+)' \(retry in (.+)\)$/);
+  if (!match) {
+    return null;
+  }
+  return {
+    path: match[1],
+    retryIn: match[2],
+  };
+}
+
 export function AccountSyncPreviewPopover({
   runtimeStatus,
   issueMessage,
@@ -83,8 +97,9 @@ export function AccountSyncPreviewPopover({
   const recentCompleted = runtimeStatus?.recentCompleted.slice(0, 6) ?? [];
   const recentFailed = runtimeStatus?.recentFailed.slice(0, 4) ?? [];
   const isRemoteScanActive = runtimeStatus?.phase === "scanning_remote";
+  const uploadCooldownHint = extractUploadCooldownHint(runtimeStatus?.phaseMessage ?? null);
   const hasIssueSummary = Boolean(issueMessage);
-  const hasIssueSection = hasIssueSummary || issueActions.length > 0 || recentFailed.length > 0;
+  const hasIssueSection = hasIssueSummary || issueActions.length > 0 || recentFailed.length > 0 || uploadCooldownHint !== null;
 
   const items = [
     ...inProgress.map((transfer) => ({
@@ -149,6 +164,21 @@ export function AccountSyncPreviewPopover({
           <p class="account-sync-preview-section-label">Issues</p>
           {hasIssueSummary && (
             <p class="account-sync-preview-issue-summary">{issueMessage}</p>
+          )}
+          {uploadCooldownHint && (
+            <p class="account-sync-preview-issue-cooldown">
+              Retry queued in {uploadCooldownHint.retryIn}:{" "}
+              <button
+                type="button"
+                class="account-sync-preview-issue-cooldown-path"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void onOpenItemFolder(uploadCooldownHint.path);
+                }}
+              >
+                {uploadCooldownHint.path}
+              </button>
+            </p>
           )}
           <div class="account-sync-preview-actions">
             {issueActions.includes("reauthenticate") && issueKind === "auth_required" && (

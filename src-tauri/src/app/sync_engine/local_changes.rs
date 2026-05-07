@@ -65,6 +65,16 @@ async fn apply_local_changes(
                     upload_cooldown_remaining_seconds(sync_state, &path, now)
                 {
                     stats.upload_cooldown_skips += 1;
+                    runtime_set_phase(
+                        &graph.sync_runtime,
+                        &graph.profile_id,
+                        "applying_local",
+                        &format!(
+                            "Upload retry delayed for '{}' (retry in {})",
+                            path,
+                            format_retry_in_text(remaining_seconds)
+                        ),
+                    );
                     log::info!(
                         "{} [cycle:{}] LOCAL_UPLOAD_COOLDOWN_SKIP path={} retry_in={}s",
                         graph.account_prefix,
@@ -111,6 +121,16 @@ async fn apply_local_changes(
             if let Some(remaining_seconds) = upload_cooldown_remaining_seconds(sync_state, &path, now)
             {
                 stats.upload_cooldown_skips += 1;
+                runtime_set_phase(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    "applying_local",
+                    &format!(
+                        "Upload retry delayed for '{}' (retry in {})",
+                        path,
+                        format_retry_in_text(remaining_seconds)
+                    ),
+                );
                 log::info!(
                     "{} [cycle:{}] LOCAL_UPLOAD_COOLDOWN_SKIP path={} retry_in={}s",
                     graph.account_prefix,
@@ -212,6 +232,20 @@ fn upload_cooldown_remaining_seconds(sync_state: &PersistedSyncState, path: &str
         return None;
     }
     Some(retry_after - now)
+}
+
+fn format_retry_in_text(remaining_seconds: i64) -> String {
+    if remaining_seconds < 60 {
+        return format!("{}s", remaining_seconds);
+    }
+    let minutes = remaining_seconds / 60;
+    let seconds = remaining_seconds % 60;
+    if minutes < 60 {
+        return format!("{}m {}s", minutes, seconds);
+    }
+    let hours = minutes / 60;
+    let rem_minutes = minutes % 60;
+    format!("{}h {}m", hours, rem_minutes)
 }
 
 fn clear_upload_failure_cooldown(sync_state: &mut PersistedSyncState, path: &str) {
