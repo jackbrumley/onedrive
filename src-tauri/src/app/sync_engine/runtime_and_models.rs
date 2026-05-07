@@ -61,6 +61,30 @@ fn resolve_download_concurrency() -> usize {
         .unwrap_or(DEFAULT_DOWNLOAD_CONCURRENCY)
 }
 
+fn resolve_delta_page_queue_capacity() -> usize {
+    std::env::var("SOMEDRIVE_SYNC_DELTA_QUEUE_CAPACITY")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .map(|value| value.clamp(1, 128))
+        .unwrap_or(8)
+}
+
+fn resolve_download_queue_capacity() -> usize {
+    std::env::var("SOMEDRIVE_SYNC_DOWNLOAD_QUEUE_CAPACITY")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .map(|value| value.clamp(16, 4096))
+        .unwrap_or(512)
+}
+
+fn resolve_checkpoint_flush_step() -> usize {
+    std::env::var("SOMEDRIVE_SYNC_CHECKPOINT_FLUSH_STEP")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .map(|value| value.clamp(1, 500))
+        .unwrap_or(25)
+}
+
 fn parse_retry_after_delay(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     let retry_after = headers.get(reqwest::header::RETRY_AFTER)?;
     let text = retry_after.to_str().ok()?.trim();

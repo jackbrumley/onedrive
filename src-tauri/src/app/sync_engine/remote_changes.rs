@@ -7,15 +7,26 @@ async fn fetch_and_apply_delta_changes(
 ) -> Result<(), String> {
     const PHASE_PROGRESS_UPDATE_INTERVAL: Duration = Duration::from_millis(750);
     const PHASE_PROGRESS_ITEM_STEP: usize = 250;
-    const DELTA_PAGE_QUEUE_CAPACITY: usize = 8;
-    const DOWNLOAD_QUEUE_CAPACITY: usize = 512;
-    const DOWNLOAD_CHECKPOINT_FLUSH_STEP: usize = 25;
+
+    let delta_page_queue_capacity = resolve_delta_page_queue_capacity();
+    let download_queue_capacity = resolve_download_queue_capacity();
+    let checkpoint_flush_step = resolve_checkpoint_flush_step();
+    let download_concurrency = resolve_download_concurrency();
 
     runtime_set_phase(
         &graph.sync_runtime,
         &graph.profile_id,
         "scanning_remote",
         "Fetching remote file list",
+    );
+    log::info!(
+        "{} [cycle:{}] REMOTE_PIPELINE_START delta_queue_capacity={} download_queue_capacity={} download_concurrency={} checkpoint_flush_step={}",
+        graph.account_prefix,
+        graph.cycle_id,
+        delta_page_queue_capacity,
+        download_queue_capacity,
+        download_concurrency,
+        checkpoint_flush_step
     );
 
     let start_url = sync_state
@@ -27,7 +38,8 @@ async fn fetch_and_apply_delta_changes(
     let mut last_phase_update_at = scan_started_at;
     let mut last_phase_update_items: usize = 0;
 
-    let (page_tx, mut page_rx) = mpsc::channel::<Result<DeltaPageWorkItem, String>>(DELTA_PAGE_QUEUE_CAPACITY);
+    let (page_tx, mut page_rx) =
+        mpsc::channel::<Result<DeltaPageWorkItem, String>>(delta_page_queue_capacity);
     let mut producer_graph = graph.clone();
     let producer_cancel = Arc::clone(cancel_flag);
     tauri::async_runtime::spawn(async move {
@@ -82,11 +94,11 @@ async fn fetch_and_apply_delta_changes(
         }
     });
 
-    let download_concurrency = resolve_download_concurrency();
-    let (download_tx_raw, download_rx) = mpsc::channel::<RemoteDownloadJob>(DOWNLOAD_QUEUE_CAPACITY);
+    let (download_tx_raw, download_rx) =
+        mpsc::channel::<RemoteDownloadJob>(download_queue_capacity);
     let mut download_tx = Some(download_tx_raw);
     let (download_result_tx, mut download_result_rx) =
-        mpsc::channel::<Result<RemoteDownloadResult, String>>(DOWNLOAD_QUEUE_CAPACITY);
+        mpsc::channel::<Result<RemoteDownloadResult, String>>(download_queue_capacity);
     let download_rx = Arc::new(tokio::sync::Mutex::new(download_rx));
 
     for _ in 0..download_concurrency {
@@ -240,7 +252,7 @@ async fn fetch_and_apply_delta_changes(
                 pending_download_count = pending_download_count.saturating_sub(1);
                 download_results_since_flush += 1;
 
-                if download_results_since_flush >= DOWNLOAD_CHECKPOINT_FLUSH_STEP {
+                if download_results_since_flush >= checkpoint_flush_step {
                     save_sync_state(&graph.profile_id, sync_state)?;
                     download_results_since_flush = 0;
                 }
