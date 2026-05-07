@@ -115,6 +115,8 @@ async fn apply_remote_changes(
     stats: &mut SyncCycleStats,
     cancel_flag: &Arc<AtomicBool>,
 ) -> Result<(), String> {
+    const DOWNLOAD_CHECKPOINT_FLUSH_STEP: usize = 25;
+
     let mut pending_downloads: Vec<(String, String, PathBuf, RemoteKnownItem)> = Vec::new();
 
     for item in changes {
@@ -292,6 +294,7 @@ async fn apply_remote_changes(
         .buffer_unordered(download_concurrency);
 
         let mut completed_count: usize = 0;
+        let mut download_results_since_flush: usize = 0;
         while let Some(task_result) = download_tasks.next().await {
             let (_, _, remote_entry, outcome) = task_result?;
             match outcome {
@@ -314,6 +317,16 @@ async fn apply_remote_changes(
                     );
                 }
             }
+
+            download_results_since_flush += 1;
+            if download_results_since_flush >= DOWNLOAD_CHECKPOINT_FLUSH_STEP {
+                save_sync_state(&graph.profile_id, sync_state)?;
+                download_results_since_flush = 0;
+            }
+        }
+
+        if download_results_since_flush > 0 {
+            save_sync_state(&graph.profile_id, sync_state)?;
         }
 
         log::info!(
