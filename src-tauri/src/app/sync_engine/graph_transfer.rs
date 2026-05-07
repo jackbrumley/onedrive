@@ -1,5 +1,5 @@
 async fn graph_get_text(
-    graph: &mut GraphContext,
+    graph: &GraphContext,
     url: &str,
     cancel_flag: &Arc<AtomicBool>,
 ) -> Result<String, String> {
@@ -9,13 +9,14 @@ async fn graph_get_text(
     loop {
         ensure_not_cancelled(cancel_flag)?;
         attempt += 1;
+        let access_token = graph.current_access_token().await;
         let response = tokio::select! {
             _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
                 return Err(SYNC_CANCELLED_ERROR.to_string());
             }
             value = client
                 .get(url)
-                .bearer_auth(&graph.access_token)
+                .bearer_auth(&access_token)
                 .send() => {
                 value.map_err(|error| format!("Graph GET failed: {error}"))
             }
@@ -91,7 +92,7 @@ async fn graph_get_text(
                 graph.account_prefix,
                 graph.cycle_id
             );
-            graph.refresh_token().await?;
+            let _ = graph.refresh_token_if_needed(&access_token).await?;
             refreshed = true;
             continue;
         }
@@ -119,13 +120,14 @@ fn is_transient_request_error(error: &str) -> bool {
         || normalized.contains("unreachable")
 }
 
-async fn graph_delete(graph: &mut GraphContext, url: &str) -> Result<(), String> {
+async fn graph_delete(graph: &GraphContext, url: &str) -> Result<(), String> {
     let client = graph_http_client()?;
     let mut refreshed = false;
     loop {
+        let access_token = graph.current_access_token().await;
         let response = client
             .delete(url)
-            .bearer_auth(&graph.access_token)
+            .bearer_auth(&access_token)
             .send()
             .await
             .map_err(|error| format!("Graph DELETE failed: {error}"))?;
@@ -136,7 +138,7 @@ async fn graph_delete(graph: &mut GraphContext, url: &str) -> Result<(), String>
                 graph.account_prefix,
                 graph.cycle_id
             );
-            graph.refresh_token().await?;
+            let _ = graph.refresh_token_if_needed(&access_token).await?;
             refreshed = true;
             continue;
         }
@@ -172,7 +174,6 @@ async fn download_remote_item_content(
     );
     let url = format!("{GRAPH_ROOT}/me/drive/items/{}/content", item_id);
     let client = graph_http_client()?;
-    let mut access_token = graph.access_token.clone();
     let mut token_refreshed = false;
     let mut attempt: u32 = 0;
     let transfer_id = runtime_start_transfer(
@@ -185,6 +186,7 @@ async fn download_remote_item_content(
     loop {
         ensure_not_cancelled(cancel_flag)?;
         attempt += 1;
+        let access_token = graph.current_access_token().await;
         let response = tokio::select! {
             _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
                 if let Some(active_transfer_id) = &transfer_id {
@@ -239,8 +241,7 @@ async fn download_remote_item_content(
                 graph.account_prefix,
                 graph.cycle_id
             );
-            let refreshed = refresh_access_token(&graph.profile_id).await?;
-            access_token = refreshed.access_token;
+            let _ = graph.refresh_token_if_needed(&access_token).await?;
             token_refreshed = true;
             continue;
         }
@@ -548,6 +549,7 @@ async fn upload_small_file_simple(
     let mut refreshed = false;
     loop {
         ensure_not_cancelled(cancel_flag)?;
+        let access_token = graph.current_access_token().await;
         let response = tokio::select! {
             _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
                 if let Some(active_transfer_id) = transfer_id {
@@ -562,7 +564,7 @@ async fn upload_small_file_simple(
             }
             value = client
                 .put(&url)
-                .bearer_auth(&graph.access_token)
+                .bearer_auth(&access_token)
                 .body(content.clone())
                 .send() => {
                 value.map_err(|error| {
@@ -593,7 +595,7 @@ async fn upload_small_file_simple(
                 graph.account_prefix,
                 graph.cycle_id
             );
-            graph.refresh_token().await?;
+            let _ = graph.refresh_token_if_needed(&access_token).await?;
             refreshed = true;
             continue;
         }
@@ -810,13 +812,14 @@ async fn create_upload_session(
 
     loop {
         ensure_not_cancelled(cancel_flag)?;
+        let access_token = graph.current_access_token().await;
         let response = tokio::select! {
             _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
                 return Err(SYNC_CANCELLED_ERROR.to_string());
             }
             value = client
                 .post(&url)
-                .bearer_auth(&graph.access_token)
+                .bearer_auth(&access_token)
                 .json(&payload)
                 .send() => {
                 value.map_err(|error| format!("Create upload session request failed: {error}"))?
@@ -830,7 +833,7 @@ async fn create_upload_session(
                 graph.account_prefix,
                 graph.cycle_id
             );
-            graph.refresh_token().await?;
+            let _ = graph.refresh_token_if_needed(&access_token).await?;
             refreshed = true;
             continue;
         }
@@ -898,13 +901,14 @@ async fn create_remote_folder(
     let mut refreshed = false;
     loop {
         ensure_not_cancelled(cancel_flag)?;
+        let access_token = graph.current_access_token().await;
         let response = tokio::select! {
             _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
                 return Err(SYNC_CANCELLED_ERROR.to_string());
             }
             value = client
                 .post(&endpoint)
-                .bearer_auth(&graph.access_token)
+                .bearer_auth(&access_token)
                 .json(&payload)
                 .send() => {
                 value.map_err(|error| {
@@ -928,7 +932,7 @@ async fn create_remote_folder(
                 graph.account_prefix,
                 graph.cycle_id
             );
-            graph.refresh_token().await?;
+            let _ = graph.refresh_token_if_needed(&access_token).await?;
             refreshed = true;
             continue;
         }

@@ -26,7 +26,8 @@ async fn tick_sync_cycle(
         profile_id: profile_id.to_string(),
         account_prefix: account_prefix.clone(),
         cycle_id: cycle_id.clone(),
-        access_token: session.access_token,
+        access_token: Arc::new(tokio::sync::RwLock::new(session.access_token)),
+        token_refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
         sync_runtime: Arc::clone(sync_runtime),
     };
 
