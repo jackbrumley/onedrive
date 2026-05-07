@@ -106,3 +106,13 @@ For each cycle, log:
 - Ignore patterns / selective sync rules.
 - Hash-based equality checks for large files.
 - Batched and parallel transfer optimization.
+
+## Queue Pipeline Notes
+
+- Remote delta sync now runs as a producer/consumer pipeline with bounded queues.
+- Delta page fetching and remote file downloads run independently with backpressure.
+- Mid-cycle recovery uses `activeDeltaNextLink` checkpoints and periodic state flushes.
+- Queue tuning can be adjusted with environment variables:
+  - `SOMEDRIVE_SYNC_DELTA_QUEUE_CAPACITY`
+  - `SOMEDRIVE_SYNC_DOWNLOAD_QUEUE_CAPACITY`
+  - `SOMEDRIVE_SYNC_CHECKPOINT_FLUSH_STEP`
