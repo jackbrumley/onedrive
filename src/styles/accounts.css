@@ -846,6 +846,7 @@
 
 .account-detail-subtitle {
   text-align: center;
+  font-weight: 400;
 }
 
 .account-detail-settings-btn,
@@ -895,6 +896,7 @@
 .account-detail-sync-preview {
   padding: 0;
   overflow: hidden;
+  contain: layout paint;
 }
 
 .account-detail-sync-preview .account-sync-activity-panel {

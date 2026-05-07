@@ -33,6 +33,16 @@ const initialSyncRuntime: SyncRuntimeSnapshot = {
   accounts: [],
 };
 
+function shouldPollSyncRuntime(routeState: AppRouteState, isDocumentVisible: boolean): boolean {
+  if (!isDocumentVisible) {
+    return false;
+  }
+  if (routeState.page === "accountsHome") {
+    return true;
+  }
+  return routeState.page === "accountDetail" && (routeState.accountView ?? "sync") === "sync";
+}
+
 export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
   const [routeState, setRouteState] = useState<AppRouteState>(routeStateFromHash(window.location.hash));
   const [status, setStatus] = useState<AppStatusSnapshot>(initialStatus);
@@ -42,6 +52,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const [syncRuntime, setSyncRuntime] = useState<SyncRuntimeSnapshot>(initialSyncRuntime);
+  const [isDocumentVisible, setIsDocumentVisible] = useState(document.visibilityState === "visible");
   const [autostartEnabled, setAutostartEnabled] = useState(false);
   const [rawLoggerMode, setRawLoggerMode] = useState(false);
 
@@ -81,16 +92,11 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     window.addEventListener("hashchange", syncRoute);
     void refreshActions.refreshStatus();
     void refreshActions.refreshActivity();
-    void refreshActions.refreshSyncRuntime();
     void systemActions.getAutostartEnabled().then(setAutostartEnabled);
     void systemActions.fetchRawLoggerMode().then(setRawLoggerMode);
-    const runtimeInterval = window.setInterval(() => {
-      void refreshActions.refreshSyncRuntime();
-    }, 1500);
     return () => {
       isDisposed = true;
       window.removeEventListener("hashchange", syncRoute);
-      window.clearInterval(runtimeInterval);
       unlistenAuthUpdatePromise
         .then((unlisten) => unlisten())
         .catch(() => {
@@ -98,6 +104,30 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
         });
     };
   }, []);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsDocumentVisible(document.visibilityState === "visible");
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    const pollEnabled = shouldPollSyncRuntime(routeState, isDocumentVisible);
+    if (!pollEnabled) {
+      return;
+    }
+    void refreshActions.refreshSyncRuntime();
+    const runtimeInterval = window.setInterval(() => {
+      void refreshActions.refreshSyncRuntime();
+    }, 1500);
+    return () => {
+      window.clearInterval(runtimeInterval);
+    };
+  }, [isDocumentVisible, routeState.accountView, routeState.page]);
 
   const toggleAutostart = async (enabled: boolean) => {
     const updated = await systemActions.setAutostartEnabled(enabled);
