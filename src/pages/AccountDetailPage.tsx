@@ -8,6 +8,7 @@ import {
   IconUser,
 } from "@tabler/icons-preact";
 import { useState } from "preact/hooks";
+import { memo } from "preact/compat";
 import { AccountDetailUnifiedPanel } from "../components/accounts/AccountDetailUnifiedPanel";
 import type { AccountProfile, SyncRuntimeAccountStatus } from "../types/somedrive";
 
@@ -34,50 +35,25 @@ interface AccountDetailPageProps {
   onExportLargeDeletePreview: (accountId: string) => Promise<void>;
 }
 
-export function AccountDetailPage({
+interface AccountDetailHeaderProps {
+  account: AccountProfile;
+  view: "sync" | "settings";
+  onBack: () => void;
+  onOpenSettings: (accountId: string) => void;
+  onOpenSync: (accountId: string) => void;
+  onSetAgentState: (accountId: string, state: "syncing" | "paused") => Promise<void>;
+}
+
+const AccountDetailHeader = memo(function AccountDetailHeader({
   account,
-  runtimeStatus,
   view,
   onBack,
   onOpenSettings,
   onOpenSync,
   onSetAgentState,
-  onStartAuth,
-  onRename,
-  onSetSyncRoot,
-  onClearAuth,
-  onRemoveProfile,
-  onOpenSyncRootFolder,
-  onOpenItemFolder,
-  onReauthenticate,
-  onRetrySync,
-  onConfirmLargeDelete,
-  onKeepCloudFiles,
-  onFetchLargeDeletePreview,
-  onExportLargeDeletePreview,
-}: AccountDetailPageProps) {
+}: AccountDetailHeaderProps) {
   const [syncButtonHovered, setSyncButtonHovered] = useState(false);
-
-  if (!account) {
-    return (
-      <section class="page">
-        <h2>Account Not Found</h2>
-        <article class="card">
-          <p>This account does not exist anymore. Return to the account list.</p>
-          <button onClick={onBack}>Back to Accounts</button>
-        </article>
-      </section>
-    );
-  }
-
-  const syncActive =
-    account.agentState === "syncing" ||
-    (runtimeStatus?.inProgress.length ?? 0) > 0 ||
-    runtimeStatus?.phase === "syncing" ||
-    runtimeStatus?.phase === "scanning_remote" ||
-    runtimeStatus?.phase === "applying_remote" ||
-    runtimeStatus?.phase === "scanning_local" ||
-    runtimeStatus?.phase === "applying_local";
+  const syncActive = account.agentState === "syncing";
   const nextSyncState: "syncing" | "paused" = syncActive ? "paused" : "syncing";
   const accountKindLabel = account.kind.charAt(0).toUpperCase() + account.kind.slice(1);
   const accountKindIcon = account.kind === "business" ? <IconBuildingBank size={15} /> : <IconUser size={15} />;
@@ -94,7 +70,7 @@ export function AccountDetailPage({
   };
 
   return (
-    <section class="page">
+    <>
       <div class="page-header account-detail-page-header">
         <a
           class="page-header-back-link"
@@ -147,6 +123,54 @@ export function AccountDetailPage({
       <p class="page-subtitle account-detail-subtitle">
         {isSyncView ? "Synchronization status and transfer activity." : "Account configuration and profile controls."}
       </p>
+    </>
+  );
+});
+
+export function AccountDetailPage({
+  account,
+  runtimeStatus,
+  view,
+  onBack,
+  onOpenSettings,
+  onOpenSync,
+  onSetAgentState,
+  onStartAuth,
+  onRename,
+  onSetSyncRoot,
+  onClearAuth,
+  onRemoveProfile,
+  onOpenSyncRootFolder,
+  onOpenItemFolder,
+  onReauthenticate,
+  onRetrySync,
+  onConfirmLargeDelete,
+  onKeepCloudFiles,
+  onFetchLargeDeletePreview,
+  onExportLargeDeletePreview,
+}: AccountDetailPageProps) {
+  if (!account) {
+    return (
+      <section class="page account-detail-page">
+        <h2>Account Not Found</h2>
+        <article class="card">
+          <p>This account does not exist anymore. Return to the account list.</p>
+          <button onClick={onBack}>Back to Accounts</button>
+        </article>
+      </section>
+    );
+  }
+
+  return (
+    <section class="page account-detail-page">
+      <AccountDetailHeader
+        account={account}
+        view={view}
+        onBack={onBack}
+        onOpenSettings={onOpenSettings}
+        onOpenSync={onOpenSync}
+        onSetAgentState={onSetAgentState}
+      />
 
       <AccountDetailUnifiedPanel
         account={account}

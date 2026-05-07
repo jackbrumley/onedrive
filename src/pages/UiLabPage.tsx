@@ -214,73 +214,74 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
     }
   }, [accounts, selectedLabAccountId]);
 
+  if (selectedLabAccount) {
+    return (
+      <AccountDetailPage
+        account={selectedLabAccount}
+        runtimeStatus={selectedRuntimeStatus}
+        view={selectedLabAccountView}
+        onBack={() => navigateUiLab(null)}
+        onOpenSettings={(accountId) => navigateUiLab(accountId, "settings")}
+        onOpenSync={(accountId) => navigateUiLab(accountId, "sync")}
+        onSetAgentState={async (accountId, nextState) => {
+          setLabAgentStateById((current) => ({ ...current, [accountId]: nextState }));
+        }}
+        onStartAuth={async () => null}
+        onRename={async () => undefined}
+        onSetSyncRoot={async () => undefined}
+        onClearAuth={async () => undefined}
+        onRemoveProfile={async () => undefined}
+        onOpenSyncRootFolder={async () => undefined}
+        onOpenItemFolder={async () => undefined}
+        onReauthenticate={async () => null}
+        onRetrySync={async () => undefined}
+        onConfirmLargeDelete={async () => undefined}
+        onKeepCloudFiles={async () => undefined}
+        onFetchLargeDeletePreview={async () => []}
+        onExportLargeDeletePreview={async () => undefined}
+      />
+    );
+  }
+
   return (
     <section class="page">
-      {!selectedLabAccount ? (
-        <>
-          <div class="page-header">
-            <a
-              class="page-header-back-link"
-              href="#/debug"
-              onClick={(event) => {
-                event.preventDefault();
-                onBack();
-              }}
-              aria-label="Back to debug tools"
-              title="Back to debug tools"
-            >
-              <IconChevronLeft size={36} stroke={2.2} />
-            </a>
-            <h2>UI Lab</h2>
+      <>
+        <div class="page-header">
+          <a
+            class="page-header-back-link"
+            href="#/debug"
+            onClick={(event) => {
+              event.preventDefault();
+              onBack();
+            }}
+            aria-label="Back to debug tools"
+            title="Back to debug tools"
+          >
+            <IconChevronLeft size={36} stroke={2.2} />
+          </a>
+          <h2>UI Lab</h2>
+        </div>
+        {accounts.length === 0 ? (
+          <p>No accounts configured yet. Show setup call-to-action.</p>
+        ) : (
+          <div class="account-list">
+            {accounts.map((account) => (
+              <AccountCard
+                key={account.id}
+                account={account}
+                runtimeStatus={runtimeByAccountId[account.id] ?? null}
+                onOpenDetails={(accountId) => {
+                  navigateUiLab(accountId, "sync");
+                }}
+                onSetAgentState={async (accountId, nextState) => {
+                  setLabAgentStateById((current) => ({ ...current, [accountId]: nextState }));
+                }}
+                onOpenSyncRootFolder={async () => undefined}
+              />
+            ))}
           </div>
-          {accounts.length === 0 ? (
-            <p>No accounts configured yet. Show setup call-to-action.</p>
-          ) : (
-            <div class="account-list">
-              {accounts.map((account) => (
-                <AccountCard
-                  key={account.id}
-                  account={account}
-                  runtimeStatus={runtimeByAccountId[account.id] ?? null}
-                  onOpenDetails={(accountId) => {
-                    navigateUiLab(accountId, "sync");
-                  }}
-                  onSetAgentState={async (accountId, nextState) => {
-                    setLabAgentStateById((current) => ({ ...current, [accountId]: nextState }));
-                  }}
-                  onOpenSyncRootFolder={async () => undefined}
-                />
-              ))}
-            </div>
-          )}
-
-        </>
-      ) : (
-        <AccountDetailPage
-          account={selectedLabAccount}
-          runtimeStatus={selectedRuntimeStatus}
-          view={selectedLabAccountView}
-          onBack={() => navigateUiLab(null)}
-          onOpenSettings={(accountId) => navigateUiLab(accountId, "settings")}
-          onOpenSync={(accountId) => navigateUiLab(accountId, "sync")}
-          onSetAgentState={async (accountId, nextState) => {
-            setLabAgentStateById((current) => ({ ...current, [accountId]: nextState }));
-          }}
-          onStartAuth={async () => null}
-          onRename={async () => undefined}
-          onSetSyncRoot={async () => undefined}
-          onClearAuth={async () => undefined}
-          onRemoveProfile={async () => undefined}
-          onOpenSyncRootFolder={async () => undefined}
-          onOpenItemFolder={async () => undefined}
-          onReauthenticate={async () => null}
-          onRetrySync={async () => undefined}
-          onConfirmLargeDelete={async () => undefined}
-          onKeepCloudFiles={async () => undefined}
-          onFetchLargeDeletePreview={async () => []}
-          onExportLargeDeletePreview={async () => undefined}
-        />
-      )}
+        )}
+      </>
     </section>
   );
 }

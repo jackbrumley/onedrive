@@ -456,77 +456,79 @@ export function AccountSyncActivityPanel({
           )}
         </section>
       )}
-      {items.length > 0 && <p class="account-sync-preview-section-label">Activity</p>}
-      {items.length === 0 ? (
-        <p class="account-sync-preview-empty">No sync activity yet.</p>
-      ) : (
-        <div class="account-sync-preview-list">
-          {items.map((item) => {
-            const isActive = item.kind === "active";
-            const progressPercent = isActive ? transferProgressPercent(item.bytesDone ?? 0, item.bytesTotal) : null;
-            return (
-              <article key={item.id} class="account-sync-preview-item">
-                <button
-                  type="button"
-                  class="account-sync-preview-item-button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void onOpenItemFolder(item.path);
-                  }}
-                >
-                  <div class="account-sync-preview-row">
-                    <span class="account-sync-preview-file-icon">
-                      {iconForFilePath(item.path)}
-                    </span>
-                    <div class="account-sync-preview-content">
-                      <p class="account-sync-preview-path">{item.path}</p>
-                      <p class="account-sync-preview-meta">
-                        {item.kind === "active" ? (
-                          shouldShowTransferBytes(item.bytesDone ?? 0, item.bytesTotal) ? (
-                            <span>
-                              {formatBytes(item.bytesDone ?? 0)}
-                              {item.bytesTotal ? ` / ${formatBytes(item.bytesTotal)}` : ""}
-                            </span>
+      <div class="account-sync-preview-activity-scroll">
+        {items.length > 0 && <p class="account-sync-preview-section-label">Activity</p>}
+        {items.length === 0 ? (
+          <p class="account-sync-preview-empty">No sync activity yet.</p>
+        ) : (
+          <div class="account-sync-preview-list">
+            {items.map((item) => {
+              const isActive = item.kind === "active";
+              const progressPercent = isActive ? transferProgressPercent(item.bytesDone ?? 0, item.bytesTotal) : null;
+              return (
+                <article key={item.id} class="account-sync-preview-item">
+                  <button
+                    type="button"
+                    class="account-sync-preview-item-button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void onOpenItemFolder(item.path);
+                    }}
+                  >
+                    <div class="account-sync-preview-row">
+                      <span class="account-sync-preview-file-icon">
+                        {iconForFilePath(item.path)}
+                      </span>
+                      <div class="account-sync-preview-content">
+                        <p class="account-sync-preview-path">{item.path}</p>
+                        <p class="account-sync-preview-meta">
+                          {item.kind === "active" ? (
+                            shouldShowTransferBytes(item.bytesDone ?? 0, item.bytesTotal) ? (
+                              <span>
+                                {formatBytes(item.bytesDone ?? 0)}
+                                {item.bytesTotal ? ` / ${formatBytes(item.bytesTotal)}` : ""}
+                              </span>
+                            ) : (
+                              <span />
+                            )
                           ) : (
-                            <span />
-                          )
-                        ) : (
-                          <span>{formatBytes(item.bytesTotal)}</span>
+                            <span>{formatBytes(item.bytesTotal)}</span>
+                          )}
+                          <span>{new Date(item.when).toLocaleTimeString()}</span>
+                        </p>
+                        {isActive && (
+                          <div class="sync-runtime-progress-track-compact">
+                            <div
+                              class={
+                                progressPercent === null
+                                  ? "sync-runtime-progress-fill-compact sync-runtime-progress-fill-compact-indeterminate"
+                                  : "sync-runtime-progress-fill-compact"
+                              }
+                              style={progressPercent === null ? { width: "34%" } : { width: `${progressPercent.toFixed(1)}%` }}
+                            />
+                          </div>
                         )}
-                        <span>{new Date(item.when).toLocaleTimeString()}</span>
-                      </p>
-                      {isActive && (
-                        <div class="sync-runtime-progress-track-compact">
-                          <div
-                            class={
-                              progressPercent === null
-                                ? "sync-runtime-progress-fill-compact sync-runtime-progress-fill-compact-indeterminate"
-                                : "sync-runtime-progress-fill-compact"
-                            }
-                            style={progressPercent === null ? { width: "34%" } : { width: `${progressPercent.toFixed(1)}%` }}
-                          />
-                        </div>
-                      )}
+                      </div>
+                      <span class="account-sync-preview-right-icons">
+                        <span class="account-sync-preview-direction-icon">
+                          {iconForDirection(item.direction)}
+                        </span>
+                        <span class="account-sync-preview-status-icon">
+                          {item.kind === "active" ? (
+                            <IconRefresh size={ACTIVITY_ICON_SIZE} class="sync-preview-icon-active" />
+                          ) : (
+                            <IconCircleCheckFilled size={ACTIVITY_ICON_SIZE} class="sync-preview-icon-success" />
+                          )}
+                        </span>
+                      </span>
                     </div>
-                    <span class="account-sync-preview-right-icons">
-                      <span class="account-sync-preview-direction-icon">
-                        {iconForDirection(item.direction)}
-                      </span>
-                      <span class="account-sync-preview-status-icon">
-                        {item.kind === "active" ? (
-                          <IconRefresh size={ACTIVITY_ICON_SIZE} class="sync-preview-icon-active" />
-                        ) : (
-                          <IconCircleCheckFilled size={ACTIVITY_ICON_SIZE} class="sync-preview-icon-success" />
-                        )}
-                      </span>
-                    </span>
-                  </div>
-                </button>
-              </article>
-            );
-          })}
-        </div>
-      )}
+                  </button>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
