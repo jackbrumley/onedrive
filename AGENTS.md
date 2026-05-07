@@ -106,6 +106,7 @@ Managed via **npm** scripts and the Tauri CLI.
 ### 3. Structure Contracts (Enforced)
 - **File Size Ceiling:** No `.rs`, `.ts`, `.tsx`, or `.css` source file may exceed **1000 lines**.
 - **Soft Size Target:** Most files should stay below 400-600 lines unless there is a clear, justified reason.
+- **Semantic Splits Only:** Never split files into numeric shards (for example `part1`, `part2`, etc.). New files must be named by responsibility and grouped by domain concern.
 - **Main Wiring Only (Rust):** `src-tauri/src/main.rs` is bootstrap-only and must contain no domain/business logic.
 - **Main Wiring Only (Frontend Entry):** `src/main.tsx` is entry wiring only.
 - **App Composition Only:** `src/App.tsx` composes shell/layout/hooks and should not hold feature/business logic.
