@@ -1,0 +1,422 @@
+async fn download_remote_item_content(
+    graph: &GraphContext,
+    item_id: &str,
+    relative_path: &str,
+    local_path: &Path,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<(), String> {
+    ensure_not_cancelled(cancel_flag)?;
+    log::info!(
+        "{} [cycle:{}] DOWNLOAD_START item_id={} path={} local_path={}",
+        graph.account_prefix,
+        graph.cycle_id,
+        item_id,
+        relative_path,
+        local_path.display()
+    );
+    let url = format!("{GRAPH_ROOT}/me/drive/items/{}/content", item_id);
+    let client = reqwest::Client::new();
+    let mut access_token = graph.access_token.clone();
+    let mut token_refreshed = false;
+    let mut attempt: u32 = 0;
+    let transfer_id = runtime_start_transfer(
+        &graph.sync_runtime,
+        &graph.profile_id,
+        "download",
+        relative_path,
+        None,
+    );
+    loop {
+        ensure_not_cancelled(cancel_flag)?;
+        attempt += 1;
+        let response = tokio::select! {
+            _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
+                if let Some(active_transfer_id) = &transfer_id {
+                    runtime_finish_transfer_error(
+                        &graph.sync_runtime,
+                        &graph.profile_id,
+                        active_transfer_id,
+                        SYNC_CANCELLED_ERROR,
+                    );
+                }
+                return Err(SYNC_CANCELLED_ERROR.to_string());
+            }
+            value = client
+                .get(&url)
+                .bearer_auth(&access_token)
+                .send() => {
+                value.map_err(|error| format!("Download request failed: {error}"))
+            }
+        };
+        let response = match response {
+            Ok(value) => value,
+            Err(error) => {
+                if attempt < MAX_DOWNLOAD_RETRIES {
+                    let delay = exponential_backoff_delay(attempt);
+                    log::warn!(
+                        "{} [cycle:{}] DOWNLOAD_RETRY attempt={} path={} reason={} delay_ms={}",
+                        graph.account_prefix,
+                        graph.cycle_id,
+                        attempt,
+                        relative_path,
+                        error,
+                        delay.as_millis()
+                    );
+                    sleep_with_cancellation(cancel_flag, delay).await?;
+                    continue;
+                }
+                if let Some(active_transfer_id) = &transfer_id {
+                    runtime_finish_transfer_error(
+                        &graph.sync_runtime,
+                        &graph.profile_id,
+                        active_transfer_id,
+                        &error,
+                    );
+                }
+                return Err(error);
+            }
+        };
+        let status = response.status();
+        if status.as_u16() == 401 && !token_refreshed {
+            log::warn!(
+                "{} [cycle:{}] GRAPH_DOWNLOAD_401_REFRESH",
+                graph.account_prefix,
+                graph.cycle_id
+            );
+            let refreshed = refresh_access_token(&graph.profile_id).await?;
+            access_token = refreshed.access_token;
+            token_refreshed = true;
+            continue;
+        }
+        if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+            if attempt < MAX_DOWNLOAD_RETRIES {
+                let delay = parse_retry_after_delay(response.headers())
+                    .unwrap_or_else(|| exponential_backoff_delay(attempt));
+                log::warn!(
+                    "{} [cycle:{}] DOWNLOAD_RETRY_HTTP attempt={} status={} path={} delay_ms={}",
+                    graph.account_prefix,
+                    graph.cycle_id,
+                    attempt,
+                    status,
+                    relative_path,
+                    delay.as_millis()
+                );
+                sleep_with_cancellation(cancel_flag, delay).await?;
+                continue;
+            }
+        }
+        if !status.is_success() {
+            let text = response.text().await.unwrap_or_default();
+            let snippet: String = text.chars().take(400).collect();
+            if let Some(active_transfer_id) = &transfer_id {
+                runtime_finish_transfer_error(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    active_transfer_id,
+                    &format!("Download failed with status {}", status),
+                );
+            }
+            return Err(format!(
+                "Download failed for item {} with status {}: {}",
+                item_id, status, snippet
+            ));
+        }
+
+        let total = response.content_length();
+        if let Some(active_transfer_id) = &transfer_id {
+            runtime_update_transfer_progress(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                active_transfer_id,
+                0,
+                total,
+            );
+        }
+
+        if let Some(parent) = local_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "Failed creating local parent '{}': {}",
+                    parent.display(),
+                    error
+                )
+            })?;
+        }
+
+        let temp_path = local_path.with_extension("somedrive-part");
+        let mut output_file = std::fs::File::create(&temp_path).map_err(|error| {
+            format!(
+                "Failed creating temporary download file '{}': {}",
+                temp_path.display(),
+                error
+            )
+        })?;
+
+        let mut stream = response.bytes_stream();
+        let mut downloaded_bytes: u64 = 0;
+        while let Some(chunk_result) = stream.next().await {
+            if cancel_flag.load(Ordering::Relaxed) {
+                if let Some(active_transfer_id) = &transfer_id {
+                    runtime_finish_transfer_error(
+                        &graph.sync_runtime,
+                        &graph.profile_id,
+                        active_transfer_id,
+                        SYNC_CANCELLED_ERROR,
+                    );
+                }
+                let _ = std::fs::remove_file(&temp_path);
+                return Err(SYNC_CANCELLED_ERROR.to_string());
+            }
+            let chunk = match chunk_result {
+                Ok(value) => value,
+                Err(error) => {
+                    if let Some(active_transfer_id) = &transfer_id {
+                        runtime_finish_transfer_error(
+                            &graph.sync_runtime,
+                            &graph.profile_id,
+                            active_transfer_id,
+                            &format!("Failed reading download stream: {}", error),
+                        );
+                    }
+                    let _ = std::fs::remove_file(&temp_path);
+                    return Err(format!("Failed reading download bytes stream: {error}"));
+                }
+            };
+
+            if let Err(error) = output_file.write_all(&chunk) {
+                if let Some(active_transfer_id) = &transfer_id {
+                    runtime_finish_transfer_error(
+                        &graph.sync_runtime,
+                        &graph.profile_id,
+                        active_transfer_id,
+                        &format!("Failed writing download chunk: {}", error),
+                    );
+                }
+                let _ = std::fs::remove_file(&temp_path);
+                return Err(format!(
+                    "Failed writing temporary file '{}': {}",
+                    temp_path.display(),
+                    error
+                ));
+            }
+
+            downloaded_bytes += chunk.len() as u64;
+            if let Some(active_transfer_id) = &transfer_id {
+                runtime_update_transfer_progress(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    active_transfer_id,
+                    downloaded_bytes,
+                    total,
+                );
+            }
+        }
+
+        if let Err(error) = output_file.flush() {
+            if let Some(active_transfer_id) = &transfer_id {
+                runtime_finish_transfer_error(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    active_transfer_id,
+                    &format!("Failed flushing temporary file: {}", error),
+                );
+            }
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(format!(
+                "Failed flushing temporary file '{}': {}",
+                temp_path.display(),
+                error
+            ));
+        }
+
+        if cancel_flag.load(Ordering::Relaxed) {
+            if let Some(active_transfer_id) = &transfer_id {
+                runtime_finish_transfer_error(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    active_transfer_id,
+                    SYNC_CANCELLED_ERROR,
+                );
+            }
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(SYNC_CANCELLED_ERROR.to_string());
+        }
+
+        if let Err(error) = std::fs::rename(&temp_path, local_path) {
+            if let Some(active_transfer_id) = &transfer_id {
+                runtime_finish_transfer_error(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    active_transfer_id,
+                    &format!("Failed finalizing local file: {}", error),
+                );
+            }
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(format!(
+                "Failed moving '{}' to '{}': {}",
+                temp_path.display(),
+                local_path.display(),
+                error
+            ));
+        }
+
+        if let Some(active_transfer_id) = &transfer_id {
+            runtime_update_transfer_progress(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                active_transfer_id,
+                downloaded_bytes,
+                Some(downloaded_bytes),
+            );
+            runtime_finish_transfer_success(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                active_transfer_id,
+            );
+        }
+
+        log::info!(
+            "{} [cycle:{}] DOWNLOAD_OK item_id={} path={} bytes={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            item_id,
+            relative_path,
+            downloaded_bytes
+        );
+        break;
+    }
+
+    Ok(())
+}
+
+async fn upload_file_by_path(
+    graph: &mut GraphContext,
+    sync_root: &Path,
+    relative_path: &str,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<DriveItemResponse, String> {
+    ensure_not_cancelled(cancel_flag)?;
+    let local_path = sync_root.join(path_to_local(relative_path));
+    let content = std::fs::read(&local_path).map_err(|error| {
+        format!(
+            "Failed reading local file '{}': {}",
+            local_path.display(),
+            error
+        )
+    })?;
+
+    let encoded_path = encode_graph_path(relative_path);
+    let url = format!("{GRAPH_ROOT}/me/drive/root:/{}:/content", encoded_path);
+    let content_len = content.len() as u64;
+    let transfer_id = runtime_start_transfer(
+        &graph.sync_runtime,
+        &graph.profile_id,
+        "upload",
+        relative_path,
+        Some(content_len),
+    );
+    log::info!(
+        "{} [cycle:{}] UPLOAD_START path={} local_path={} bytes={}",
+        graph.account_prefix,
+        graph.cycle_id,
+        relative_path,
+        local_path.display(),
+        content.len()
+    );
+    let client = reqwest::Client::new();
+    let mut refreshed = false;
+    loop {
+        ensure_not_cancelled(cancel_flag)?;
+        let response = tokio::select! {
+            _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
+                if let Some(active_transfer_id) = &transfer_id {
+                    runtime_finish_transfer_error(
+                        &graph.sync_runtime,
+                        &graph.profile_id,
+                        active_transfer_id,
+                        SYNC_CANCELLED_ERROR,
+                    );
+                }
+                return Err(SYNC_CANCELLED_ERROR.to_string());
+            }
+            value = client
+                .put(&url)
+                .bearer_auth(&graph.access_token)
+                .body(content.clone())
+                .send() => {
+                value.map_err(|error| {
+                    if let Some(active_transfer_id) = &transfer_id {
+                        runtime_finish_transfer_error(
+                            &graph.sync_runtime,
+                            &graph.profile_id,
+                            active_transfer_id,
+                            &format!("Upload request failed: {}", error),
+                        );
+                    }
+                    format!("Failed uploading file '{}': {}", relative_path, error)
+                })?
+            }
+        };
+
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .map_err(|error| format!("Failed reading upload response: {error}"))?;
+
+        ensure_not_cancelled(cancel_flag)?;
+
+        if status.as_u16() == 401 && !refreshed {
+            log::warn!(
+                "{} [cycle:{}] GRAPH_UPLOAD_401_REFRESH",
+                graph.account_prefix,
+                graph.cycle_id
+            );
+            graph.refresh_token().await?;
+            refreshed = true;
+            continue;
+        }
+
+        if !status.is_success() {
+            let snippet: String = text.chars().take(400).collect();
+            if let Some(active_transfer_id) = &transfer_id {
+                runtime_finish_transfer_error(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    active_transfer_id,
+                    &format!("Upload failed with status {}", status),
+                );
+            }
+            return Err(format!(
+                "Upload failed for '{}' with status {}: {}",
+                relative_path, status, snippet
+            ));
+        }
+        let parsed = serde_json::from_str::<DriveItemResponse>(&text)
+            .map_err(|error| format!("Failed decoding upload response JSON: {error}"))?;
+        if let Some(active_transfer_id) = &transfer_id {
+            runtime_update_transfer_progress(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                active_transfer_id,
+                content_len,
+                Some(content_len),
+            );
+            runtime_finish_transfer_success(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                active_transfer_id,
+            );
+        }
+        log::info!(
+            "{} [cycle:{}] UPLOAD_OK path={} remote_id={} size={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            relative_path,
+            parsed.id,
+            parsed.size.unwrap_or(0)
+        );
+        return Ok(parsed);
+    }
+}
+

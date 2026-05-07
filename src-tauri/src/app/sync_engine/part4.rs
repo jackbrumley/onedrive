@@ -1,0 +1,312 @@
+async fn create_remote_folder(
+    graph: &mut GraphContext,
+    relative_path: &str,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<DriveItemResponse, String> {
+    ensure_not_cancelled(cancel_flag)?;
+    let (parent, name) = split_parent_and_name(relative_path)?;
+    let endpoint = if parent.is_empty() {
+        format!("{GRAPH_ROOT}/me/drive/root/children")
+    } else {
+        format!(
+            "{GRAPH_ROOT}/me/drive/root:/{}:/children",
+            encode_graph_path(parent)
+        )
+    };
+    let payload = serde_json::json!({
+        "name": name,
+        "folder": {},
+        "@microsoft.graph.conflictBehavior": "replace"
+    });
+    log::info!(
+        "{} [cycle:{}] REMOTE_DIR_CREATE_REQUEST path={} parent={}",
+        graph.account_prefix,
+        graph.cycle_id,
+        relative_path,
+        parent
+    );
+
+    let client = reqwest::Client::new();
+    let mut refreshed = false;
+    loop {
+        ensure_not_cancelled(cancel_flag)?;
+        let response = tokio::select! {
+            _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
+                return Err(SYNC_CANCELLED_ERROR.to_string());
+            }
+            value = client
+                .post(&endpoint)
+                .bearer_auth(&graph.access_token)
+                .json(&payload)
+                .send() => {
+                value.map_err(|error| {
+                    format!(
+                        "Failed creating remote folder '{}': {}",
+                        relative_path, error
+                    )
+                })?
+            }
+        };
+
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .map_err(|error| format!("Failed reading create folder response: {error}"))?;
+
+        if status.as_u16() == 401 && !refreshed {
+            log::warn!(
+                "{} [cycle:{}] GRAPH_DIR_CREATE_401_REFRESH",
+                graph.account_prefix,
+                graph.cycle_id
+            );
+            graph.refresh_token().await?;
+            refreshed = true;
+            continue;
+        }
+
+        if !status.is_success() {
+            let snippet: String = text.chars().take(400).collect();
+            return Err(format!(
+                "Create folder failed for '{}' with status {}: {}",
+                relative_path, status, snippet
+            ));
+        }
+        let parsed = serde_json::from_str::<DriveItemResponse>(&text)
+            .map_err(|error| format!("Failed decoding create-folder response JSON: {error}"))?;
+        log::info!(
+            "{} [cycle:{}] REMOTE_DIR_CREATE_OK path={} remote_id={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            relative_path,
+            parsed.id
+        );
+        return Ok(parsed);
+    }
+}
+
+async fn delete_remote_item(
+    graph: &mut GraphContext,
+    item_id: &str,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<(), String> {
+    ensure_not_cancelled(cancel_flag)?;
+    let url = format!("{GRAPH_ROOT}/me/drive/items/{}", item_id);
+    log::info!(
+        "{} [cycle:{}] REMOTE_DELETE_REQUEST item_id={}",
+        graph.account_prefix,
+        graph.cycle_id,
+        item_id
+    );
+    graph_delete(graph, &url).await?;
+    log::info!(
+        "{} [cycle:{}] REMOTE_DELETE_RESULT item_id={} status=ok",
+        graph.account_prefix,
+        graph.cycle_id,
+        item_id
+    );
+    Ok(())
+}
+
+fn split_parent_and_name(relative_path: &str) -> Result<(&str, &str), String> {
+    let trimmed = relative_path.trim_matches('/');
+    if trimmed.is_empty() {
+        return Err("Remote folder path is empty".to_string());
+    }
+    if let Some((parent, name)) = trimmed.rsplit_once('/') {
+        return Ok((parent, name));
+    }
+    Ok(("", trimmed))
+}
+
+fn encode_graph_path(path: &str) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for segment in path.split('/') {
+        if segment.is_empty() {
+            continue;
+        }
+        parts.push(percent_encode(segment));
+    }
+    parts.join("/")
+}
+
+fn percent_encode(input: &str) -> String {
+    let mut output = String::new();
+    for byte in input.bytes() {
+        let unreserved = matches!(
+            byte,
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~'
+        );
+        if unreserved {
+            output.push(byte as char);
+        } else {
+            output.push('%');
+            output.push_str(&format!("{:02X}", byte));
+        }
+    }
+    output
+}
+
+fn remote_known_item_from_drive_item(
+    item: DriveItemResponse,
+    fallback_path: &str,
+) -> Result<RemoteKnownItem, String> {
+    let path = if let (Some(name), Some(parent_ref)) =
+        (item.name.clone(), item.parent_reference.clone())
+    {
+        let parent = parent_ref
+            .path
+            .as_deref()
+            .map(extract_root_relative)
+            .unwrap_or_default();
+        normalize_relative_path(&if parent.is_empty() {
+            name
+        } else {
+            format!("{}/{}", parent, name)
+        })
+    } else {
+        fallback_path.to_string()
+    };
+    if path.trim().is_empty() {
+        return Err("Remote item path cannot be empty".to_string());
+    }
+
+    Ok(RemoteKnownItem {
+        id: item.id,
+        path,
+        is_dir: item.folder.is_some(),
+        size: item.size.unwrap_or(0),
+        modified_ts: parse_rfc3339_seconds(item.last_modified_date_time.as_deref()),
+    })
+}
+
+fn collect_local_snapshot(sync_root: &Path) -> Result<HashMap<String, LocalSnapshotEntry>, String> {
+    let mut snapshot = HashMap::new();
+    if !sync_root.exists() {
+        return Ok(snapshot);
+    }
+
+    let mut stack: Vec<PathBuf> = vec![sync_root.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        let entries = std::fs::read_dir(&current).map_err(|error| {
+            format!(
+                "Failed reading directory '{}': {}",
+                current.display(),
+                error
+            )
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let path = entry.path();
+            let metadata = entry.metadata().map_err(|error| {
+                format!("Failed reading metadata '{}': {}", path.display(), error)
+            })?;
+
+            if !metadata.is_file() && !metadata.is_dir() {
+                continue;
+            }
+
+            let relative = path
+                .strip_prefix(sync_root)
+                .map_err(|error| {
+                    format!(
+                        "Failed computing relative path '{}': {}",
+                        path.display(),
+                        error
+                    )
+                })?
+                .to_string_lossy()
+                .replace('\\', "/");
+            let normalized = normalize_relative_path(&relative);
+            if normalized.is_empty() {
+                continue;
+            }
+
+            let modified_ts = metadata
+                .modified()
+                .ok()
+                .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|value| value.as_secs() as i64)
+                .unwrap_or(0);
+
+            snapshot.insert(
+                normalized,
+                LocalSnapshotEntry {
+                    is_dir: metadata.is_dir(),
+                    size: if metadata.is_file() {
+                        metadata.len()
+                    } else {
+                        0
+                    },
+                    modified_ts,
+                },
+            );
+
+            if metadata.is_dir() {
+                stack.push(path);
+            }
+        }
+    }
+
+    Ok(snapshot)
+}
+
+fn read_local_entry(path: &Path) -> Result<Option<LocalSnapshotEntry>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let metadata = std::fs::metadata(path).map_err(|error| error.to_string())?;
+    let modified_ts = metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|value| value.as_secs() as i64)
+        .unwrap_or(0);
+    Ok(Some(LocalSnapshotEntry {
+        is_dir: metadata.is_dir(),
+        size: if metadata.is_file() {
+            metadata.len()
+        } else {
+            0
+        },
+        modified_ts,
+    }))
+}
+
+fn sync_state_path(profile_id: &str) -> Result<PathBuf, String> {
+    let config_dir =
+        dirs::config_dir().ok_or_else(|| "Could not resolve config directory".to_string())?;
+    Ok(config_dir
+        .join("somedrive")
+        .join("accounts")
+        .join(profile_id)
+        .join("sync_state.json"))
+}
+
+fn load_sync_state(profile_id: &str) -> Result<PersistedSyncState, String> {
+    let path = sync_state_path(profile_id)?;
+    if !path.exists() {
+        return Ok(PersistedSyncState::default());
+    }
+    let text = std::fs::read_to_string(&path)
+        .map_err(|error| format!("Failed reading sync state '{}': {}", path.display(), error))?;
+    serde_json::from_str::<PersistedSyncState>(&text)
+        .map_err(|error| format!("Failed decoding sync state JSON: {error}"))
+}
+
+fn save_sync_state(profile_id: &str, state: &PersistedSyncState) -> Result<(), String> {
+    let path = sync_state_path(profile_id)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "Failed creating sync state directory '{}': {}",
+                parent.display(),
+                error
+            )
+        })?;
+    }
+    let text = serde_json::to_string_pretty(state)
+        .map_err(|error| format!("Failed encoding sync state JSON: {error}"))?;
+    std::fs::write(&path, text)
+        .map_err(|error| format!("Failed writing sync state '{}': {}", path.display(), error))
+}
