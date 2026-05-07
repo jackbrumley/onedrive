@@ -35,6 +35,8 @@ pub fn run() {
             pause_all_accounts,
             resume_all_accounts,
             set_account_sync_root,
+            open_account_item_folder,
+            open_account_sync_root_folder,
             list_activity_events,
             start_device_auth,
             start_interactive_auth,

@@ -1,28 +1,22 @@
-export type AccountDetailTab = "overview" | "sync" | "activity" | "settings";
-
 export type AppPage = "accountsHome" | "accountDetail" | "debug" | "uiLab";
 
 export interface AppRouteState {
   page: AppPage;
   accountId: string | null;
-  accountTab: AccountDetailTab;
 }
 
 const defaultState: AppRouteState = {
   page: "accountsHome",
   accountId: null,
-  accountTab: "overview",
 };
 
 export function routeStateFromHash(hash: string): AppRouteState {
   const segments = hash.replace(/^#\/?/, "").split("/").filter(Boolean);
   if (segments.length === 0 || segments[0] === "accounts") {
-    if (segments[1] && segments[2]) {
-      const tab = normalizeAccountTab(segments[2]);
+    if (segments[1]) {
       return {
         page: "accountDetail",
         accountId: decodeURIComponent(segments[1]),
-        accountTab: tab,
       };
     }
     return defaultState;
@@ -32,7 +26,6 @@ export function routeStateFromHash(hash: string): AppRouteState {
     return {
       page: "debug",
       accountId: null,
-      accountTab: "overview",
     };
   }
 
@@ -40,7 +33,6 @@ export function routeStateFromHash(hash: string): AppRouteState {
     return {
       page: "uiLab",
       accountId: null,
-      accountTab: "overview",
     };
   }
 
@@ -52,7 +44,7 @@ export function hashFromRouteState(state: AppRouteState): string {
     return "#/accounts";
   }
   if (state.page === "accountDetail" && state.accountId) {
-    return `#/accounts/${encodeURIComponent(state.accountId)}/${state.accountTab}`;
+    return `#/accounts/${encodeURIComponent(state.accountId)}`;
   }
   if (state.page === "debug") {
     return "#/settings";
@@ -61,12 +53,4 @@ export function hashFromRouteState(state: AppRouteState): string {
     return "#/ui-lab";
   }
   return "#/accounts";
-}
-
-function normalizeAccountTab(value: string): AccountDetailTab {
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "overview" || normalized === "sync" || normalized === "activity" || normalized === "settings") {
-    return normalized;
-  }
-  return "overview";
 }

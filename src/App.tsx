@@ -23,7 +23,7 @@ function App() {
     const rawLabel = button.dataset.logAction ?? button.textContent ?? "button";
     const label = rawLabel.replace(/\s+/g, " ").trim() || "button";
     const accountContext = runtime.routeState.accountId ? ` account=${runtime.routeState.accountId}` : "";
-    const message = `click page=${runtime.routeState.page} tab=${runtime.routeState.accountTab}${accountContext} label="${label}"`;
+    const message = `click page=${runtime.routeState.page}${accountContext} label="${label}"`;
 
     void invoke("log_ui_event", { message }).catch(() => {
       // no-op

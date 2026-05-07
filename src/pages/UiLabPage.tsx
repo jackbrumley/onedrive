@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { AccountActivityPanel } from "../components/accounts/AccountActivityPanel";
 import { AccountCard } from "../components/accounts/AccountCard";
-import { AccountDetailTabs } from "../components/accounts/AccountDetailTabs";
-import { AccountOverviewPanel } from "../components/accounts/AccountOverviewPanel";
-import { AccountSyncPanel } from "../components/accounts/AccountSyncPanel";
+import { AccountDetailUnifiedPanel } from "../components/accounts/AccountDetailUnifiedPanel";
 import { SyncStateControl } from "../components/sync/SyncStateControl";
-import type { AccountDetailTab } from "../routes/appRoutes";
 import type {
   AccountProfile,
   ActivityEvent,
@@ -59,7 +55,6 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
   const [demoAccountSyncState, setDemoAccountSyncState] = useState<"syncing" | "paused">("syncing");
   const [demoGlobalSyncState, setDemoGlobalSyncState] = useState<"syncing" | "paused">("paused");
   const [selectedLabAccountId, setSelectedLabAccountId] = useState<string | null>(null);
-  const [selectedLabTab, setSelectedLabTab] = useState<AccountDetailTab>("overview");
   const [labAgentStateById, setLabAgentStateById] = useState<Record<string, SyncAgentState>>({});
 
   const accounts = useMemo(() => {
@@ -159,6 +154,15 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
             status: "completed",
             error: null,
           },
+          {
+            id: "lab-complete-2",
+            direction: "upload",
+            path: "Invoices/paid-2026-05.csv",
+            bytesTotal: 48203,
+            finishedAt: new Date(Date.now() - 110_000).toISOString(),
+            status: "completed",
+            error: null,
+          },
         ],
         recentFailed: [],
       },
@@ -202,7 +206,6 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
     }
     if (!accounts.some((account) => account.id === selectedLabAccountId)) {
       setSelectedLabAccountId(null);
-      setSelectedLabTab("overview");
     }
   }, [accounts, selectedLabAccountId]);
 
@@ -214,43 +217,8 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
           Back
         </button>
       </div>
-      <article class="card">
-        <p>Hidden visual sandbox for quickly previewing account states and UI variations.</p>
-        <p>Route shortcut: #/ui-lab</p>
-        <div class="button-row">
-          <button onClick={() => setScenario("empty")}>Empty State</button>
-          <button onClick={() => setScenario("single")}>Single Account</button>
-          <button onClick={() => setScenario("mixed")}>Mixed Accounts</button>
-          <button onClick={() => setShowErrorBanner((current) => !current)}>
-            {showErrorBanner ? "Hide" : "Show"} Error Banner
-          </button>
-        </div>
-      </article>
-
-      <article class="card">
-        <h3>Pause / Play Control Demo</h3>
-        <p>Click these controls to simulate the sync pause/resume behavior.</p>
-        <div class="button-row" style={{ alignItems: "center" }}>
-          <span class="pill">Account Sync: {demoAccountSyncState}</span>
-          <SyncStateControl state={demoAccountSyncState} onToggle={async (next) => setDemoAccountSyncState(next)} />
-        </div>
-        <div class="button-row" style={{ alignItems: "center" }}>
-          <span class="pill">Global Sync: {demoGlobalSyncState}</span>
-          <SyncStateControl state={demoGlobalSyncState} onToggle={async (next) => setDemoGlobalSyncState(next)} />
-        </div>
-      </article>
-
-      {showErrorBanner && (
-        <article class="card card-error">
-          <h3>Simulated Error Banner</h3>
-          <p>One account needs re-authentication. User action should stay in-app.</p>
-          <button>Reconnect Account</button>
-        </article>
-      )}
-
       {!selectedLabAccount ? (
         <>
-          <h3>Preview Account Cards</h3>
           {accounts.length === 0 ? (
             <p>No accounts configured yet. Show setup call-to-action.</p>
           ) : (
@@ -260,14 +228,39 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
                   key={account.id}
                   account={account}
                   runtimeStatus={runtimeByAccountId[account.id] ?? null}
-                  onOpenDetails={(accountId, tab = "overview") => {
+                  onOpenDetails={(accountId) => {
                     setSelectedLabAccountId(accountId);
-                    setSelectedLabTab(tab);
                   }}
+                  onOpenSyncRootFolder={async () => undefined}
+                  onOpenItemFolder={async () => undefined}
                 />
               ))}
             </div>
           )}
+
+          <div class="button-row" style={{ marginTop: "10px" }}>
+            <button onClick={() => setScenario("empty")}>Empty State</button>
+            <button onClick={() => setScenario("single")}>Single Account</button>
+            <button onClick={() => setScenario("mixed")}>Mixed Accounts</button>
+            <button onClick={() => setShowErrorBanner((current) => !current)}>
+              {showErrorBanner ? "Hide" : "Show"} Error Banner
+            </button>
+          </div>
+
+          {showErrorBanner && (
+            <article class="card card-error" style={{ marginTop: "10px" }}>
+              <h3>Simulated Error Banner</h3>
+              <p>One account needs re-authentication. User action should stay in-app.</p>
+              <button>Reconnect Account</button>
+            </article>
+          )}
+
+          <div class="button-row" style={{ alignItems: "center", marginTop: "10px" }}>
+            <span class="pill">Account Sync: {demoAccountSyncState}</span>
+            <SyncStateControl state={demoAccountSyncState} onToggle={async (next) => setDemoAccountSyncState(next)} />
+            <span class="pill">Global Sync: {demoGlobalSyncState}</span>
+            <SyncStateControl state={demoGlobalSyncState} onToggle={async (next) => setDemoGlobalSyncState(next)} />
+          </div>
         </>
       ) : (
         <>
@@ -279,61 +272,26 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
             <button
               onClick={() => {
                 setSelectedLabAccountId(null);
-                setSelectedLabTab("overview");
               }}
             >
               Back to Cards
             </button>
           </div>
 
-          <AccountDetailTabs activeTab={selectedLabTab} onSelectTab={setSelectedLabTab} />
-
-          {selectedLabTab === "overview" && (
-            <AccountOverviewPanel
-              account={selectedLabAccount}
-              onSetAgentState={async (accountId, nextState) => {
-                setLabAgentStateById((current) => ({ ...current, [accountId]: nextState }));
-              }}
-              onStartAuth={async () => null}
-            />
-          )}
-
-          {selectedLabTab === "sync" && (
-              <AccountSyncPanel
-                account={selectedLabAccount}
-                runtimeStatus={selectedRuntimeStatus}
-                recentEvents={selectedLabEvents.slice(0, 8)}
-                onSetAgentState={async (accountId, nextState) => {
-                setLabAgentStateById((current) => ({ ...current, [accountId]: nextState }));
-              }}
-            />
-          )}
-
-          {selectedLabTab === "activity" && <AccountActivityPanel events={selectedLabEvents} />}
-
-          {selectedLabTab === "settings" && (
-            <article class="card">
-              <h3>Account Settings (Preview)</h3>
-              <p>
-                Account Name: <span class="pill">{selectedLabAccount.displayName}</span>
-              </p>
-              <p>
-                Sync Root: <span class="pill">{selectedLabAccount.syncRoot}</span>
-              </p>
-              <p>
-                Auth: <span class="pill">{selectedLabAccount.authConfigured ? "Connected" : "Needs Authentication"}</span>
-              </p>
-              <div class="button-row">
-                <button disabled>Rename</button>
-                <button disabled>Choose Sync Folder</button>
-                <button disabled>Start Microsoft Sign-In</button>
-                <button class="danger" disabled>
-                  Remove Profile
-                </button>
-              </div>
-              <p class="page-subtitle">Preview-only settings panel. Actions are intentionally disabled.</p>
-            </article>
-          )}
+          <AccountDetailUnifiedPanel
+            account={selectedLabAccount}
+            runtimeStatus={selectedRuntimeStatus}
+            events={selectedLabEvents}
+            actionsDisabled
+            onSetAgentState={async (accountId, nextState) => {
+              setLabAgentStateById((current) => ({ ...current, [accountId]: nextState }));
+            }}
+            onStartAuth={async () => null}
+            onRename={async () => undefined}
+            onSetSyncRoot={async () => undefined}
+            onClearAuth={async () => undefined}
+            onRemoveProfile={async () => undefined}
+          />
         </>
       )}
     </section>

@@ -1,18 +1,11 @@
-import { AccountActivityPanel } from "../components/accounts/AccountActivityPanel";
-import { AccountDetailTabs } from "../components/accounts/AccountDetailTabs";
-import { AccountOverviewPanel } from "../components/accounts/AccountOverviewPanel";
-import { AccountSettingsPanel } from "../components/accounts/AccountSettingsPanel";
-import { AccountSyncPanel } from "../components/accounts/AccountSyncPanel";
-import type { AccountDetailTab } from "../routes/appRoutes";
+import { AccountDetailUnifiedPanel } from "../components/accounts/AccountDetailUnifiedPanel";
 import type { AccountProfile, ActivityEvent, SyncRuntimeAccountStatus } from "../types/somedrive";
 
 interface AccountDetailPageProps {
   account: AccountProfile | null;
   runtimeStatus: SyncRuntimeAccountStatus | null;
-  activeTab: AccountDetailTab;
   events: ActivityEvent[];
   onBack: () => void;
-  onChangeTab: (tab: AccountDetailTab) => void;
   onSetAgentState: (accountId: string, state: "syncing" | "paused") => Promise<void>;
   onStartAuth: (accountId: string) => Promise<unknown>;
   onRename: (id: string, name: string) => Promise<void>;
@@ -24,10 +17,8 @@ interface AccountDetailPageProps {
 export function AccountDetailPage({
   account,
   runtimeStatus,
-  activeTab,
   events,
   onBack,
-  onChangeTab,
   onSetAgentState,
   onStartAuth,
   onRename,
@@ -52,38 +43,22 @@ export function AccountDetailPage({
       <div class="detail-header">
         <div>
           <h2>{account.displayName}</h2>
-          <p class="page-subtitle">Manage this account's sync, activity, and settings.</p>
+          <p class="page-subtitle">Manage this account in one place.</p>
         </div>
         <button onClick={onBack}>Back to Accounts</button>
       </div>
 
-      <AccountDetailTabs activeTab={activeTab} onSelectTab={onChangeTab} />
-
-      {activeTab === "overview" && (
-        <AccountOverviewPanel account={account} onSetAgentState={onSetAgentState} onStartAuth={onStartAuth} />
-      )}
-
-      {activeTab === "sync" && (
-        <AccountSyncPanel
-          account={account}
-          runtimeStatus={runtimeStatus}
-          recentEvents={events.slice(0, 8)}
-          onSetAgentState={onSetAgentState}
-        />
-      )}
-
-      {activeTab === "activity" && <AccountActivityPanel events={events} />}
-
-      {activeTab === "settings" && (
-        <AccountSettingsPanel
-          account={account}
-          onRename={onRename}
-          onSetSyncRoot={onSetSyncRoot}
-          onStartAuth={onStartAuth}
-          onClearAuth={onClearAuth}
-          onRemoveProfile={onRemoveProfile}
-        />
-      )}
+      <AccountDetailUnifiedPanel
+        account={account}
+        runtimeStatus={runtimeStatus}
+        events={events}
+        onSetAgentState={onSetAgentState}
+        onStartAuth={onStartAuth}
+        onRename={onRename}
+        onSetSyncRoot={onSetSyncRoot}
+        onClearAuth={onClearAuth}
+        onRemoveProfile={onRemoveProfile}
+      />
     </section>
   );
 }

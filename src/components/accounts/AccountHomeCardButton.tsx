@@ -3,7 +3,7 @@ import type { ComponentChildren } from "preact";
 interface AccountHomeCardButtonProps {
   onClick: () => void;
   ariaLabel: string;
-  title: string;
+  title?: string;
   className?: string;
   children: ComponentChildren;
 }

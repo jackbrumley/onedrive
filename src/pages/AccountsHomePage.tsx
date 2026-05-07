@@ -2,14 +2,15 @@ import { useState } from "preact/hooks";
 import { AddAccountCard } from "../components/accounts/AddAccountCard";
 import { AddAccountModal } from "../components/accounts/AddAccountModal";
 import { AccountCard } from "../components/accounts/AccountCard";
-import type { AccountDetailTab } from "../routes/appRoutes";
 import type { AccountProfile, AccountKind, SyncRuntimeAccountStatus } from "../types/somedrive";
 
 interface AccountsHomePageProps {
   accounts: AccountProfile[];
   syncRuntimeByAccountId: Record<string, SyncRuntimeAccountStatus>;
   onCreateAccount: (displayName: string, kind: AccountKind) => Promise<boolean>;
-  onOpenAccount: (accountId: string, tab?: AccountDetailTab) => void;
+  onOpenAccount: (accountId: string) => void;
+  onOpenSyncRootFolder: (accountId: string) => Promise<void>;
+  onOpenItemFolder: (accountId: string, relativePath: string) => Promise<void>;
 }
 
 export function AccountsHomePage({
@@ -17,6 +18,8 @@ export function AccountsHomePage({
   syncRuntimeByAccountId,
   onCreateAccount,
   onOpenAccount,
+  onOpenSyncRootFolder,
+  onOpenItemFolder,
 }: AccountsHomePageProps) {
   const [showAddModal, setShowAddModal] = useState(false);
 
@@ -32,6 +35,8 @@ export function AccountsHomePage({
             account={account}
             runtimeStatus={syncRuntimeByAccountId[account.id] ?? null}
             onOpenDetails={onOpenAccount}
+            onOpenSyncRootFolder={onOpenSyncRootFolder}
+            onOpenItemFolder={onOpenItemFolder}
           />
         ))}
         <AddAccountCard onClick={() => setShowAddModal(true)} />

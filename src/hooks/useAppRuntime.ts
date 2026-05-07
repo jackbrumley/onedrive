@@ -4,7 +4,6 @@ import { useEffect, useState } from "preact/hooks";
 import {
   hashFromRouteState,
   routeStateFromHash,
-  type AccountDetailTab,
   type AppRouteState,
 } from "../routes/appRoutes";
 import type {
@@ -65,15 +64,13 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     navigate({
       page: "accountsHome",
       accountId: null,
-      accountTab: "overview",
     });
   };
 
-  const openAccount = (accountId: string, tab: AccountDetailTab = "overview") => {
+  const openAccount = (accountId: string) => {
     navigate({
       page: "accountDetail",
       accountId,
-      accountTab: tab,
     });
   };
 
@@ -81,7 +78,6 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     navigate({
       page: "debug",
       accountId: null,
-      accountTab: "overview",
     });
   };
 
@@ -89,7 +85,6 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     navigate({
       page: "uiLab",
       accountId: null,
-      accountTab: "overview",
     });
   };
 
@@ -149,7 +144,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
       showToast(`Account '${displayName}' added.`, "success", 2200);
       await Promise.all([refreshStatus(), refreshActivity(), refreshSyncRuntime()]);
       const authStarted = await startInteractiveAuth(profile.id);
-      openAccount(profile.id, "settings");
+      openAccount(profile.id);
       return authStarted;
     } catch (error) {
       showToast(`Failed to add account: ${error}`, "error", 4200);
@@ -275,6 +270,29 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     }
   };
 
+  const openAccountItemFolder = async (profileId: string, relativePath: string) => {
+    try {
+      await invoke("open_account_item_folder", {
+        input: {
+          profileId,
+          relativePath,
+        },
+      });
+    } catch (error) {
+      showToast(`Failed to open folder: ${error}`, "error", 3200);
+    }
+  };
+
+  const openAccountSyncRootFolder = async (profileId: string) => {
+    try {
+      await invoke("open_account_sync_root_folder", {
+        profileId,
+      });
+    } catch (error) {
+      showToast(`Failed to open folder: ${error}`, "error", 3200);
+    }
+  };
+
   useEffect(() => {
     const syncRoute = () => setRouteState(routeStateFromHash(window.location.hash));
     let isDisposed = false;
@@ -335,5 +353,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     fetchSessionLogText,
     copySessionLog,
     openSessionLog,
+    openAccountSyncRootFolder,
+    openAccountItemFolder,
   };
 }

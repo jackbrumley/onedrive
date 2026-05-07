@@ -33,20 +33,16 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
           syncRuntimeByAccountId={syncRuntimeByAccountId}
           onCreateAccount={runtime.createAccountProfile}
           onOpenAccount={runtime.openAccount}
+          onOpenSyncRootFolder={runtime.openAccountSyncRootFolder}
+          onOpenItemFolder={runtime.openAccountItemFolder}
         />
       )}
       renderAccountDetail={() => (
         <AccountDetailPage
           account={selectedAccount}
           runtimeStatus={selectedAccount ? (syncRuntimeByAccountId[selectedAccount.id] ?? null) : null}
-          activeTab={runtime.routeState.accountTab}
           events={selectedAccountEvents}
           onBack={runtime.goHome}
-          onChangeTab={(tab) => {
-            if (selectedAccount) {
-              runtime.openAccount(selectedAccount.id, tab);
-            }
-          }}
           onSetAgentState={runtime.setAccountAgentState}
           onStartAuth={runtime.startInteractiveAuth}
           onRename={runtime.renameAccountProfile}
