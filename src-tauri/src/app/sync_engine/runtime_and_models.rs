@@ -4,6 +4,7 @@ struct SyncCycleStats {
     cycle_id: String,
     downloaded_files: usize,
     uploaded_files: usize,
+    upload_failures: usize,
     deleted_local: usize,
     deleted_remote: usize,
     created_remote_folders: usize,

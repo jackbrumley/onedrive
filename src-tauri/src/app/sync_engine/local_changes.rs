@@ -69,10 +69,23 @@ async fn apply_local_changes(
                     local_entry.modified_ts,
                     remote_modified
                 );
-                let uploaded = upload_file_by_path(graph, sync_root, &path, cancel_flag).await?;
-                let known = remote_known_item_from_drive_item(uploaded, &path)?;
-                upsert_remote_known_item(sync_state, known);
-                stats.uploaded_files += 1;
+                match upload_file_by_path(graph, sync_root, &path, cancel_flag).await {
+                    Ok(uploaded) => {
+                        let known = remote_known_item_from_drive_item(uploaded, &path)?;
+                        upsert_remote_known_item(sync_state, known);
+                        stats.uploaded_files += 1;
+                    }
+                    Err(error) => {
+                        stats.upload_failures += 1;
+                        log::warn!(
+                            "{} [cycle:{}] LOCAL_UPLOAD_FAILED path={} reason={}",
+                            graph.account_prefix,
+                            graph.cycle_id,
+                            path,
+                            error
+                        );
+                    }
+                }
             }
         } else {
             log::info!(
@@ -81,10 +94,23 @@ async fn apply_local_changes(
                 graph.cycle_id,
                 path
             );
-            let uploaded = upload_file_by_path(graph, sync_root, &path, cancel_flag).await?;
-            let known = remote_known_item_from_drive_item(uploaded, &path)?;
-            upsert_remote_known_item(sync_state, known);
-            stats.uploaded_files += 1;
+            match upload_file_by_path(graph, sync_root, &path, cancel_flag).await {
+                Ok(uploaded) => {
+                    let known = remote_known_item_from_drive_item(uploaded, &path)?;
+                    upsert_remote_known_item(sync_state, known);
+                    stats.uploaded_files += 1;
+                }
+                Err(error) => {
+                    stats.upload_failures += 1;
+                    log::warn!(
+                        "{} [cycle:{}] LOCAL_UPLOAD_FAILED path={} reason={}",
+                        graph.account_prefix,
+                        graph.cycle_id,
+                        path,
+                        error
+                    );
+                }
+            }
         }
     }
 
@@ -249,4 +275,3 @@ fn parse_rfc3339_seconds(value: Option<&str>) -> i64 {
         .map(|timestamp| timestamp.timestamp())
         .unwrap_or(0)
 }
-

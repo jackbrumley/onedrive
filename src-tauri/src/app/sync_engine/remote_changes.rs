@@ -330,11 +330,23 @@ async fn process_remote_page_items(
                         graph.cycle_id,
                         existing.path
                     );
-                    let uploaded =
-                        upload_file_by_path(graph, sync_root, &existing.path, cancel_flag).await?;
-                    let known = remote_known_item_from_drive_item(uploaded, &existing.path)?;
-                    upsert_remote_known_item(sync_state, known);
-                    stats.uploaded_files += 1;
+                    match upload_file_by_path(graph, sync_root, &existing.path, cancel_flag).await {
+                        Ok(uploaded) => {
+                            let known = remote_known_item_from_drive_item(uploaded, &existing.path)?;
+                            upsert_remote_known_item(sync_state, known);
+                            stats.uploaded_files += 1;
+                        }
+                        Err(error) => {
+                            stats.upload_failures += 1;
+                            log::warn!(
+                                "{} [cycle:{}] REMOTE_DELETE_LOCAL_UPLOAD_FAILED path={} reason={}",
+                                graph.account_prefix,
+                                graph.cycle_id,
+                                existing.path,
+                                error
+                            );
+                        }
+                    }
                     continue;
                 }
 
@@ -398,21 +410,34 @@ async fn process_remote_page_items(
             .map(|entry| has_local_changed(entry, previous_local))
             .unwrap_or(false);
 
-        if local_changed {
-            let local_entry = local_current.expect("local_changed implies local entry exists");
-            if local_entry.modified_ts > remote_entry.modified_ts {
-                log::info!(
-                    "{} [cycle:{}] REMOTE_OLDER_UPLOAD_LOCAL path={} local_ts={} remote_ts={}",
-                    graph.account_prefix,
-                    graph.cycle_id,
-                    path,
-                    local_entry.modified_ts,
-                    remote_entry.modified_ts
-                );
-                let uploaded = upload_file_by_path(graph, sync_root, &path, cancel_flag).await?;
-                let known = remote_known_item_from_drive_item(uploaded, &path)?;
-                upsert_remote_known_item(sync_state, known);
-                stats.uploaded_files += 1;
+            if local_changed {
+                let local_entry = local_current.expect("local_changed implies local entry exists");
+                if local_entry.modified_ts > remote_entry.modified_ts {
+                    log::info!(
+                        "{} [cycle:{}] REMOTE_OLDER_UPLOAD_LOCAL path={} local_ts={} remote_ts={}",
+                        graph.account_prefix,
+                        graph.cycle_id,
+                        path,
+                        local_entry.modified_ts,
+                        remote_entry.modified_ts
+                    );
+                    match upload_file_by_path(graph, sync_root, &path, cancel_flag).await {
+                        Ok(uploaded) => {
+                            let known = remote_known_item_from_drive_item(uploaded, &path)?;
+                            upsert_remote_known_item(sync_state, known);
+                            stats.uploaded_files += 1;
+                        }
+                        Err(error) => {
+                            stats.upload_failures += 1;
+                            log::warn!(
+                                "{} [cycle:{}] REMOTE_OLDER_UPLOAD_FAILED path={} reason={}",
+                                graph.account_prefix,
+                                graph.cycle_id,
+                                path,
+                                error
+                            );
+                        }
+                    }
                 continue;
             }
 
