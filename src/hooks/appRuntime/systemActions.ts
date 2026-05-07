@@ -61,6 +61,34 @@ export function createSystemActions({ showToast }: SystemActionsFactoryParams) {
     }
   };
 
+  const openProfileLog = async (profileId: string) => {
+    try {
+      await invoke("open_profile_log", { profileId });
+    } catch (error) {
+      showToast(`Failed to open profile log: ${error}`, "error", 4200);
+    }
+  };
+
+  const fetchRawLoggerMode = async () => {
+    try {
+      return await invoke<boolean>("get_raw_logger_mode");
+    } catch (error) {
+      showToast(`Failed to read raw logger mode: ${error}`, "error", 4200);
+      return false;
+    }
+  };
+
+  const setRawLoggerMode = async (enabled: boolean) => {
+    try {
+      await invoke("set_raw_logger_mode", { enabled });
+      showToast(`Raw logger mode ${enabled ? "enabled" : "disabled"}.`, "success", 2600);
+      return enabled;
+    } catch (error) {
+      showToast(`Failed to update raw logger mode: ${error}`, "error", 4200);
+      return null;
+    }
+  };
+
   const openAccountItemFolder = async (profileId: string, relativePath: string) => {
     try {
       await invoke("open_account_item_folder", {
@@ -90,6 +118,9 @@ export function createSystemActions({ showToast }: SystemActionsFactoryParams) {
     fetchSessionLogText,
     copySessionLog,
     openSessionLog,
+    openProfileLog,
+    fetchRawLoggerMode,
+    setRawLoggerMode,
     openAccountItemFolder,
     openAccountSyncRootFolder,
   };

@@ -3,10 +3,12 @@ async fn graph_get_text(
     url: &str,
     cancel_flag: &Arc<AtomicBool>,
 ) -> Result<String, String> {
-    let client = reqwest::Client::new();
+    let client = graph_http_client()?;
     let mut refreshed = false;
+    let mut attempt: u32 = 0;
     loop {
         ensure_not_cancelled(cancel_flag)?;
+        attempt += 1;
         let response = tokio::select! {
             _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
                 return Err(SYNC_CANCELLED_ERROR.to_string());
@@ -15,14 +17,73 @@ async fn graph_get_text(
                 .get(url)
                 .bearer_auth(&graph.access_token)
                 .send() => {
-                value.map_err(|error| format!("Graph GET failed: {error}"))?
+                value.map_err(|error| format!("Graph GET failed: {error}"))
             }
         };
+        let response = match response {
+            Ok(value) => value,
+            Err(error) => {
+                if attempt < MAX_DOWNLOAD_RETRIES && is_transient_request_error(&error) {
+                    let delay = exponential_backoff_delay(attempt);
+                    log::warn!(
+                        "{} [cycle:{}] GRAPH_GET_RETRY attempt={} url={} reason={} delay_ms={}",
+                        graph.account_prefix,
+                        graph.cycle_id,
+                        attempt,
+                        url,
+                        error,
+                        delay.as_millis()
+                    );
+                    sleep_with_cancellation(cancel_flag, delay).await?;
+                    continue;
+                }
+                return Err(error);
+            }
+        };
+
         let status = response.status();
+        if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+            if attempt < MAX_DOWNLOAD_RETRIES {
+                let delay = parse_retry_after_delay(response.headers())
+                    .unwrap_or_else(|| exponential_backoff_delay(attempt));
+                log::warn!(
+                    "{} [cycle:{}] GRAPH_GET_RETRY_HTTP attempt={} status={} url={} delay_ms={}",
+                    graph.account_prefix,
+                    graph.cycle_id,
+                    attempt,
+                    status,
+                    url,
+                    delay.as_millis()
+                );
+                sleep_with_cancellation(cancel_flag, delay).await?;
+                continue;
+            }
+        }
+
         let text = response
             .text()
             .await
-            .map_err(|error| format!("Failed reading Graph response: {error}"))?;
+            .map_err(|error| format!("Failed reading Graph response: {error}"));
+        let text = match text {
+            Ok(value) => value,
+            Err(error) => {
+                if attempt < MAX_DOWNLOAD_RETRIES && is_transient_request_error(&error) {
+                    let delay = exponential_backoff_delay(attempt);
+                    log::warn!(
+                        "{} [cycle:{}] GRAPH_GET_RETRY_BODY attempt={} url={} reason={} delay_ms={}",
+                        graph.account_prefix,
+                        graph.cycle_id,
+                        attempt,
+                        url,
+                        error,
+                        delay.as_millis()
+                    );
+                    sleep_with_cancellation(cancel_flag, delay).await?;
+                    continue;
+                }
+                return Err(error);
+            }
+        };
 
         if status.as_u16() == 401 && !refreshed {
             log::warn!(
@@ -46,8 +107,20 @@ async fn graph_get_text(
     }
 }
 
+fn is_transient_request_error(error: &str) -> bool {
+    let normalized = error.to_lowercase();
+    normalized.contains("timed out")
+        || normalized.contains("timeout")
+        || normalized.contains("connection reset")
+        || normalized.contains("connection aborted")
+        || normalized.contains("connection refused")
+        || normalized.contains("tempor")
+        || normalized.contains("dns")
+        || normalized.contains("unreachable")
+}
+
 async fn graph_delete(graph: &mut GraphContext, url: &str) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    let client = graph_http_client()?;
     let mut refreshed = false;
     loop {
         let response = client
@@ -98,7 +171,7 @@ async fn download_remote_item_content(
         local_path.display()
     );
     let url = format!("{GRAPH_ROOT}/me/drive/items/{}/content", item_id);
-    let client = reqwest::Client::new();
+    let client = graph_http_client()?;
     let mut access_token = graph.access_token.clone();
     let mut token_refreshed = false;
     let mut attempt: u32 = 0;
@@ -376,6 +449,16 @@ async fn download_remote_item_content(
             );
         }
 
+        if attempt > 1 {
+            log::info!(
+                "{} [cycle:{}] DOWNLOAD_RETRY_RECOVERED attempts={} path={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                attempt,
+                relative_path
+            );
+        }
+
         log::info!(
             "{} [cycle:{}] DOWNLOAD_OK item_id={} path={} bytes={}",
             graph.account_prefix,
@@ -461,7 +544,7 @@ async fn upload_small_file_simple(
 ) -> Result<DriveItemResponse, String> {
     let encoded_path = encode_graph_path(relative_path);
     let url = format!("{GRAPH_ROOT}/me/drive/root:/{}:/content", encoded_path);
-    let client = reqwest::Client::new();
+    let client = graph_http_client()?;
     let mut refreshed = false;
     loop {
         ensure_not_cancelled(cancel_flag)?;
@@ -568,7 +651,7 @@ async fn upload_large_file_session(
 ) -> Result<DriveItemResponse, String> {
     let upload_url = create_upload_session(graph, relative_path, cancel_flag).await?;
     let chunk_size = resolve_upload_chunk_bytes();
-    let client = reqwest::Client::new();
+    let client = graph_http_client()?;
     let mut file = std::fs::File::open(local_path).map_err(|error| {
         format!(
             "Failed opening local upload file '{}': {}",
@@ -722,7 +805,7 @@ async fn create_upload_session(
             "@microsoft.graph.conflictBehavior": "replace"
         }
     });
-    let client = reqwest::Client::new();
+    let client = graph_http_client()?;
     let mut refreshed = false;
 
     loop {
@@ -811,7 +894,7 @@ async fn create_remote_folder(
         parent
     );
 
-    let client = reqwest::Client::new();
+    let client = graph_http_client()?;
     let mut refreshed = false;
     loop {
         ensure_not_cancelled(cancel_flag)?;

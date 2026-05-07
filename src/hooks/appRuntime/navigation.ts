@@ -18,6 +18,7 @@ export function createNavigationActions({ setRouteState }: NavigationFactoryPara
     navigate({
       page: "accountsHome",
       accountId: null,
+      accountView: null,
     });
   };
 
@@ -25,6 +26,15 @@ export function createNavigationActions({ setRouteState }: NavigationFactoryPara
     navigate({
       page: "accountDetail",
       accountId,
+      accountView: "sync",
+    });
+  };
+
+  const openAccountSettings = (accountId: string) => {
+    navigate({
+      page: "accountDetail",
+      accountId,
+      accountView: "settings",
     });
   };
 
@@ -32,6 +42,7 @@ export function createNavigationActions({ setRouteState }: NavigationFactoryPara
     navigate({
       page: "settings",
       accountId: null,
+      accountView: null,
     });
   };
 
@@ -39,6 +50,7 @@ export function createNavigationActions({ setRouteState }: NavigationFactoryPara
     navigate({
       page: "debug",
       accountId: null,
+      accountView: null,
     });
   };
 
@@ -46,6 +58,7 @@ export function createNavigationActions({ setRouteState }: NavigationFactoryPara
     navigate({
       page: "uiLab",
       accountId: null,
+      accountView: null,
     });
   };
 
@@ -53,6 +66,7 @@ export function createNavigationActions({ setRouteState }: NavigationFactoryPara
     navigate,
     goHome,
     openAccount,
+    openAccountSettings,
     goSettings,
     goDebug,
     goUiLab,

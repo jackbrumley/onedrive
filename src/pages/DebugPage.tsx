@@ -10,6 +10,7 @@ interface DebugPageProps {
   onFetchSessionLogText: () => Promise<string>;
   onCopySessionLog: () => Promise<void>;
   onOpenSessionLog: () => Promise<void>;
+  onOpenProfileLog: (profileId: string) => Promise<void>;
 }
 
 export function DebugPage({
@@ -20,6 +21,7 @@ export function DebugPage({
   onFetchSessionLogText,
   onCopySessionLog,
   onOpenSessionLog,
+  onOpenProfileLog,
 }: DebugPageProps) {
   const [logPreview, setLogPreview] = useState("");
   const [loadingLog, setLoadingLog] = useState(false);
@@ -75,6 +77,22 @@ export function DebugPage({
       <article class="card">
         <h3>Recent Session Log</h3>
         {logPreview ? <pre class="log-preview">{logPreview}</pre> : <p>Log preview not loaded yet.</p>}
+      </article>
+
+      <article class="card">
+        <h3>Profile Logs</h3>
+        <p>Open per-profile sync logs for detailed file and delta activity.</p>
+        <div class="button-row">
+          {status.accounts.length === 0 ? (
+            <span>No profiles available.</span>
+          ) : (
+            status.accounts.map((account) => (
+              <button key={account.id} onClick={() => void onOpenProfileLog(account.id)}>
+                Open {account.displayName || account.id} Log
+              </button>
+            ))
+          )}
+        </div>
       </article>
     </section>
   );

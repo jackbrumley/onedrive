@@ -14,9 +14,6 @@ interface AccountsHomePageProps {
   onOpenAccount: (accountId: string) => void;
   onSetAgentState: (accountId: string, state: "syncing" | "paused") => Promise<void>;
   onOpenSyncRootFolder: (accountId: string) => Promise<void>;
-  onOpenItemFolder: (accountId: string, relativePath: string) => Promise<void>;
-  onReauthenticate: (accountId: string) => Promise<unknown>;
-  onRetrySync: (accountId: string) => Promise<void>;
 }
 
 export function AccountsHomePage({
@@ -27,9 +24,6 @@ export function AccountsHomePage({
   onOpenAccount,
   onSetAgentState,
   onOpenSyncRootFolder,
-  onOpenItemFolder,
-  onReauthenticate,
-  onRetrySync,
 }: AccountsHomePageProps) {
   const [showAddModal, setShowAddModal] = useState(false);
 
@@ -47,9 +41,6 @@ export function AccountsHomePage({
             onOpenDetails={onOpenAccount}
             onSetAgentState={onSetAgentState}
             onOpenSyncRootFolder={onOpenSyncRootFolder}
-            onOpenItemFolder={onOpenItemFolder}
-            onReauthenticate={onReauthenticate}
-            onRetrySync={onRetrySync}
           />
         ))}
         <AddAccountCard onClick={() => setShowAddModal(true)} />

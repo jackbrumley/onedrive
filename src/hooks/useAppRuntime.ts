@@ -43,6 +43,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const [syncRuntime, setSyncRuntime] = useState<SyncRuntimeSnapshot>(initialSyncRuntime);
   const [autostartEnabled, setAutostartEnabled] = useState(false);
+  const [rawLoggerMode, setRawLoggerMode] = useState(false);
 
   const navigation = createNavigationActions({ setRouteState });
   const refreshActions = createRefreshActions({
@@ -82,6 +83,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     void refreshActions.refreshActivity();
     void refreshActions.refreshSyncRuntime();
     void systemActions.getAutostartEnabled().then(setAutostartEnabled);
+    void systemActions.fetchRawLoggerMode().then(setRawLoggerMode);
     const runtimeInterval = window.setInterval(() => {
       void refreshActions.refreshSyncRuntime();
     }, 1500);
@@ -104,6 +106,13 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     }
   };
 
+  const toggleRawLoggerMode = async (enabled: boolean) => {
+    const updated = await systemActions.setRawLoggerMode(enabled);
+    if (typeof updated === "boolean") {
+      setRawLoggerMode(updated);
+    }
+  };
+
   return {
     routeState,
     status,
@@ -118,6 +127,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     navigate: navigation.navigate,
     goHome: navigation.goHome,
     openAccount: navigation.openAccount,
+    openAccountSettings: navigation.openAccountSettings,
     goSettings: navigation.goSettings,
     goDebug: navigation.goDebug,
     goUiLab: navigation.goUiLab,
@@ -137,9 +147,12 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     retryAccountSync: accountActions.retryAccountSync,
     autostartEnabled,
     toggleAutostart,
+    rawLoggerMode,
+    toggleRawLoggerMode,
     fetchSessionLogText: systemActions.fetchSessionLogText,
     copySessionLog: systemActions.copySessionLog,
     openSessionLog: systemActions.openSessionLog,
+    openProfileLog: systemActions.openProfileLog,
     openAccountSyncRootFolder: systemActions.openAccountSyncRootFolder,
     openAccountItemFolder: systemActions.openAccountItemFolder,
   };

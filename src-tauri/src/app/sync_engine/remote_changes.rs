@@ -39,7 +39,12 @@ async fn fetch_and_apply_delta_changes(
     let scan_started_at = std::time::Instant::now();
     let mut last_phase_update_at = scan_started_at;
     let mut last_phase_update_items: usize = 0;
-    let mut last_heartbeat_at = scan_started_at;
+    let mut last_progress_at = scan_started_at;
+    let stall_timeout = resolve_stall_timeout();
+    let mut heartbeat_ticker = tokio::time::interval(HEARTBEAT_INTERVAL);
+    heartbeat_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut watchdog_ticker = tokio::time::interval(Duration::from_secs(2));
+    watchdog_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     let (page_tx, mut page_rx) =
         mpsc::channel::<Result<DeltaPageWorkItem, String>>(delta_page_queue_capacity);
@@ -161,20 +166,36 @@ async fn fetch_and_apply_delta_changes(
             break;
         }
 
-        if last_heartbeat_at.elapsed() >= HEARTBEAT_INTERVAL {
-            log::info!(
-                "{} [cycle:{}] SYNC_HEARTBEAT phase=scanning_remote pages={} items={} pending_downloads={} staged_downloads={}",
-                graph.account_prefix,
-                graph.cycle_id,
-                stats.remote_pages,
-                stats.remote_items_received,
-                pending_download_count,
-                staged_download_jobs.len()
-            );
-            last_heartbeat_at = std::time::Instant::now();
-        }
-
         tokio::select! {
+            _ = heartbeat_ticker.tick() => {
+                log::info!(
+                    "{} [cycle:{}] SYNC_HEARTBEAT phase=scanning_remote pages={} items={} pending_downloads={} staged_downloads={}",
+                    graph.account_prefix,
+                    graph.cycle_id,
+                    stats.remote_pages,
+                    stats.remote_items_received,
+                    pending_download_count,
+                    staged_download_jobs.len()
+                );
+            }
+            _ = watchdog_ticker.tick() => {
+                if last_progress_at.elapsed() >= stall_timeout {
+                    log::warn!(
+                        "{} [cycle:{}] SYNC_STALLED phase=scanning_remote no_progress_for={}s pages={} items={} pending_downloads={} staged_downloads={}",
+                        graph.account_prefix,
+                        graph.cycle_id,
+                        stall_timeout.as_secs(),
+                        stats.remote_pages,
+                        stats.remote_items_received,
+                        pending_download_count,
+                        staged_download_jobs.len()
+                    );
+                    return Err(format!(
+                        "Remote sync stalled after {}s with no progress",
+                        stall_timeout.as_secs()
+                    ));
+                }
+            }
             maybe_page = page_rx.recv(), if !producer_done => {
                 let page_payload = match maybe_page {
                     Some(Ok(value)) => value,
@@ -184,6 +205,7 @@ async fn fetch_and_apply_delta_changes(
                         continue;
                     }
                 };
+                last_progress_at = std::time::Instant::now();
 
                 stats.remote_pages += 1;
                 stats.remote_items_received += page_payload.items.len();
@@ -274,6 +296,7 @@ async fn fetch_and_apply_delta_changes(
                     Some(value) => value?,
                     None => return Err("Download worker channel closed unexpectedly".to_string()),
                 };
+                last_progress_at = std::time::Instant::now();
                 let completed_download_id = download_result.remote_entry.id.clone();
                 apply_remote_download_result(
                     graph,

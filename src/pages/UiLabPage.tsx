@@ -1,17 +1,37 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { IconChevronLeft } from "@tabler/icons-preact";
 import { AccountCard } from "../components/accounts/AccountCard";
-import { AccountDetailUnifiedPanel } from "../components/accounts/AccountDetailUnifiedPanel";
+import { AccountDetailPage } from "./AccountDetailPage";
 import { SyncStateControl } from "../components/sync/SyncStateControl";
 import type {
   AccountProfile,
-  ActivityEvent,
   SyncAgentState,
   SyncRuntimeAccountStatus,
 } from "../types/somedrive";
 
 interface UiLabPageProps {
   onBack: () => void;
+}
+
+type UiLabAccountView = "sync" | "settings";
+
+function parseUiLabRoute(hash: string): { accountId: string; view: UiLabAccountView } | null {
+  const segments = hash.replace(/^#\/?/, "").split("/").filter(Boolean);
+  if (segments[0] !== "ui-lab" || segments[1] !== "accounts" || !segments[2]) {
+    return null;
+  }
+  return {
+    accountId: decodeURIComponent(segments[2]),
+    view: segments[3] === "settings" ? "settings" : "sync",
+  };
+}
+
+function buildUiLabRoute(accountId: string | null, view: UiLabAccountView): string {
+  if (!accountId) {
+    return "#/ui-lab";
+  }
+  const base = `#/ui-lab/accounts/${encodeURIComponent(accountId)}`;
+  return view === "settings" ? `${base}/settings` : base;
 }
 
 const previewAccounts: AccountProfile[] = [
@@ -55,8 +75,19 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
   const [showErrorBanner, setShowErrorBanner] = useState(true);
   const [demoAccountSyncState, setDemoAccountSyncState] = useState<"syncing" | "paused">("syncing");
   const [demoGlobalSyncState, setDemoGlobalSyncState] = useState<"syncing" | "paused">("paused");
-  const [selectedLabAccountId, setSelectedLabAccountId] = useState<string | null>(null);
+  const initialLabRoute = parseUiLabRoute(window.location.hash);
+  const [selectedLabAccountId, setSelectedLabAccountId] = useState<string | null>(initialLabRoute?.accountId ?? null);
+  const [selectedLabAccountView, setSelectedLabAccountView] = useState<UiLabAccountView>(initialLabRoute?.view ?? "sync");
   const [labAgentStateById, setLabAgentStateById] = useState<Record<string, SyncAgentState>>({});
+
+  const navigateUiLab = (accountId: string | null, view: UiLabAccountView = "sync") => {
+    const nextHash = buildUiLabRoute(accountId, view);
+    if (window.location.hash !== nextHash) {
+      window.location.hash = nextHash;
+    }
+    setSelectedLabAccountId(accountId);
+    setSelectedLabAccountView(view);
+  };
 
   const accounts = useMemo(() => {
     const withOverrides = previewAccounts.map((account) => ({
@@ -72,51 +103,9 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
     return withOverrides;
   }, [labAgentStateById, scenario]);
 
-  const previewEvents: ActivityEvent[] = useMemo(
-    () => [
-      {
-        id: "evt-lab-1",
-        profileId: "lab-1",
-        profileName: "Personal",
-        kind: "success",
-        message: "Synchronized 24 files from Documents",
-        timestamp: new Date(Date.now() - 3 * 60 * 1000).toISOString(),
-      },
-      {
-        id: "evt-lab-2",
-        profileId: "lab-1",
-        profileName: "Personal",
-        kind: "info",
-        message: "Detected 2 local file changes",
-        timestamp: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
-      },
-      {
-        id: "evt-lab-3",
-        profileId: "lab-2",
-        profileName: "Work",
-        kind: "warning",
-        message: "Retrying upload for Budget-Q4.xlsx",
-        timestamp: new Date(Date.now() - 7 * 60 * 1000).toISOString(),
-      },
-      {
-        id: "evt-lab-4",
-        profileId: "lab-3",
-        profileName: "Personal 2",
-        kind: "error",
-        message: "Authentication required before next sync cycle",
-        timestamp: new Date(Date.now() - 19 * 60 * 1000).toISOString(),
-      },
-    ],
-    []
-  );
-
   const selectedLabAccount = selectedLabAccountId
     ? accounts.find((account) => account.id === selectedLabAccountId) ?? null
     : null;
-
-  const selectedLabEvents = selectedLabAccount
-    ? previewEvents.filter((event) => event.profileId === selectedLabAccount.id)
-    : [];
 
   const runtimeByAccountId: Record<string, SyncRuntimeAccountStatus> = useMemo(
     () => ({
@@ -217,33 +206,45 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
   const selectedRuntimeStatus = selectedLabAccount ? runtimeByAccountId[selectedLabAccount.id] ?? null : null;
 
   useEffect(() => {
+    const syncFromHash = () => {
+      const nextRoute = parseUiLabRoute(window.location.hash);
+      setSelectedLabAccountId(nextRoute?.accountId ?? null);
+      setSelectedLabAccountView(nextRoute?.view ?? "sync");
+    };
+    window.addEventListener("hashchange", syncFromHash);
+    return () => {
+      window.removeEventListener("hashchange", syncFromHash);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!selectedLabAccountId) {
       return;
     }
     if (!accounts.some((account) => account.id === selectedLabAccountId)) {
-      setSelectedLabAccountId(null);
+      navigateUiLab(null);
     }
   }, [accounts, selectedLabAccountId]);
 
   return (
     <section class="page">
-      <div class="page-header">
-        <a
-          class="page-header-back-link"
-          href="#/debug"
-          onClick={(event) => {
-            event.preventDefault();
-            onBack();
-          }}
-          aria-label="Back to debug tools"
-          title="Back to debug tools"
-        >
-          <IconChevronLeft size={36} stroke={2.2} />
-        </a>
-        <h2>UI Lab</h2>
-      </div>
       {!selectedLabAccount ? (
         <>
+          <div class="page-header">
+            <a
+              class="page-header-back-link"
+              href="#/debug"
+              onClick={(event) => {
+                event.preventDefault();
+                onBack();
+              }}
+              aria-label="Back to debug tools"
+              title="Back to debug tools"
+            >
+              <IconChevronLeft size={36} stroke={2.2} />
+            </a>
+            <h2>UI Lab</h2>
+          </div>
           {accounts.length === 0 ? (
             <p>No accounts configured yet. Show setup call-to-action.</p>
           ) : (
@@ -254,15 +255,12 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
                   account={account}
                   runtimeStatus={runtimeByAccountId[account.id] ?? null}
                   onOpenDetails={(accountId) => {
-                    setSelectedLabAccountId(accountId);
+                    navigateUiLab(accountId, "sync");
                   }}
                   onSetAgentState={async (accountId, nextState) => {
                     setLabAgentStateById((current) => ({ ...current, [accountId]: nextState }));
                   }}
                   onOpenSyncRootFolder={async () => undefined}
-                  onOpenItemFolder={async () => undefined}
-                  onReauthenticate={async () => undefined}
-                  onRetrySync={async () => undefined}
                 />
               ))}
             </div>
@@ -293,36 +291,26 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
           </div>
         </>
       ) : (
-        <>
-          <div class="detail-header">
-            <div>
-              <h3>{selectedLabAccount.displayName}</h3>
-              <p class="page-subtitle">UI Lab account detail preview.</p>
-            </div>
-            <button
-              onClick={() => {
-                setSelectedLabAccountId(null);
-              }}
-            >
-              Back to Cards
-            </button>
-          </div>
-
-          <AccountDetailUnifiedPanel
-            account={selectedLabAccount}
-            runtimeStatus={selectedRuntimeStatus}
-            events={selectedLabEvents}
-            actionsDisabled
-            onSetAgentState={async (accountId, nextState) => {
-              setLabAgentStateById((current) => ({ ...current, [accountId]: nextState }));
-            }}
-            onStartAuth={async () => null}
-            onRename={async () => undefined}
-            onSetSyncRoot={async () => undefined}
-            onClearAuth={async () => undefined}
-            onRemoveProfile={async () => undefined}
-          />
-        </>
+        <AccountDetailPage
+          account={selectedLabAccount}
+          runtimeStatus={selectedRuntimeStatus}
+          view={selectedLabAccountView}
+          onBack={() => navigateUiLab(null)}
+          onOpenSettings={(accountId) => navigateUiLab(accountId, "settings")}
+          onOpenSync={(accountId) => navigateUiLab(accountId, "sync")}
+          onSetAgentState={async (accountId, nextState) => {
+            setLabAgentStateById((current) => ({ ...current, [accountId]: nextState }));
+          }}
+          onStartAuth={async () => null}
+          onRename={async () => undefined}
+          onSetSyncRoot={async () => undefined}
+          onClearAuth={async () => undefined}
+          onRemoveProfile={async () => undefined}
+          onOpenSyncRootFolder={async () => undefined}
+          onOpenItemFolder={async () => undefined}
+          onReauthenticate={async () => null}
+          onRetrySync={async () => undefined}
+        />
       )}
     </section>
   );

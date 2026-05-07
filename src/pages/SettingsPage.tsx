@@ -4,11 +4,20 @@ import { ToggleSwitch } from "../components/ui/ToggleSwitch";
 interface SettingsPageProps {
   autostartEnabled: boolean;
   onToggleAutostart: (enabled: boolean) => Promise<void>;
+  rawLoggerMode: boolean;
+  onToggleRawLoggerMode: (enabled: boolean) => Promise<void>;
   onGoDebug: () => void;
   onBack: () => void;
 }
 
-export function SettingsPage({ autostartEnabled, onToggleAutostart, onGoDebug, onBack }: SettingsPageProps) {
+export function SettingsPage({
+  autostartEnabled,
+  onToggleAutostart,
+  rawLoggerMode,
+  onToggleRawLoggerMode,
+  onGoDebug,
+  onBack,
+}: SettingsPageProps) {
   return (
     <section class="page">
       <div class="page-header">
@@ -44,6 +53,15 @@ export function SettingsPage({ autostartEnabled, onToggleAutostart, onGoDebug, o
       <article class="card">
         <h3>Developer</h3>
         <p>Debug and diagnostics tools are grouped separately from regular settings.</p>
+        <div class="settings-list">
+          <ToggleSwitch
+            id="raw-logger-mode-toggle"
+            label="Raw logger mode"
+            description="Write an additional full combined session log for deep troubleshooting."
+            checked={rawLoggerMode}
+            onChange={onToggleRawLoggerMode}
+          />
+        </div>
         <div class="button-row">
           <button onClick={onGoDebug}>Open Debug Tools</button>
         </div>

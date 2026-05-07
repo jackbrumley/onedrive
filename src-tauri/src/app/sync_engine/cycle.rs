@@ -73,6 +73,12 @@ async fn tick_sync_cycle(
     );
     let local_snapshot = collect_local_snapshot(&sync_root)?;
     stats.local_items_seen = local_snapshot.len();
+    log::info!(
+        "{} [cycle:{}] LOCAL_SCAN_SUMMARY items={}",
+        account_prefix,
+        cycle_id,
+        stats.local_items_seen
+    );
     runtime_set_phase(
         &graph.sync_runtime,
         profile_id,

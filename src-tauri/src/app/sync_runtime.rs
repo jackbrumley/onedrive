@@ -2,8 +2,8 @@ use chrono::Local;
 use serde::Serialize;
 use std::collections::HashMap;
 
-const RECENT_COMPLETED_LIMIT: usize = 40;
-const RECENT_FAILED_LIMIT: usize = 40;
+const RECENT_COMPLETED_LIMIT: usize = 120;
+const RECENT_FAILED_LIMIT: usize = 120;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

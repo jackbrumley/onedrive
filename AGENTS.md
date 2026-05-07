@@ -103,6 +103,15 @@ Managed via **npm** scripts and the Tauri CLI.
 - **Component Styling:** Prefer local style ownership by concern; avoid adding new rules to a giant catch-all stylesheet.
 - **Tauri Core:** Use `@tauri-apps/api` for communication with the backend.
 
+#### UI Consistency Contract (Required)
+- **Define Once, Reuse Everywhere:** Shared page layout primitives (`.page`, `.page-header`, `.page-subtitle`, card spacing, header action zones) are global contracts. Do not recreate them per page.
+- **No Duplicate Patterns:** If multiple pages share a pattern, they must use the same component/classes. Avoid one-off spacing/alignment overrides unless there is a confirmed exception.
+- **Header Contract:** Back control left, title centered to viewport, actions right. Keep one canonical implementation and avoid transform-based control centering that causes soft/blurry rendering.
+- **Operational vs Settings Separation:** Runtime/synchronization telemetry belongs on operational pages; account settings pages must remain configuration-only.
+- **Naming Must Match Reality:** Component/class names must reflect actual role (`Panel`, `Page`, `Section`). Do not keep legacy names like `Popover` when content is page-embedded.
+- **Refactor Completion Rule:** When replacing a UI pattern, remove dead pages/components/styles in the same change (or immediately after) so the codebase has one source of truth.
+- **Acceptance Check (UI Work):** Before marking complete, verify consistent spacing/header behavior across active pages and run `npm run typecheck` + `cargo check`.
+
 ### 3. Structure Contracts (Enforced)
 - **File Size Ceiling:** No `.rs`, `.ts`, `.tsx`, or `.css` source file may exceed **1000 lines**.
 - **Soft Size Target:** Most files should stay below 400-600 lines unless there is a clear, justified reason.

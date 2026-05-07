@@ -7,6 +7,8 @@ async fn apply_local_changes(
     stats: &mut SyncCycleStats,
     cancel_flag: &Arc<AtomicBool>,
 ) -> Result<(), String> {
+    const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
+
     runtime_set_phase(
         &graph.sync_runtime,
         &graph.profile_id,
@@ -15,8 +17,25 @@ async fn apply_local_changes(
     );
     let mut local_paths: Vec<String> = current_local_snapshot.keys().cloned().collect();
     local_paths.sort_by_key(|path| path.matches('/').count());
+    let mut local_paths_seen: usize = 0;
+    let mut last_heartbeat_at = std::time::Instant::now();
     for path in local_paths {
         ensure_not_cancelled(cancel_flag)?;
+        local_paths_seen += 1;
+
+        if last_heartbeat_at.elapsed() >= HEARTBEAT_INTERVAL {
+            log::info!(
+                "{} [cycle:{}] SYNC_HEARTBEAT phase=applying_local paths_seen={} uploaded={} upload_failures={} upload_cooldown_skips={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                local_paths_seen,
+                stats.uploaded_files,
+                stats.upload_failures,
+                stats.upload_cooldown_skips
+            );
+            last_heartbeat_at = std::time::Instant::now();
+        }
+
         if is_safe_backup_artifact(&path) {
             continue;
         }
@@ -194,9 +213,22 @@ async fn apply_local_changes(
 
     let mut deleted_paths = deleted_paths;
     deleted_paths.sort_by_key(|path| std::cmp::Reverse(path.matches('/').count()));
+    let mut deleted_paths_seen: usize = 0;
 
     for deleted_path in deleted_paths {
         ensure_not_cancelled(cancel_flag)?;
+        deleted_paths_seen += 1;
+        if last_heartbeat_at.elapsed() >= HEARTBEAT_INTERVAL {
+            log::info!(
+                "{} [cycle:{}] SYNC_HEARTBEAT phase=applying_local delete_paths_seen={} remote_deleted={} local_deleted={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                deleted_paths_seen,
+                stats.deleted_remote,
+                stats.deleted_local
+            );
+            last_heartbeat_at = std::time::Instant::now();
+        }
         if let Some(remote_id) = sync_state.remote_path_to_id.get(&deleted_path).cloned() {
             log::info!(
                 "{} [cycle:{}] REMOTE_DELETE_START path={} remote_id={}",

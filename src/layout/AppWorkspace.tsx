@@ -17,10 +17,6 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
     ? runtime.status.accounts.find((account) => account.id === runtime.routeState.accountId) ?? null
     : null;
 
-  const selectedAccountEvents = selectedAccount
-    ? runtime.activityEvents.filter((event) => event.profileId === selectedAccount.id)
-    : [];
-
   const syncRuntimeByAccountId = Object.fromEntries(
     runtime.syncRuntime.accounts.map((status) => [status.profileId, status])
   );
@@ -37,29 +33,34 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
           onOpenAccount={runtime.openAccount}
           onSetAgentState={runtime.setAccountAgentState}
           onOpenSyncRootFolder={runtime.openAccountSyncRootFolder}
-          onOpenItemFolder={runtime.openAccountItemFolder}
-          onReauthenticate={runtime.startInteractiveAuth}
-          onRetrySync={runtime.retryAccountSync}
         />
       )}
       renderAccountDetail={() => (
         <AccountDetailPage
           account={selectedAccount}
           runtimeStatus={selectedAccount ? (syncRuntimeByAccountId[selectedAccount.id] ?? null) : null}
-          events={selectedAccountEvents}
+          view={runtime.routeState.accountView ?? "sync"}
           onBack={runtime.goHome}
+          onOpenSettings={runtime.openAccountSettings}
+          onOpenSync={runtime.openAccount}
           onSetAgentState={runtime.setAccountAgentState}
           onStartAuth={runtime.startInteractiveAuth}
           onRename={runtime.renameAccountProfile}
           onSetSyncRoot={runtime.setAccountSyncRoot}
           onClearAuth={runtime.clearAccountAuth}
           onRemoveProfile={runtime.removeAccountProfile}
+          onOpenSyncRootFolder={runtime.openAccountSyncRootFolder}
+          onOpenItemFolder={runtime.openAccountItemFolder}
+          onReauthenticate={runtime.startInteractiveAuth}
+          onRetrySync={runtime.retryAccountSync}
         />
       )}
       renderSettings={() => (
         <SettingsPage
           autostartEnabled={runtime.autostartEnabled}
           onToggleAutostart={runtime.toggleAutostart}
+          rawLoggerMode={runtime.rawLoggerMode}
+          onToggleRawLoggerMode={runtime.toggleRawLoggerMode}
           onGoDebug={runtime.goDebug}
           onBack={runtime.goHome}
         />
@@ -73,6 +74,7 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
           onFetchSessionLogText={runtime.fetchSessionLogText}
           onCopySessionLog={runtime.copySessionLog}
           onOpenSessionLog={runtime.openSessionLog}
+          onOpenProfileLog={runtime.openProfileLog}
         />
       )}
       renderUiLab={() => <UiLabPage onBack={runtime.goDebug} />}

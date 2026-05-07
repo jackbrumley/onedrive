@@ -106,6 +106,41 @@ fn resolve_upload_chunk_bytes() -> usize {
         .unwrap_or(8 * 1024 * 1024)
 }
 
+fn resolve_request_timeout() -> Duration {
+    std::env::var("SOMEDRIVE_SYNC_REQUEST_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(|seconds| seconds.clamp(5, 300))
+        .map(Duration::from_secs)
+        .unwrap_or(Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECONDS))
+}
+
+fn resolve_connect_timeout() -> Duration {
+    std::env::var("SOMEDRIVE_SYNC_CONNECT_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(|seconds| seconds.clamp(1, 120))
+        .map(Duration::from_secs)
+        .unwrap_or(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECONDS))
+}
+
+fn resolve_stall_timeout() -> Duration {
+    std::env::var("SOMEDRIVE_SYNC_STALL_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(|seconds| seconds.clamp(10, 600))
+        .map(Duration::from_secs)
+        .unwrap_or(Duration::from_secs(DEFAULT_STALL_TIMEOUT_SECONDS))
+}
+
+fn graph_http_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(resolve_connect_timeout())
+        .timeout(resolve_request_timeout())
+        .build()
+        .map_err(|error| format!("Failed creating Graph HTTP client: {error}"))
+}
+
 fn parse_retry_after_delay(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     let retry_after = headers.get(reqwest::header::RETRY_AFTER)?;
     let text = retry_after.to_str().ok()?.trim();

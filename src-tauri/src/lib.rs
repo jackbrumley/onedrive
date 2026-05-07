@@ -46,7 +46,10 @@ pub fn run() {
             app::session_log::log_ui_event,
             app::session_log::get_session_log_text,
             app::session_log::copy_session_log_to_clipboard,
-            app::session_log::open_session_log
+            app::session_log::open_session_log,
+            app::session_log::open_profile_log,
+            app::session_log::get_raw_logger_mode,
+            app::session_log::set_raw_logger_mode
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

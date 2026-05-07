@@ -1,13 +1,23 @@
 import {
   IconAlertCircle,
   IconCircleCheckFilled,
+  IconCode,
   IconDownload,
+  IconFile,
+  IconFileDescription,
+  IconFileMusic,
+  IconFileSpreadsheet,
+  IconFileTypePdf,
+  IconFileWord,
+  IconFileZip,
+  IconPhoto,
   IconRefresh,
   IconUpload,
+  IconVideo,
 } from "@tabler/icons-preact";
 import type { SyncRuntimeAccountStatus } from "../../types/somedrive";
 
-interface AccountSyncPreviewPopoverProps {
+interface AccountSyncActivityPanelProps {
   runtimeStatus: SyncRuntimeAccountStatus | null;
   issueMessage: string | null;
   issueKind: "auth_required" | "sync_error" | null;
@@ -18,8 +28,6 @@ interface AccountSyncPreviewPopoverProps {
   onOpenSyncRootFolder: () => Promise<void>;
   onReauthenticate: () => Promise<unknown>;
   onRetrySync: () => Promise<void>;
-  placement: "top" | "bottom";
-  visible: boolean;
 }
 
 function formatBytes(value: number | null): string {
@@ -98,7 +106,61 @@ function isTransientTransferError(errorText: string | null): boolean {
   );
 }
 
-export function AccountSyncPreviewPopover({
+function extensionFromPath(path: string): string {
+  const filename = path.split("/").pop() ?? "";
+  const dotIndex = filename.lastIndexOf(".");
+  if (dotIndex <= 0 || dotIndex === filename.length - 1) {
+    return "";
+  }
+  return filename.slice(dotIndex + 1).toLowerCase();
+}
+
+const FILE_TYPE_ICON_SIZE = 34;
+const ACTIVITY_ICON_SIZE = 24;
+
+function iconForFilePath(path: string) {
+  const extension = extensionFromPath(path);
+
+  if (["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "heic", "tif", "tiff", "ico"].includes(extension)) {
+    return <IconPhoto size={FILE_TYPE_ICON_SIZE} />;
+  }
+
+  if (["mp4", "mkv", "mov", "avi", "wmv", "webm", "m4v", "flv"].includes(extension)) {
+    return <IconVideo size={FILE_TYPE_ICON_SIZE} />;
+  }
+
+  if (["mp3", "wav", "flac", "m4a", "aac", "ogg", "wma"].includes(extension)) {
+    return <IconFileMusic size={FILE_TYPE_ICON_SIZE} />;
+  }
+
+  if (["doc", "docx", "odt", "rtf", "txt", "md"].includes(extension)) {
+    return <IconFileWord size={FILE_TYPE_ICON_SIZE} />;
+  }
+
+  if (["xls", "xlsx", "csv", "ods", "tsv"].includes(extension)) {
+    return <IconFileSpreadsheet size={FILE_TYPE_ICON_SIZE} />;
+  }
+
+  if (extension === "pdf") {
+    return <IconFileTypePdf size={FILE_TYPE_ICON_SIZE} />;
+  }
+
+  if (["zip", "rar", "7z", "tar", "gz", "bz2", "xz"].includes(extension)) {
+    return <IconFileZip size={FILE_TYPE_ICON_SIZE} />;
+  }
+
+  if (["json", "yaml", "yml", "toml", "xml", "ini", "conf", "cfg", "env", "ts", "tsx", "js", "jsx", "rs", "py", "sh"].includes(extension)) {
+    return <IconCode size={FILE_TYPE_ICON_SIZE} />;
+  }
+
+  if (["ppt", "pptx", "odp"].includes(extension)) {
+    return <IconFileDescription size={FILE_TYPE_ICON_SIZE} />;
+  }
+
+  return <IconFile size={FILE_TYPE_ICON_SIZE} />;
+}
+
+export function AccountSyncActivityPanel({
   runtimeStatus,
   issueMessage,
   issueKind,
@@ -109,9 +171,7 @@ export function AccountSyncPreviewPopover({
   onOpenSyncRootFolder,
   onReauthenticate,
   onRetrySync,
-  placement,
-  visible,
-}: AccountSyncPreviewPopoverProps) {
+}: AccountSyncActivityPanelProps) {
   const inProgress = runtimeStatus?.inProgress ?? [];
   const recentCompleted = runtimeStatus?.recentCompleted ?? [];
   const recentFailed = runtimeStatus?.recentFailed ?? [];
@@ -168,23 +228,16 @@ export function AccountSyncPreviewPopover({
   const iconForDirection = (direction: string, className = "") => {
     const normalized = direction.toLowerCase();
     if (normalized === "upload") {
-      return <IconUpload size={14} class={className} />;
+      return <IconUpload size={ACTIVITY_ICON_SIZE} class={className} />;
     }
-    return <IconDownload size={14} class={className} />;
+    return <IconDownload size={ACTIVITY_ICON_SIZE} class={className} />;
   };
 
   const conflictTargetPath = issueSecondaryPath ?? issuePath;
   const hasConflictAction = issueActions.includes("open_conflict") && Boolean(conflictTargetPath);
-  const popoverClassName = `account-sync-preview-popover ${
-    placement === "top" ? "account-sync-preview-popover-top" : "account-sync-preview-popover-bottom"
-  }${visible ? " account-sync-preview-popover-visible" : ""}${hasConflictAction ? " account-sync-preview-popover-conflict" : ""}`;
 
   return (
-    <div
-      class={popoverClassName}
-      role="dialog"
-      aria-label="Sync activity preview"
-    >
+    <div class="account-sync-activity-panel" role="region" aria-label="Sync activity">
       <p class="account-sync-preview-subtitle">
         <span class="account-sync-preview-phase-line">
           {isRemoteScanActive && <IconRefresh size={13} class="sync-preview-icon-active" />}
@@ -289,11 +342,8 @@ export function AccountSyncPreviewPopover({
                     }}
                   >
                     <div class="account-sync-preview-row">
-                      <span class="account-sync-preview-status-icon">
-                        <IconAlertCircle size={14} class="sync-preview-icon-error" />
-                      </span>
-                      <span class="account-sync-preview-direction-icon">
-                        {iconForDirection(item.direction)}
+                      <span class="account-sync-preview-file-icon">
+                        {iconForFilePath(item.path)}
                       </span>
                       <div class="account-sync-preview-content">
                         <p class="account-sync-preview-path">{item.path}</p>
@@ -302,6 +352,14 @@ export function AccountSyncPreviewPopover({
                           <span>{new Date(item.finishedAt).toLocaleTimeString()}</span>
                         </p>
                       </div>
+                      <span class="account-sync-preview-right-icons">
+                        <span class="account-sync-preview-direction-icon">
+                          {iconForDirection(item.direction)}
+                        </span>
+                        <span class="account-sync-preview-status-icon">
+                          <IconAlertCircle size={ACTIVITY_ICON_SIZE} class="sync-preview-icon-error" />
+                        </span>
+                      </span>
                     </div>
                   </button>
                 </article>
@@ -329,46 +387,51 @@ export function AccountSyncPreviewPopover({
                   }}
                 >
                   <div class="account-sync-preview-row">
-                  <span class="account-sync-preview-status-icon">
-                    {item.kind === "active" ? (
-                      <IconRefresh size={14} class="sync-preview-icon-active" />
-                    ) : (
-                      <IconCircleCheckFilled size={14} class="sync-preview-icon-success" />
-                    )}
-                  </span>
-                  <span class="account-sync-preview-direction-icon">
-                    {iconForDirection(item.direction)}
-                  </span>
-                  <div class="account-sync-preview-content">
-                    <p class="account-sync-preview-path">{item.path}</p>
-                    <p class="account-sync-preview-meta">
-                      {item.kind === "active" ? (
-                        shouldShowTransferBytes(item.bytesDone ?? 0, item.bytesTotal) ? (
-                          <span>
-                            {formatBytes(item.bytesDone ?? 0)}
-                            {item.bytesTotal ? ` / ${formatBytes(item.bytesTotal)}` : ""}
-                          </span>
+                    <span class="account-sync-preview-file-icon">
+                      {iconForFilePath(item.path)}
+                    </span>
+                    <div class="account-sync-preview-content">
+                      <p class="account-sync-preview-path">{item.path}</p>
+                      <p class="account-sync-preview-meta">
+                        {item.kind === "active" ? (
+                          shouldShowTransferBytes(item.bytesDone ?? 0, item.bytesTotal) ? (
+                            <span>
+                              {formatBytes(item.bytesDone ?? 0)}
+                              {item.bytesTotal ? ` / ${formatBytes(item.bytesTotal)}` : ""}
+                            </span>
+                          ) : (
+                            <span />
+                          )
                         ) : (
-                          <span />
-                        )
-                      ) : (
-                        <span>{formatBytes(item.bytesTotal)}</span>
+                          <span>{formatBytes(item.bytesTotal)}</span>
+                        )}
+                        <span>{new Date(item.when).toLocaleTimeString()}</span>
+                      </p>
+                      {isActive && (
+                        <div class="sync-runtime-progress-track-compact">
+                          <div
+                            class={
+                              progressPercent === null
+                                ? "sync-runtime-progress-fill-compact sync-runtime-progress-fill-compact-indeterminate"
+                                : "sync-runtime-progress-fill-compact"
+                            }
+                            style={progressPercent === null ? { width: "34%" } : { width: `${progressPercent.toFixed(1)}%` }}
+                          />
+                        </div>
                       )}
-                      <span>{new Date(item.when).toLocaleTimeString()}</span>
-                    </p>
-                    {isActive && (
-                      <div class="sync-runtime-progress-track-compact">
-                        <div
-                          class={
-                            progressPercent === null
-                              ? "sync-runtime-progress-fill-compact sync-runtime-progress-fill-compact-indeterminate"
-                              : "sync-runtime-progress-fill-compact"
-                          }
-                          style={progressPercent === null ? { width: "34%" } : { width: `${progressPercent.toFixed(1)}%` }}
-                        />
-                      </div>
-                    )}
-                  </div>
+                    </div>
+                    <span class="account-sync-preview-right-icons">
+                      <span class="account-sync-preview-direction-icon">
+                        {iconForDirection(item.direction)}
+                      </span>
+                      <span class="account-sync-preview-status-icon">
+                        {item.kind === "active" ? (
+                          <IconRefresh size={ACTIVITY_ICON_SIZE} class="sync-preview-icon-active" />
+                        ) : (
+                          <IconCircleCheckFilled size={ACTIVITY_ICON_SIZE} class="sync-preview-icon-success" />
+                        )}
+                      </span>
+                    </span>
                   </div>
                 </button>
               </article>
