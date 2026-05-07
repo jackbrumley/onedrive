@@ -271,6 +271,7 @@ struct RemoteKnownItem {
 #[serde(rename_all = "camelCase")]
 struct PersistedSyncState {
     delta_link: Option<String>,
+    active_delta_next_link: Option<String>,
     remote_by_id: HashMap<String, RemoteKnownItem>,
     remote_path_to_id: HashMap<String, String>,
     local_snapshot: HashMap<String, LocalSnapshotEntry>,

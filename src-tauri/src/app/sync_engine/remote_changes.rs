@@ -1,10 +1,10 @@
-async fn fetch_delta_changes(
+async fn fetch_and_apply_delta_changes(
     graph: &mut GraphContext,
-    initial_delta_link: Option<String>,
+    sync_root: &Path,
     sync_state: &mut PersistedSyncState,
     stats: &mut SyncCycleStats,
     cancel_flag: &Arc<AtomicBool>,
-) -> Result<Vec<DeltaItem>, String> {
+) -> Result<(), String> {
     const PHASE_PROGRESS_UPDATE_INTERVAL: Duration = Duration::from_millis(750);
     const PHASE_PROGRESS_ITEM_STEP: usize = 250;
 
@@ -14,9 +14,11 @@ async fn fetch_delta_changes(
         "scanning_remote",
         "Fetching remote file list",
     );
-    let mut all_items: Vec<DeltaItem> = Vec::new();
-    let mut current_url =
-        initial_delta_link.unwrap_or_else(|| format!("{GRAPH_ROOT}/me/drive/root/delta"));
+    let mut current_url = sync_state
+        .active_delta_next_link
+        .clone()
+        .or_else(|| sync_state.delta_link.clone())
+        .unwrap_or_else(|| format!("{GRAPH_ROOT}/me/drive/root/delta"));
     let scan_started_at = std::time::Instant::now();
     let mut last_phase_update_at = scan_started_at;
     let mut last_phase_update_items: usize = 0;
@@ -77,21 +79,19 @@ async fn fetch_delta_changes(
             stats.remote_pages,
             response.value.len()
         );
-        for item in &response.value {
-            let path = resolve_delta_item_path(item).unwrap_or_else(|| "<unknown>".to_string());
-            log::info!(
-                "{} [cycle:{}] DELTA_ITEM id={} path={} is_dir={} deleted={}",
-                graph.account_prefix,
-                graph.cycle_id,
-                item.id,
-                path,
-                item.folder.is_some(),
-                item.deleted.is_some()
-            );
-        }
-        all_items.extend(response.value.into_iter());
+        apply_remote_changes(
+            graph,
+            sync_root,
+            &response.value,
+            sync_state,
+            stats,
+            cancel_flag,
+        )
+        .await?;
 
         if let Some(next_link) = response.next_link {
+            sync_state.active_delta_next_link = Some(next_link.clone());
+            save_sync_state(&graph.profile_id, sync_state)?;
             current_url = next_link;
             continue;
         }
@@ -99,10 +99,12 @@ async fn fetch_delta_changes(
         if let Some(delta_link) = response.delta_link {
             sync_state.delta_link = Some(delta_link);
         }
+        sync_state.active_delta_next_link = None;
+        save_sync_state(&graph.profile_id, sync_state)?;
         break;
     }
 
-    Ok(all_items)
+    Ok(())
 }
 
 async fn apply_remote_changes(
@@ -113,12 +115,6 @@ async fn apply_remote_changes(
     stats: &mut SyncCycleStats,
     cancel_flag: &Arc<AtomicBool>,
 ) -> Result<(), String> {
-    runtime_set_phase(
-        &graph.sync_runtime,
-        &graph.profile_id,
-        "applying_remote",
-        "Applying remote changes",
-    );
     let mut pending_downloads: Vec<(String, String, PathBuf, RemoteKnownItem)> = Vec::new();
 
     for item in changes {

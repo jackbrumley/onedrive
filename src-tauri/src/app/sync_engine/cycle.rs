@@ -56,20 +56,9 @@ async fn tick_sync_cycle(
         &format!("{} [cycle:{}] SYNC_CYCLE_START", account_prefix, cycle_id),
     );
 
-    let remote_changes = fetch_delta_changes(
-        &mut graph,
-        sync_state.delta_link.clone(),
-        &mut sync_state,
-        &mut stats,
-        cancel_flag,
-    )
-    .await?;
-
-    ensure_not_cancelled(cancel_flag)?;
-    apply_remote_changes(
+    fetch_and_apply_delta_changes(
         &mut graph,
         &sync_root,
-        &remote_changes,
         &mut sync_state,
         &mut stats,
         cancel_flag,
