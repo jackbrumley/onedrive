@@ -41,21 +41,21 @@ export function syncModeMessage(
     if (phase === "scanning_local" || phase === "applying_local") {
       return {
         title: "Preparing two-way sync",
-        detail: "Building your local baseline before enabling two-way sync.",
-        tone: "info",
+        detail: "Cloud files are still in control. Local adds/deletes won't sync yet.",
+        tone: "warning",
       };
     }
     if (phase === "paused") {
       return {
         title: "Initial sync paused",
         detail: "Initial sync runs in cloud-files-only mode.",
-        tone: "info",
+        tone: "warning",
       };
     }
     return {
       title: "Initial sync in progress",
-      detail: "Downloading cloud files only.",
-      tone: "info",
+      detail: "Downloading cloud files first. Local adds/deletes won't sync yet.",
+      tone: "warning",
     };
   }
 

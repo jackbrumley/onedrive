@@ -94,7 +94,7 @@ export function AccountCard({ account, runtimeStatus, onOpenDetails, onSetAgentS
           >
             <IconFolder size={14} /> {account.syncRoot}
           </button>
-          <p class="account-sync-mode-line">
+          <p class={`account-sync-mode-line account-sync-mode-line-${modeMessage.tone}`}>
             <span class="account-sync-mode-title">{modeMessage.title}</span>
             <span class="account-sync-mode-sep">: </span>
             <span class="account-sync-mode-detail">{modeMessage.detail}</span>

@@ -705,6 +705,33 @@
   opacity: 0.86;
 }
 
+.account-sync-mode-line-info {
+  color: #325d86;
+}
+
+.account-sync-mode-line-info .account-sync-mode-sep,
+.account-sync-mode-line-info .account-sync-mode-detail {
+  color: #5e7894;
+}
+
+.account-sync-mode-line-warning {
+  color: #8f5f1d;
+}
+
+.account-sync-mode-line-warning .account-sync-mode-sep,
+.account-sync-mode-line-warning .account-sync-mode-detail {
+  color: #986d33;
+}
+
+.account-sync-mode-line-success {
+  color: #236548;
+}
+
+.account-sync-mode-line-success .account-sync-mode-sep,
+.account-sync-mode-line-success .account-sync-mode-detail {
+  color: #3b7158;
+}
+
 .account-path-link {
   width: fit-content;
   max-width: 100%;
