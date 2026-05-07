@@ -145,6 +145,7 @@ async fn fetch_and_apply_delta_changes(
     drop(download_result_tx);
 
     let mut pending_download_ids: HashSet<String> = HashSet::new();
+    let mut staged_download_jobs: HashMap<String, RemoteDownloadJob> = HashMap::new();
     let mut pending_download_count: usize = 0;
     let mut download_results_since_flush: usize = 0;
     let mut producer_done = false;
@@ -163,7 +164,6 @@ async fn fetch_and_apply_delta_changes(
                     Some(Err(error)) => return Err(error),
                     None => {
                         producer_done = true;
-                        let _ = download_tx.take();
                         continue;
                     }
                 };
@@ -224,6 +224,7 @@ async fn fetch_and_apply_delta_changes(
                     page_payload.items,
                     active_download_tx,
                     &mut pending_download_ids,
+                    &mut staged_download_jobs,
                     &mut pending_download_count,
                 )
                 .await?;
@@ -234,7 +235,6 @@ async fn fetch_and_apply_delta_changes(
                 } else {
                     deferred_delta_link = page_payload.delta_link;
                     producer_done = true;
-                    let _ = download_tx.take();
                 }
             }
             maybe_download_result = download_result_rx.recv(), if pending_download_count > 0 => {
@@ -242,6 +242,7 @@ async fn fetch_and_apply_delta_changes(
                     Some(value) => value?,
                     None => return Err("Download worker channel closed unexpectedly".to_string()),
                 };
+                let completed_download_id = download_result.remote_entry.id.clone();
                 apply_remote_download_result(
                     graph,
                     sync_state,
@@ -251,6 +252,17 @@ async fn fetch_and_apply_delta_changes(
                 );
                 pending_download_count = pending_download_count.saturating_sub(1);
                 download_results_since_flush += 1;
+
+                if let Some(next_job) = staged_download_jobs.remove(&completed_download_id) {
+                    let active_download_tx = download_tx
+                        .as_ref()
+                        .ok_or_else(|| "Remote download queue unavailable".to_string())?;
+                    active_download_tx
+                        .send(next_job)
+                        .await
+                        .map_err(|_| "Remote download queue closed unexpectedly".to_string())?;
+                    pending_download_count += 1;
+                }
 
                 if download_results_since_flush >= checkpoint_flush_step {
                     save_sync_state(&graph.profile_id, sync_state)?;
@@ -269,6 +281,7 @@ async fn fetch_and_apply_delta_changes(
         }
     }
 
+    let _ = download_tx.take();
     if let Some(delta_link) = deferred_delta_link {
         sync_state.delta_link = Some(delta_link);
     }
@@ -287,6 +300,7 @@ async fn process_remote_page_items(
     items: Vec<DeltaItem>,
     download_tx: &mpsc::Sender<RemoteDownloadJob>,
     pending_download_ids: &mut HashSet<String>,
+    staged_download_jobs: &mut HashMap<String, RemoteDownloadJob>,
     pending_download_count: &mut usize,
 ) -> Result<(), String> {
     for item in items {
@@ -425,17 +439,20 @@ async fn process_remote_page_items(
             }
         }
 
-        if pending_download_ids.insert(item.id.clone()) {
+        let job = RemoteDownloadJob {
+            item_id: item.id,
+            path,
+            local_abs,
+            remote_entry,
+        };
+        if pending_download_ids.insert(job.item_id.clone()) {
             download_tx
-                .send(RemoteDownloadJob {
-                    item_id: item.id,
-                    path,
-                    local_abs,
-                    remote_entry,
-                })
+                .send(job)
                 .await
                 .map_err(|_| "Remote download queue closed unexpectedly".to_string())?;
             *pending_download_count += 1;
+        } else {
+            staged_download_jobs.insert(job.item_id.clone(), job);
         }
     }
 
