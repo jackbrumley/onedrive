@@ -237,12 +237,6 @@
   color: #6c7f95;
 }
 
-.account-sync-preview-scan-note {
-  margin: 0 0 6px;
-  font-size: 0.72rem;
-  color: #526c88;
-}
-
 .account-sync-preview-empty {
   margin: 0;
   color: var(--text-muted);

@@ -48,18 +48,16 @@ async fn fetch_delta_changes(
             let elapsed_seconds = scan_started_at.elapsed().as_secs_f64();
             let progress_message = if elapsed_seconds > 0.0 {
                 format!(
-                    "Fetching remote file list - {} items across {} pages ({:.0} items/s){}",
+                    "Fetching remote file list - {} items across {} pages ({:.0} items/s)",
                     stats.remote_items_received,
                     stats.remote_pages,
-                    stats.remote_items_received as f64 / elapsed_seconds,
-                    if has_next_link { " - still scanning..." } else { "" }
+                    stats.remote_items_received as f64 / elapsed_seconds
                 )
             } else {
                 format!(
-                    "Fetching remote file list - {} items across {} pages{}",
+                    "Fetching remote file list - {} items across {} pages",
                     stats.remote_items_received,
-                    stats.remote_pages,
-                    if has_next_link { " - still scanning..." } else { "" }
+                    stats.remote_pages
                 )
             };
             runtime_set_phase(

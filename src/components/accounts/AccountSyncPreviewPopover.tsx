@@ -144,11 +144,6 @@ export function AccountSyncPreviewPopover({
         </span>
         {runtimeStatus ? <span class="account-sync-preview-updated">updated {relativeUpdatedAt(runtimeStatus.updatedAt)}</span> : null}
       </p>
-      {isRemoteScanActive && (
-        <p class="account-sync-preview-scan-note">
-          Remote scan is running in the background. Item and page counts update as results stream in.
-        </p>
-      )}
       {hasIssueSection && (
         <section class="account-sync-preview-issues">
           <p class="account-sync-preview-section-label">Issues</p>
