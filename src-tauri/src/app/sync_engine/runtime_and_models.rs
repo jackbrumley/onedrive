@@ -18,6 +18,24 @@ enum RemoteDownloadOutcome {
     SkippedMissingRemote,
 }
 
+struct DeltaPageWorkItem {
+    items: Vec<DeltaItem>,
+    next_link: Option<String>,
+    delta_link: Option<String>,
+}
+
+struct RemoteDownloadJob {
+    item_id: String,
+    path: String,
+    local_abs: PathBuf,
+    remote_entry: RemoteKnownItem,
+}
+
+struct RemoteDownloadResult {
+    remote_entry: RemoteKnownItem,
+    outcome: RemoteDownloadOutcome,
+}
+
 #[derive(Clone)]
 struct GraphContext {
     profile_id: String,

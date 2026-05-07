@@ -4,15 +4,16 @@ use crate::app::auth::{load_auth_session, refresh_access_token};
 use crate::app::log_context;
 use crate::app::state::AppState;
 use crate::app::sync_runtime::{self, SyncRuntimeMap};
-use futures_util::{stream, StreamExt};
+use futures_util::StreamExt;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::mpsc;
 
 const GRAPH_ROOT: &str = "https://graph.microsoft.com/v1.0";
 const DEFAULT_DOWNLOAD_CONCURRENCY: usize = 8;
@@ -52,4 +53,3 @@ pub fn on_agent_state_changed(
     }
     Ok(())
 }
-

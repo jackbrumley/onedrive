@@ -7,6 +7,9 @@ async fn fetch_and_apply_delta_changes(
 ) -> Result<(), String> {
     const PHASE_PROGRESS_UPDATE_INTERVAL: Duration = Duration::from_millis(750);
     const PHASE_PROGRESS_ITEM_STEP: usize = 250;
+    const DELTA_PAGE_QUEUE_CAPACITY: usize = 8;
+    const DOWNLOAD_QUEUE_CAPACITY: usize = 512;
+    const DOWNLOAD_CHECKPOINT_FLUSH_STEP: usize = 25;
 
     runtime_set_phase(
         &graph.sync_runtime,
@@ -14,7 +17,8 @@ async fn fetch_and_apply_delta_changes(
         "scanning_remote",
         "Fetching remote file list",
     );
-    let mut current_url = sync_state
+
+    let start_url = sync_state
         .active_delta_next_link
         .clone()
         .or_else(|| sync_state.delta_link.clone())
@@ -23,103 +27,257 @@ async fn fetch_and_apply_delta_changes(
     let mut last_phase_update_at = scan_started_at;
     let mut last_phase_update_items: usize = 0;
 
+    let (page_tx, mut page_rx) = mpsc::channel::<Result<DeltaPageWorkItem, String>>(DELTA_PAGE_QUEUE_CAPACITY);
+    let mut producer_graph = graph.clone();
+    let producer_cancel = Arc::clone(cancel_flag);
+    tauri::async_runtime::spawn(async move {
+        let mut current_url = start_url;
+        loop {
+            if let Err(error) = ensure_not_cancelled(&producer_cancel) {
+                let _ = page_tx.send(Err(error)).await;
+                return;
+            }
+
+            log::info!(
+                "{} [cycle:{}] DELTA_PAGE_REQUEST url={}",
+                producer_graph.account_prefix,
+                producer_graph.cycle_id,
+                current_url
+            );
+            let response_text = match graph_get_text(&mut producer_graph, &current_url, &producer_cancel).await {
+                Ok(text) => text,
+                Err(error) => {
+                    let _ = page_tx.send(Err(error)).await;
+                    return;
+                }
+            };
+
+            let response: DeltaResponse = match serde_json::from_str(&response_text)
+                .map_err(|error| format!("Failed to decode delta response: {error}"))
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    let _ = page_tx.send(Err(error)).await;
+                    return;
+                }
+            };
+
+            let next_link = response.next_link.clone();
+            let payload = DeltaPageWorkItem {
+                items: response.value,
+                next_link: response.next_link,
+                delta_link: response.delta_link,
+            };
+
+            if page_tx.send(Ok(payload)).await.is_err() {
+                return;
+            }
+
+            if let Some(next) = next_link {
+                current_url = next;
+                continue;
+            }
+
+            return;
+        }
+    });
+
+    let download_concurrency = resolve_download_concurrency();
+    let (download_tx_raw, download_rx) = mpsc::channel::<RemoteDownloadJob>(DOWNLOAD_QUEUE_CAPACITY);
+    let mut download_tx = Some(download_tx_raw);
+    let (download_result_tx, mut download_result_rx) =
+        mpsc::channel::<Result<RemoteDownloadResult, String>>(DOWNLOAD_QUEUE_CAPACITY);
+    let download_rx = Arc::new(tokio::sync::Mutex::new(download_rx));
+
+    for _ in 0..download_concurrency {
+        let worker_graph = graph.clone();
+        let worker_cancel = Arc::clone(cancel_flag);
+        let worker_download_rx = Arc::clone(&download_rx);
+        let worker_result_tx = download_result_tx.clone();
+        tauri::async_runtime::spawn(async move {
+            loop {
+                let maybe_job = {
+                    let mut receiver = worker_download_rx.lock().await;
+                    receiver.recv().await
+                };
+
+                let Some(job) = maybe_job else {
+                    return;
+                };
+
+                let result = match download_remote_item_content(
+                    &worker_graph,
+                    &job.item_id,
+                    &job.path,
+                    &job.local_abs,
+                    &worker_cancel,
+                )
+                .await
+                {
+                    Ok(outcome) => Ok(RemoteDownloadResult {
+                        remote_entry: job.remote_entry,
+                        outcome,
+                    }),
+                    Err(error) => Err(format!(
+                        "Remote download failed item_id={} path={}: {}",
+                        job.item_id, job.path, error
+                    )),
+                };
+
+                if worker_result_tx.send(result).await.is_err() {
+                    return;
+                }
+            }
+        });
+    }
+    drop(download_result_tx);
+
+    let mut pending_download_ids: HashSet<String> = HashSet::new();
+    let mut pending_download_count: usize = 0;
+    let mut download_results_since_flush: usize = 0;
+    let mut producer_done = false;
+    let mut deferred_delta_link: Option<String> = None;
+
     loop {
         ensure_not_cancelled(cancel_flag)?;
-        log::info!(
-            "{} [cycle:{}] DELTA_PAGE_REQUEST url={}",
-            graph.account_prefix,
-            graph.cycle_id,
-            current_url
-        );
-        let response_text = graph_get_text(graph, &current_url, cancel_flag).await?;
-        let response: DeltaResponse = serde_json::from_str(&response_text)
-            .map_err(|error| format!("Failed to decode delta response: {error}"))?;
+        if producer_done && pending_download_count == 0 {
+            break;
+        }
 
-        stats.remote_pages += 1;
-        stats.remote_items_received += response.value.len();
-        let has_next_link = response.next_link.is_some();
+        tokio::select! {
+            maybe_page = page_rx.recv(), if !producer_done => {
+                let page_payload = match maybe_page {
+                    Some(Ok(value)) => value,
+                    Some(Err(error)) => return Err(error),
+                    None => {
+                        producer_done = true;
+                        let _ = download_tx.take();
+                        continue;
+                    }
+                };
 
-        let should_update_phase = stats.remote_pages == 1
-            || last_phase_update_at.elapsed() >= PHASE_PROGRESS_UPDATE_INTERVAL
-            || stats
-                .remote_items_received
-                .saturating_sub(last_phase_update_items)
-                >= PHASE_PROGRESS_ITEM_STEP
-            || !has_next_link;
-        if should_update_phase {
-            let elapsed_seconds = scan_started_at.elapsed().as_secs_f64();
-            let progress_message = if elapsed_seconds > 0.0 {
-                format!(
-                    "Fetching remote file list - {} items across {} pages ({:.0} items/s)",
-                    stats.remote_items_received,
+                stats.remote_pages += 1;
+                stats.remote_items_received += page_payload.items.len();
+                let has_next_link = page_payload.next_link.is_some();
+                let should_update_phase = stats.remote_pages == 1
+                    || last_phase_update_at.elapsed() >= PHASE_PROGRESS_UPDATE_INTERVAL
+                    || stats
+                        .remote_items_received
+                        .saturating_sub(last_phase_update_items)
+                        >= PHASE_PROGRESS_ITEM_STEP
+                    || !has_next_link;
+                if should_update_phase {
+                    let elapsed_seconds = scan_started_at.elapsed().as_secs_f64();
+                    let progress_message = if elapsed_seconds > 0.0 {
+                        format!(
+                            "Fetching remote file list - {} items across {} pages ({:.0} items/s)",
+                            stats.remote_items_received,
+                            stats.remote_pages,
+                            stats.remote_items_received as f64 / elapsed_seconds
+                        )
+                    } else {
+                        format!(
+                            "Fetching remote file list - {} items across {} pages",
+                            stats.remote_items_received,
+                            stats.remote_pages
+                        )
+                    };
+                    runtime_set_phase(
+                        &graph.sync_runtime,
+                        &graph.profile_id,
+                        "scanning_remote",
+                        &progress_message,
+                    );
+                    last_phase_update_at = std::time::Instant::now();
+                    last_phase_update_items = stats.remote_items_received;
+                }
+
+                log::info!(
+                    "{} [cycle:{}] DELTA_PAGE_RECEIVED page={} items={}",
+                    graph.account_prefix,
+                    graph.cycle_id,
                     stats.remote_pages,
-                    stats.remote_items_received as f64 / elapsed_seconds
+                    page_payload.items.len()
+                );
+
+                let active_download_tx = download_tx
+                    .as_ref()
+                    .ok_or_else(|| "Remote download queue unavailable".to_string())?;
+                process_remote_page_items(
+                    graph,
+                    sync_root,
+                    sync_state,
+                    stats,
+                    cancel_flag,
+                    page_payload.items,
+                    active_download_tx,
+                    &mut pending_download_ids,
+                    &mut pending_download_count,
                 )
-            } else {
-                format!(
-                    "Fetching remote file list - {} items across {} pages",
-                    stats.remote_items_received,
-                    stats.remote_pages
-                )
-            };
-            runtime_set_phase(
-                &graph.sync_runtime,
-                &graph.profile_id,
-                "scanning_remote",
-                &progress_message,
-            );
-            last_phase_update_at = std::time::Instant::now();
-            last_phase_update_items = stats.remote_items_received;
-        }
+                .await?;
 
-        log::info!(
-            "{} [cycle:{}] DELTA_PAGE_RECEIVED page={} items={}",
-            graph.account_prefix,
-            graph.cycle_id,
-            stats.remote_pages,
-            response.value.len()
-        );
-        apply_remote_changes(
-            graph,
-            sync_root,
-            &response.value,
-            sync_state,
-            stats,
-            cancel_flag,
-        )
-        .await?;
+                if let Some(next_link) = page_payload.next_link {
+                    sync_state.active_delta_next_link = Some(next_link);
+                    save_sync_state(&graph.profile_id, sync_state)?;
+                } else {
+                    deferred_delta_link = page_payload.delta_link;
+                    producer_done = true;
+                    let _ = download_tx.take();
+                }
+            }
+            maybe_download_result = download_result_rx.recv(), if pending_download_count > 0 => {
+                let download_result = match maybe_download_result {
+                    Some(value) => value?,
+                    None => return Err("Download worker channel closed unexpectedly".to_string()),
+                };
+                apply_remote_download_result(
+                    graph,
+                    sync_state,
+                    stats,
+                    &mut pending_download_ids,
+                    download_result,
+                );
+                pending_download_count = pending_download_count.saturating_sub(1);
+                download_results_since_flush += 1;
 
-        if let Some(next_link) = response.next_link {
-            sync_state.active_delta_next_link = Some(next_link.clone());
-            save_sync_state(&graph.profile_id, sync_state)?;
-            current_url = next_link;
-            continue;
-        }
+                if download_results_since_flush >= DOWNLOAD_CHECKPOINT_FLUSH_STEP {
+                    save_sync_state(&graph.profile_id, sync_state)?;
+                    download_results_since_flush = 0;
+                }
 
-        if let Some(delta_link) = response.delta_link {
-            sync_state.delta_link = Some(delta_link);
+                if producer_done && pending_download_count > 0 {
+                    runtime_set_phase(
+                        &graph.sync_runtime,
+                        &graph.profile_id,
+                        "applying_remote",
+                        &format!("Finishing remote downloads - {} items remaining", pending_download_count),
+                    );
+                }
+            }
         }
-        sync_state.active_delta_next_link = None;
-        save_sync_state(&graph.profile_id, sync_state)?;
-        break;
     }
+
+    if let Some(delta_link) = deferred_delta_link {
+        sync_state.delta_link = Some(delta_link);
+    }
+    sync_state.active_delta_next_link = None;
+    save_sync_state(&graph.profile_id, sync_state)?;
 
     Ok(())
 }
 
-async fn apply_remote_changes(
+async fn process_remote_page_items(
     graph: &mut GraphContext,
     sync_root: &Path,
-    changes: &[DeltaItem],
     sync_state: &mut PersistedSyncState,
     stats: &mut SyncCycleStats,
     cancel_flag: &Arc<AtomicBool>,
+    items: Vec<DeltaItem>,
+    download_tx: &mpsc::Sender<RemoteDownloadJob>,
+    pending_download_ids: &mut HashSet<String>,
+    pending_download_count: &mut usize,
 ) -> Result<(), String> {
-    const DOWNLOAD_CHECKPOINT_FLUSH_STEP: usize = 25;
-
-    let mut pending_downloads: Vec<(String, String, PathBuf, RemoteKnownItem)> = Vec::new();
-
-    for item in changes {
+    for item in items {
         ensure_not_cancelled(cancel_flag)?;
         if item.deleted.is_some() {
             if let Some(existing) = sync_state.remote_by_id.get(&item.id).cloned() {
@@ -157,6 +315,7 @@ async fn apply_remote_changes(
                 sync_state.remote_by_id.remove(&item.id);
                 sync_state.remote_path_to_id.remove(&existing.path);
                 sync_state.local_snapshot.remove(&existing.path);
+                pending_download_ids.remove(&item.id);
                 remove_local_path(sync_root, &existing.path)?;
                 log::info!(
                     "{} [cycle:{}] LOCAL_DELETE_OK path={}",
@@ -169,7 +328,7 @@ async fn apply_remote_changes(
             continue;
         }
 
-        let Some(path) = resolve_delta_item_path(item) else {
+        let Some(path) = resolve_delta_item_path(&item) else {
             log::warn!(
                 "{} [cycle:{}] DELTA_ITEM_SKIPPED id={} reason=missing_path",
                 graph.account_prefix,
@@ -202,140 +361,102 @@ async fn apply_remote_changes(
                     error
                 )
             })?;
-        } else {
-            let local_current = read_local_entry(&local_abs)?;
-            let previous_local = sync_state.local_snapshot.get(&path);
-            let local_changed = local_current
-                .as_ref()
-                .map(|entry| has_local_changed(entry, previous_local))
-                .unwrap_or(false);
-
-            if local_changed {
-                let local_entry = local_current.expect("local_changed implies local entry exists");
-                if local_entry.modified_ts > remote_entry.modified_ts {
-                    log::info!(
-                        "{} [cycle:{}] REMOTE_OLDER_UPLOAD_LOCAL path={} local_ts={} remote_ts={}",
-                        graph.account_prefix,
-                        graph.cycle_id,
-                        path,
-                        local_entry.modified_ts,
-                        remote_entry.modified_ts
-                    );
-                    let uploaded =
-                        upload_file_by_path(graph, sync_root, &path, cancel_flag).await?;
-                    let known = remote_known_item_from_drive_item(uploaded, &path)?;
-                    upsert_remote_known_item(sync_state, known);
-                    stats.uploaded_files += 1;
-                    continue;
-                }
-
-                if let Some(backup_path) = create_safe_backup(&local_abs)? {
-                    log::info!(
-                        "{} [cycle:{}] SAFE_BACKUP_CREATED source={} backup={}",
-                        graph.account_prefix,
-                        graph.cycle_id,
-                        local_abs.display(),
-                        backup_path.display()
-                    );
-                    let conflict_backup_relative = relative_path_for_issue(sync_root, &backup_path);
-                    if let Ok(mut runtime_map) = graph.sync_runtime.lock() {
-                        sync_runtime::set_issue(
-                            &mut runtime_map,
-                            &graph.profile_id,
-                            "conflict_detected",
-                            "Conflict detected. A safe backup was created.",
-                            &["open_conflict", "open_sync_root", "retry_sync"],
-                            Some(&path),
-                            conflict_backup_relative.as_deref(),
-                        );
-                    }
-                }
-            }
-
-            pending_downloads.push((item.id.clone(), path, local_abs, remote_entry.clone()));
+            upsert_remote_known_item(sync_state, remote_entry);
             continue;
         }
 
-        upsert_remote_known_item(sync_state, remote_entry);
-    }
+        let local_current = read_local_entry(&local_abs)?;
+        let previous_local = sync_state.local_snapshot.get(&path);
+        let local_changed = local_current
+            .as_ref()
+            .map(|entry| has_local_changed(entry, previous_local))
+            .unwrap_or(false);
 
-    if !pending_downloads.is_empty() {
-        let download_concurrency = resolve_download_concurrency();
-        log::info!(
-            "{} [cycle:{}] REMOTE_DOWNLOAD_BATCH_START queued={} concurrency={}",
-            graph.account_prefix,
-            graph.cycle_id,
-            pending_downloads.len(),
-            download_concurrency
-        );
-
-        let mut download_tasks = stream::iter(pending_downloads.into_iter().map(|download| {
-            let cancel_state = Arc::clone(cancel_flag);
-            let graph_context = graph.clone();
-            async move {
-                let (item_id, path, local_abs, remote_entry) = download;
-                match download_remote_item_content(
-                    &graph_context,
-                    &item_id,
-                    &path,
-                    &local_abs,
-                    &cancel_state,
-                )
-                .await
-                {
-                    Ok(outcome) => Ok((item_id, path, remote_entry, outcome)),
-                    Err(error) => Err(format!(
-                        "Remote download failed item_id={} path={}: {}",
-                        item_id, path, error
-                    )),
-                }
+        if local_changed {
+            let local_entry = local_current.expect("local_changed implies local entry exists");
+            if local_entry.modified_ts > remote_entry.modified_ts {
+                log::info!(
+                    "{} [cycle:{}] REMOTE_OLDER_UPLOAD_LOCAL path={} local_ts={} remote_ts={}",
+                    graph.account_prefix,
+                    graph.cycle_id,
+                    path,
+                    local_entry.modified_ts,
+                    remote_entry.modified_ts
+                );
+                let uploaded = upload_file_by_path(graph, sync_root, &path, cancel_flag).await?;
+                let known = remote_known_item_from_drive_item(uploaded, &path)?;
+                upsert_remote_known_item(sync_state, known);
+                stats.uploaded_files += 1;
+                continue;
             }
-        }))
-        .buffer_unordered(download_concurrency);
 
-        let mut completed_count: usize = 0;
-        let mut download_results_since_flush: usize = 0;
-        while let Some(task_result) = download_tasks.next().await {
-            let (_, _, remote_entry, outcome) = task_result?;
-            match outcome {
-                RemoteDownloadOutcome::Downloaded => {
-                    upsert_remote_known_item(sync_state, remote_entry);
-                    stats.downloaded_files += 1;
-                    completed_count += 1;
-                }
-                RemoteDownloadOutcome::SkippedMissingRemote => {
-                    sync_state.remote_by_id.remove(&remote_entry.id);
-                    sync_state.remote_path_to_id.remove(&remote_entry.path);
-                    sync_state.local_snapshot.remove(&remote_entry.path);
-                    stats.remote_items_skipped_missing += 1;
-                    log::warn!(
-                        "{} [cycle:{}] REMOTE_ITEM_SKIP_MISSING path={} id={}",
-                        graph.account_prefix,
-                        graph.cycle_id,
-                        remote_entry.path,
-                        remote_entry.id
+            if let Some(backup_path) = create_safe_backup(&local_abs)? {
+                log::info!(
+                    "{} [cycle:{}] SAFE_BACKUP_CREATED source={} backup={}",
+                    graph.account_prefix,
+                    graph.cycle_id,
+                    local_abs.display(),
+                    backup_path.display()
+                );
+                let conflict_backup_relative = relative_path_for_issue(sync_root, &backup_path);
+                if let Ok(mut runtime_map) = graph.sync_runtime.lock() {
+                    sync_runtime::set_issue(
+                        &mut runtime_map,
+                        &graph.profile_id,
+                        "conflict_detected",
+                        "Conflict detected. A safe backup was created.",
+                        &["open_conflict", "open_sync_root", "retry_sync"],
+                        Some(&path),
+                        conflict_backup_relative.as_deref(),
                     );
                 }
             }
-
-            download_results_since_flush += 1;
-            if download_results_since_flush >= DOWNLOAD_CHECKPOINT_FLUSH_STEP {
-                save_sync_state(&graph.profile_id, sync_state)?;
-                download_results_since_flush = 0;
-            }
         }
 
-        if download_results_since_flush > 0 {
-            save_sync_state(&graph.profile_id, sync_state)?;
+        if pending_download_ids.insert(item.id.clone()) {
+            download_tx
+                .send(RemoteDownloadJob {
+                    item_id: item.id,
+                    path,
+                    local_abs,
+                    remote_entry,
+                })
+                .await
+                .map_err(|_| "Remote download queue closed unexpectedly".to_string())?;
+            *pending_download_count += 1;
         }
-
-        log::info!(
-            "{} [cycle:{}] REMOTE_DOWNLOAD_BATCH_COMPLETE completed={}",
-            graph.account_prefix,
-            graph.cycle_id,
-            completed_count
-        );
     }
 
     Ok(())
+}
+
+fn apply_remote_download_result(
+    graph: &GraphContext,
+    sync_state: &mut PersistedSyncState,
+    stats: &mut SyncCycleStats,
+    pending_download_ids: &mut HashSet<String>,
+    result: RemoteDownloadResult,
+) {
+    pending_download_ids.remove(&result.remote_entry.id);
+    match result.outcome {
+        RemoteDownloadOutcome::Downloaded => {
+            upsert_remote_known_item(sync_state, result.remote_entry);
+            stats.downloaded_files += 1;
+        }
+        RemoteDownloadOutcome::SkippedMissingRemote => {
+            sync_state.remote_by_id.remove(&result.remote_entry.id);
+            sync_state
+                .remote_path_to_id
+                .remove(&result.remote_entry.path);
+            sync_state.local_snapshot.remove(&result.remote_entry.path);
+            stats.remote_items_skipped_missing += 1;
+            log::warn!(
+                "{} [cycle:{}] REMOTE_ITEM_SKIP_MISSING path={} id={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                result.remote_entry.path,
+                result.remote_entry.id
+            );
+        }
+    }
 }
