@@ -15,6 +15,7 @@ import {
   IconUpload,
   IconVideo,
 } from "@tabler/icons-preact";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { SyncRuntimeAccountStatus } from "../../types/somedrive";
 import { syncModeMessage } from "./syncModeMessaging";
 
@@ -50,6 +51,17 @@ function formatBytes(value: number | null): string {
     return `${(value / (1024 * 1024)).toFixed(1)} MB`;
   }
   return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function formatTransferRate(bytesPerSecond: number): string {
+  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) {
+    return "0 MB/s (0 Mbps)";
+  }
+  const megabytesPerSecond = bytesPerSecond / (1024 * 1024);
+  const megabitsPerSecond = (bytesPerSecond * 8) / 1_000_000;
+  const mbPerSecondText = megabytesPerSecond >= 10 ? megabytesPerSecond.toFixed(1) : megabytesPerSecond.toFixed(2);
+  const mbpsText = megabitsPerSecond >= 100 ? megabitsPerSecond.toFixed(0) : megabitsPerSecond.toFixed(1);
+  return `${mbPerSecondText} MB/s (${mbpsText} Mbps)`;
 }
 
 function transferProgressPercent(bytesDone: number, bytesTotal: number | null): number | null {
@@ -168,6 +180,9 @@ export function AccountSyncActivityPanel({
   largeDeletePreviewPaths,
   onExportLargeDeletePreview,
 }: AccountSyncActivityPanelProps) {
+  const throughputSampleRef = useRef<{ timestampMs: number; downloadedBytes: number; uploadedBytes: number } | null>(null);
+  const [downloadBytesPerSecond, setDownloadBytesPerSecond] = useState(0);
+  const [uploadBytesPerSecond, setUploadBytesPerSecond] = useState(0);
   const modeMessage = syncModeMessage(runtimeStatus, hasCompletedInitialSync);
   const isPausedPhase = runtimeStatus?.phase === "paused";
   const inProgress = runtimeStatus?.inProgress ?? [];
@@ -182,6 +197,12 @@ export function AccountSyncActivityPanel({
   const remoteDownloadInFlightRaw = runtimeStatus?.remoteDownloadInFlight ?? 0;
   const remoteDownloadInFlight = isPausedPhase ? 0 : remoteDownloadInFlightRaw;
   const remoteDownloadRetryWaiting = runtimeStatus?.remoteDownloadRetryWaiting ?? 0;
+  const remoteDownloadPlannedBytesTotal = runtimeStatus?.remoteDownloadPlannedBytesTotal ?? 0;
+  const remoteDownloadCompletedBytesTotal = runtimeStatus?.remoteDownloadCompletedBytesTotal ?? 0;
+  const remoteDownloadRemainingBytesTotal = runtimeStatus?.remoteDownloadRemainingBytesTotal ?? 0;
+  const remoteDownloadInFlightBytesDone = runtimeStatus?.remoteDownloadInFlightBytesDone ?? 0;
+  const remoteDownloadThrottleTotal = runtimeStatus?.remoteDownloadThrottleTotal ?? 0;
+  const remoteDownloadThrottleLastMinute = runtimeStatus?.remoteDownloadThrottleLastMinute ?? 0;
   const remoteScanComplete = runtimeStatus?.remoteScanComplete ?? false;
   const remoteDownloadRemainingCount = Math.max(
     remoteDownloadPlannedCount - remoteDownloadedCount - remoteDownloadFailedCount - remoteDownloadInFlight - remoteDownloadRetryWaiting,
@@ -193,6 +214,12 @@ export function AccountSyncActivityPanel({
   const uploadedCount = runtimeStatus?.uploadCompletedTotal ?? 0;
   const uploadFailedCount = runtimeStatus?.uploadFailedTotal ?? 0;
   const uploadRetryWaitingCount = runtimeStatus?.uploadRetryWaiting ?? 0;
+  const uploadPlannedBytesTotal = runtimeStatus?.uploadPlannedBytesTotal ?? 0;
+  const uploadCompletedBytesTotal = runtimeStatus?.uploadCompletedBytesTotal ?? 0;
+  const uploadRemainingBytesTotal = runtimeStatus?.uploadRemainingBytesTotal ?? 0;
+  const uploadInFlightBytesDone = runtimeStatus?.uploadInFlightBytesDone ?? 0;
+  const uploadThrottleTotal = runtimeStatus?.uploadThrottleTotal ?? 0;
+  const uploadThrottleLastMinute = runtimeStatus?.uploadThrottleLastMinute ?? 0;
   const showTransferStats =
     remoteDiscoveredCount > 0 ||
     remoteDownloadPlannedCount > 0 ||
@@ -262,6 +289,41 @@ export function AccountSyncActivityPanel({
   const conflictTargetPath = issueSecondaryPath ?? issuePath;
   const hasConflictAction = issueActions.includes("open_conflict") && Boolean(conflictTargetPath);
 
+  useEffect(() => {
+    if (!runtimeStatus) {
+      throughputSampleRef.current = null;
+      setDownloadBytesPerSecond(0);
+      setUploadBytesPerSecond(0);
+      return;
+    }
+
+    const timestampMs = new Date(runtimeStatus.updatedAt).getTime();
+    const safeTimestampMs = Number.isFinite(timestampMs) ? timestampMs : Date.now();
+    const downloadedBytes = remoteDownloadCompletedBytesTotal + remoteDownloadInFlightBytesDone;
+    const uploadedBytes = uploadCompletedBytesTotal + uploadInFlightBytesDone;
+    const previousSample = throughputSampleRef.current;
+
+    if (previousSample && safeTimestampMs > previousSample.timestampMs) {
+      const deltaSeconds = (safeTimestampMs - previousSample.timestampMs) / 1000;
+      const nextDownloadRate = Math.max(0, (downloadedBytes - previousSample.downloadedBytes) / deltaSeconds);
+      const nextUploadRate = Math.max(0, (uploadedBytes - previousSample.uploadedBytes) / deltaSeconds);
+      setDownloadBytesPerSecond((currentRate) => (currentRate <= 0 ? nextDownloadRate : currentRate * 0.55 + nextDownloadRate * 0.45));
+      setUploadBytesPerSecond((currentRate) => (currentRate <= 0 ? nextUploadRate : currentRate * 0.55 + nextUploadRate * 0.45));
+    }
+
+    throughputSampleRef.current = {
+      timestampMs: safeTimestampMs,
+      downloadedBytes,
+      uploadedBytes,
+    };
+  }, [
+    runtimeStatus,
+    remoteDownloadCompletedBytesTotal,
+    remoteDownloadInFlightBytesDone,
+    uploadCompletedBytesTotal,
+    uploadInFlightBytesDone,
+  ]);
+
   return (
     <div class="account-sync-activity-panel" role="region" aria-label="Sync activity">
       <section class={`account-sync-mode-banner account-sync-mode-banner-${modeMessage.tone}`}>
@@ -285,24 +347,39 @@ export function AccountSyncActivityPanel({
 
           <p class="account-sync-preview-stats-section">Downloads</p>
           <p class="account-sync-preview-stats-line">
-            <span>Need download {remoteDownloadPlannedCount}</span>
+            <span>Download queue {remoteDownloadPlannedCount}</span>
+            <span>Download queue size {formatBytes(remoteDownloadPlannedBytesTotal)}</span>
             <span>Downloading now {remoteDownloadInFlight}</span>
+            <span>Download speed {formatTransferRate(downloadBytesPerSecond)}</span>
             <span>Downloaded {remoteDownloadedCount}</span>
+            <span>Downloaded size {formatBytes(remoteDownloadCompletedBytesTotal)}</span>
             <span>Download retry waiting {remoteDownloadRetryWaiting}</span>
             <span>Download failed {remoteDownloadFailedCount}</span>
+            <span>Download 429 (1m) {remoteDownloadThrottleLastMinute}</span>
+            <span>Download 429 (total) {remoteDownloadThrottleTotal}</span>
             <span>
               Download remaining {remoteDownloadRemainingCount}
+              {!remoteScanComplete ? "+" : ""}
+            </span>
+            <span>
+              Download remaining size {formatBytes(remoteDownloadRemainingBytesTotal)}
               {!remoteScanComplete ? "+" : ""}
             </span>
           </p>
 
           <p class="account-sync-preview-stats-section">Uploads</p>
           <p class="account-sync-preview-stats-line">
-            <span>Need upload {uploadPlannedCount}</span>
+            <span>Upload queue {uploadPlannedCount}</span>
+            <span>Upload queue size {formatBytes(uploadPlannedBytesTotal)}</span>
             <span>Uploading now {activeUploadCount}</span>
+            <span>Upload speed {formatTransferRate(uploadBytesPerSecond)}</span>
             <span>Uploaded {uploadedCount}</span>
+            <span>Uploaded size {formatBytes(uploadCompletedBytesTotal)}</span>
             <span>Upload retry waiting {uploadRetryWaitingCount}</span>
             <span>Upload failed {uploadFailedCount}</span>
+            <span>Upload remaining size {formatBytes(uploadRemainingBytesTotal)}</span>
+            <span>Upload 429 (1m) {uploadThrottleLastMinute}</span>
+            <span>Upload 429 (total) {uploadThrottleTotal}</span>
           </p>
         </div>
       )}

@@ -262,7 +262,8 @@ fn build_unique_download_temp_path(
     std::hash::Hash::hash(relative_path, &mut hasher);
     std::hash::Hash::hash(cycle_id, &mut hasher);
     let suffix = format!("{:016x}", std::hash::Hasher::finish(&hasher));
-    local_path.with_extension(format!("somedrive-part-{suffix}"))
+    let parent = local_path.parent().unwrap_or_else(|| Path::new("."));
+    parent.join(format!(".somedrive-part-{suffix}.tmp"))
 }
 
 async fn handle_download_retry(

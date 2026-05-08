@@ -26,21 +26,28 @@ struct ClaimedDownloadJob {
 #[derive(Debug, Clone, Default)]
 struct DownloadJobCounters {
     planned_total: usize,
+    planned_bytes: u64,
     in_progress: usize,
+    in_flight_bytes_done: u64,
     retry_waiting: usize,
     completed: usize,
+    completed_bytes: u64,
     failed_terminal: usize,
     remaining: usize,
+    remaining_bytes: u64,
 }
 
 #[derive(Debug, Clone, Default)]
 struct UploadJobCounters {
     planned_total: usize,
+    planned_bytes: u64,
     in_progress: usize,
+    in_flight_bytes_done: u64,
     retry_waiting: usize,
     completed: usize,
+    completed_bytes: u64,
     failed_terminal: usize,
-    remaining: usize,
+    remaining_bytes: u64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -69,6 +76,14 @@ struct PersistedSyncIssue {
     issue_actions: Vec<String>,
     issue_path: Option<String>,
     issue_secondary_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ThrottleCounters {
+    download_total: usize,
+    download_last_minute: usize,
+    upload_total: usize,
+    upload_last_minute: usize,
 }
 
 fn sync_jobs_db_path(profile_id: &str) -> Result<PathBuf, String> {
@@ -164,6 +179,15 @@ fn open_sync_jobs_connection(profile_id: &str) -> Result<Connection, String> {
                  issue_path TEXT,
                  issue_secondary_path TEXT,
                  updated_at INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS sync_throttle_events (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 profile_id TEXT NOT NULL,
+                 direction TEXT NOT NULL,
+                 occurred_at INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_sync_throttle_events_lookup
+                 ON sync_throttle_events(profile_id, direction, occurred_at)
              );",
         )
         .map_err(|error| format!("Failed initializing sync jobs schema: {error}"))?;
@@ -648,49 +672,57 @@ fn reset_running_sync_jobs_for_pause(profile_id: &str) -> Result<usize, String> 
 
 fn read_download_job_counters(profile_id: &str) -> Result<DownloadJobCounters, String> {
     let connection = open_sync_jobs_connection(profile_id)?;
-    let mut statement = connection
-        .prepare(
-            "SELECT state, run_state, COUNT(1)
+    connection
+        .query_row(
+            "SELECT
+                SUM(CASE WHEN state != 'skipped' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN state = 'in_progress' AND run_state = 'running' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN state = 'retry_wait' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN state = 'done' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN state = 'failed_terminal' THEN 1 ELSE 0 END),
+                SUM(CASE
+                    WHEN state IN ('queued', 'retry_wait') THEN COALESCE(bytes_total, remote_size, 0)
+                    WHEN state = 'in_progress' AND run_state = 'running' THEN CASE
+                        WHEN COALESCE(bytes_total, remote_size, 0) > COALESCE(bytes_done, 0)
+                            THEN COALESCE(bytes_total, remote_size, 0) - COALESCE(bytes_done, 0)
+                        ELSE 0
+                    END
+                    ELSE 0
+                END),
+                SUM(CASE WHEN state != 'skipped' THEN COALESCE(bytes_total, remote_size, 0) ELSE 0 END),
+                SUM(CASE WHEN state = 'done' THEN COALESCE(bytes_total, bytes_done, remote_size, 0) ELSE 0 END),
+                SUM(CASE WHEN state = 'in_progress' AND run_state = 'running' THEN COALESCE(bytes_done, 0) ELSE 0 END)
              FROM sync_jobs
-             WHERE profile_id = ?1 AND direction = ?2
-             GROUP BY state, run_state",
+             WHERE profile_id = ?1 AND direction = ?2",
+            params![profile_id, DOWNLOAD_JOB_DIRECTION],
+            |row| {
+                let planned_total = row.get::<_, Option<i64>>(0)?.unwrap_or(0).max(0) as usize;
+                let in_progress = row.get::<_, Option<i64>>(1)?.unwrap_or(0).max(0) as usize;
+                let retry_waiting = row.get::<_, Option<i64>>(2)?.unwrap_or(0).max(0) as usize;
+                let completed = row.get::<_, Option<i64>>(3)?.unwrap_or(0).max(0) as usize;
+                let failed_terminal = row.get::<_, Option<i64>>(4)?.unwrap_or(0).max(0) as usize;
+                let remaining_bytes = row.get::<_, Option<i64>>(5)?.unwrap_or(0).max(0) as u64;
+                let planned_bytes = row.get::<_, Option<i64>>(6)?.unwrap_or(0).max(0) as u64;
+                let completed_bytes = row.get::<_, Option<i64>>(7)?.unwrap_or(0).max(0) as u64;
+                let in_flight_bytes_done = row.get::<_, Option<i64>>(8)?.unwrap_or(0).max(0) as u64;
+                let remaining = planned_total
+                    .saturating_sub(completed)
+                    .saturating_sub(failed_terminal);
+                Ok(DownloadJobCounters {
+                    planned_total,
+                    planned_bytes,
+                    in_progress,
+                    in_flight_bytes_done,
+                    retry_waiting,
+                    completed,
+                    completed_bytes,
+                    failed_terminal,
+                    remaining,
+                    remaining_bytes,
+                })
+            },
         )
-        .map_err(|error| format!("Failed preparing download counters query: {error}"))?;
-
-    let mut counters = DownloadJobCounters::default();
-    let rows = statement
-        .query_map(params![profile_id, DOWNLOAD_JOB_DIRECTION], |row| {
-            let state: String = row.get(0)?;
-            let run_state: String = row.get(1)?;
-            let count: i64 = row.get(2)?;
-            Ok((state, run_state, count.max(0) as usize))
-        })
-        .map_err(|error| format!("Failed querying download counters: {error}"))?;
-
-    for row in rows {
-        let (state, run_state, count) =
-            row.map_err(|error| format!("Failed reading download counters: {error}"))?;
-        counters.planned_total += count;
-        match state.as_str() {
-            DOWNLOAD_JOB_STATE_IN_PROGRESS => {
-                if run_state == JOB_RUN_STATE_RUNNING {
-                    counters.in_progress = count;
-                }
-            }
-            DOWNLOAD_JOB_STATE_RETRY_WAIT => counters.retry_waiting = count,
-            DOWNLOAD_JOB_STATE_DONE => counters.completed = count,
-            DOWNLOAD_JOB_STATE_FAILED_TERMINAL => counters.failed_terminal = count,
-            DOWNLOAD_JOB_STATE_QUEUED => {}
-            DOWNLOAD_JOB_STATE_SKIPPED => {}
-            _ => {}
-        }
-    }
-
-    counters.remaining = counters
-        .planned_total
-        .saturating_sub(counters.completed)
-        .saturating_sub(counters.failed_terminal);
-    Ok(counters)
+        .map_err(|error| format!("Failed reading download counters: {error}"))
 }
 
 fn begin_upload_job(
@@ -855,49 +887,53 @@ fn update_upload_job_progress(
 
 fn read_upload_job_counters(profile_id: &str) -> Result<UploadJobCounters, String> {
     let connection = open_sync_jobs_connection(profile_id)?;
-    let mut statement = connection
-        .prepare(
-            "SELECT state, run_state, COUNT(1)
+    connection
+        .query_row(
+            "SELECT
+                SUM(CASE WHEN state != 'skipped' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN state = 'in_progress' AND run_state = 'running' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN state = 'retry_wait' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN state = 'done' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN state = 'failed_terminal' THEN 1 ELSE 0 END),
+                SUM(CASE
+                    WHEN state IN ('queued', 'retry_wait') THEN COALESCE(bytes_total, remote_size, 0)
+                    WHEN state = 'in_progress' AND run_state = 'running' THEN CASE
+                        WHEN COALESCE(bytes_total, remote_size, 0) > COALESCE(bytes_done, 0)
+                            THEN COALESCE(bytes_total, remote_size, 0) - COALESCE(bytes_done, 0)
+                        ELSE 0
+                    END
+                    ELSE 0
+                END),
+                SUM(CASE WHEN state != 'skipped' THEN COALESCE(bytes_total, remote_size, 0) ELSE 0 END),
+                SUM(CASE WHEN state = 'done' THEN COALESCE(bytes_total, bytes_done, remote_size, 0) ELSE 0 END),
+                SUM(CASE WHEN state = 'in_progress' AND run_state = 'running' THEN COALESCE(bytes_done, 0) ELSE 0 END)
              FROM sync_jobs
-             WHERE profile_id = ?1 AND direction = ?2
-             GROUP BY state, run_state",
+             WHERE profile_id = ?1 AND direction = ?2",
+            params![profile_id, UPLOAD_JOB_DIRECTION],
+            |row| {
+                let planned_total = row.get::<_, Option<i64>>(0)?.unwrap_or(0).max(0) as usize;
+                let in_progress = row.get::<_, Option<i64>>(1)?.unwrap_or(0).max(0) as usize;
+                let retry_waiting = row.get::<_, Option<i64>>(2)?.unwrap_or(0).max(0) as usize;
+                let completed = row.get::<_, Option<i64>>(3)?.unwrap_or(0).max(0) as usize;
+                let failed_terminal = row.get::<_, Option<i64>>(4)?.unwrap_or(0).max(0) as usize;
+                let remaining_bytes = row.get::<_, Option<i64>>(5)?.unwrap_or(0).max(0) as u64;
+                let planned_bytes = row.get::<_, Option<i64>>(6)?.unwrap_or(0).max(0) as u64;
+                let completed_bytes = row.get::<_, Option<i64>>(7)?.unwrap_or(0).max(0) as u64;
+                let in_flight_bytes_done = row.get::<_, Option<i64>>(8)?.unwrap_or(0).max(0) as u64;
+                Ok(UploadJobCounters {
+                    planned_total,
+                    planned_bytes,
+                    in_progress,
+                    in_flight_bytes_done,
+                    retry_waiting,
+                    completed,
+                    completed_bytes,
+                    failed_terminal,
+                    remaining_bytes,
+                })
+            },
         )
-        .map_err(|error| format!("Failed preparing upload counters query: {error}"))?;
-
-    let mut counters = UploadJobCounters::default();
-    let rows = statement
-        .query_map(params![profile_id, UPLOAD_JOB_DIRECTION], |row| {
-            let state: String = row.get(0)?;
-            let run_state: String = row.get(1)?;
-            let count: i64 = row.get(2)?;
-            Ok((state, run_state, count.max(0) as usize))
-        })
-        .map_err(|error| format!("Failed querying upload counters: {error}"))?;
-
-    for row in rows {
-        let (state, run_state, count) =
-            row.map_err(|error| format!("Failed reading upload counters: {error}"))?;
-        counters.planned_total += count;
-        match state.as_str() {
-            DOWNLOAD_JOB_STATE_IN_PROGRESS => {
-                if run_state == JOB_RUN_STATE_RUNNING {
-                    counters.in_progress = count;
-                }
-            }
-            DOWNLOAD_JOB_STATE_DONE => counters.completed = count,
-            DOWNLOAD_JOB_STATE_FAILED_TERMINAL => counters.failed_terminal = count,
-            DOWNLOAD_JOB_STATE_RETRY_WAIT => counters.retry_waiting = count,
-            DOWNLOAD_JOB_STATE_QUEUED => {}
-            DOWNLOAD_JOB_STATE_SKIPPED => {}
-            _ => {}
-        }
-    }
-
-    counters.remaining = counters
-        .planned_total
-        .saturating_sub(counters.completed)
-        .saturating_sub(counters.failed_terminal);
-    Ok(counters)
+        .map_err(|error| format!("Failed reading upload counters: {error}"))
 }
 
 fn read_sync_job_activity_projection(
@@ -1139,6 +1175,10 @@ pub fn hydrate_runtime_status_from_db(
     status.remote_download_failed_total = download_counters.failed_terminal;
     status.remote_download_in_flight = download_counters.in_progress;
     status.remote_download_retry_waiting = download_counters.retry_waiting;
+    status.remote_download_planned_bytes_total = download_counters.planned_bytes;
+    status.remote_download_completed_bytes_total = download_counters.completed_bytes;
+    status.remote_download_remaining_bytes_total = download_counters.remaining_bytes;
+    status.remote_download_in_flight_bytes_done = download_counters.in_flight_bytes_done;
     status.remote_download_queue_count = status.remote_download_in_flight;
     status.remote_downloaded_count = status.remote_download_completed_total;
 
@@ -1147,6 +1187,16 @@ pub fn hydrate_runtime_status_from_db(
     status.upload_failed_total = upload_counters.failed_terminal;
     status.upload_in_flight = upload_counters.in_progress;
     status.upload_retry_waiting = upload_counters.retry_waiting;
+    status.upload_planned_bytes_total = upload_counters.planned_bytes;
+    status.upload_completed_bytes_total = upload_counters.completed_bytes;
+    status.upload_remaining_bytes_total = upload_counters.remaining_bytes;
+    status.upload_in_flight_bytes_done = upload_counters.in_flight_bytes_done;
+
+    let throttle = read_throttle_counters(&profile_id)?;
+    status.remote_download_throttle_total = throttle.download_total;
+    status.remote_download_throttle_last_minute = throttle.download_last_minute;
+    status.upload_throttle_total = throttle.upload_total;
+    status.upload_throttle_last_minute = throttle.upload_last_minute;
 
     if let Some(issue) = read_persisted_sync_issue(&profile_id)? {
         status.issue_code = Some(issue.issue_code);
@@ -1245,6 +1295,57 @@ fn read_persisted_sync_issue(profile_id: &str) -> Result<Option<PersistedSyncIss
         .optional()
         .map_err(|error| format!("Failed reading sync issue state: {error}"))?;
     Ok(row)
+}
+
+fn record_throttle_event(profile_id: &str, direction: &str) -> Result<(), String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let now = current_unix_seconds();
+    let trim_before = now.saturating_sub(3600);
+    connection
+        .execute(
+            "INSERT INTO sync_throttle_events (profile_id, direction, occurred_at) VALUES (?1, ?2, ?3)",
+            params![profile_id, direction, now],
+        )
+        .map_err(|error| format!("Failed recording throttle event: {error}"))?;
+    connection
+        .execute(
+            "DELETE FROM sync_throttle_events WHERE profile_id = ?1 AND occurred_at < ?2",
+            params![profile_id, trim_before],
+        )
+        .map_err(|error| format!("Failed trimming throttle events: {error}"))?;
+    Ok(())
+}
+
+fn read_throttle_counters(profile_id: &str) -> Result<ThrottleCounters, String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let now = current_unix_seconds();
+    let last_minute = now.saturating_sub(60);
+    connection
+        .query_row(
+            "SELECT
+                SUM(CASE WHEN direction = ?2 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN direction = ?2 AND occurred_at >= ?4 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN direction = ?3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN direction = ?3 AND occurred_at >= ?4 THEN 1 ELSE 0 END)
+             FROM sync_throttle_events
+             WHERE profile_id = ?1",
+            params![
+                profile_id,
+                DOWNLOAD_JOB_DIRECTION,
+                UPLOAD_JOB_DIRECTION,
+                last_minute,
+            ],
+            |row| {
+                Ok(ThrottleCounters {
+                    download_total: row.get::<_, Option<i64>>(0)?.unwrap_or(0).max(0) as usize,
+                    download_last_minute: row.get::<_, Option<i64>>(1)?.unwrap_or(0).max(0)
+                        as usize,
+                    upload_total: row.get::<_, Option<i64>>(2)?.unwrap_or(0).max(0) as usize,
+                    upload_last_minute: row.get::<_, Option<i64>>(3)?.unwrap_or(0).max(0) as usize,
+                })
+            },
+        )
+        .map_err(|error| format!("Failed reading throttle counters: {error}"))
 }
 
 fn unix_seconds_to_rfc3339(value: i64) -> String {

@@ -55,11 +55,23 @@ pub struct SyncRuntimeAccountStatus {
     pub remote_download_failed_total: usize,
     pub remote_download_in_flight: usize,
     pub remote_download_retry_waiting: usize,
+    pub remote_download_planned_bytes_total: u64,
+    pub remote_download_completed_bytes_total: u64,
+    pub remote_download_remaining_bytes_total: u64,
+    pub remote_download_in_flight_bytes_done: u64,
+    pub remote_download_throttle_total: usize,
+    pub remote_download_throttle_last_minute: usize,
     pub upload_planned_total: usize,
     pub upload_completed_total: usize,
     pub upload_failed_total: usize,
     pub upload_in_flight: usize,
     pub upload_retry_waiting: usize,
+    pub upload_planned_bytes_total: u64,
+    pub upload_completed_bytes_total: u64,
+    pub upload_remaining_bytes_total: u64,
+    pub upload_in_flight_bytes_done: u64,
+    pub upload_throttle_total: usize,
+    pub upload_throttle_last_minute: usize,
     pub remote_scan_complete: bool,
     pub updated_at: String,
     #[serde(skip_serializing)]
@@ -97,11 +109,23 @@ impl SyncRuntimeAccountStatus {
             remote_download_failed_total: 0,
             remote_download_in_flight: 0,
             remote_download_retry_waiting: 0,
+            remote_download_planned_bytes_total: 0,
+            remote_download_completed_bytes_total: 0,
+            remote_download_remaining_bytes_total: 0,
+            remote_download_in_flight_bytes_done: 0,
+            remote_download_throttle_total: 0,
+            remote_download_throttle_last_minute: 0,
             upload_planned_total: 0,
             upload_completed_total: 0,
             upload_failed_total: 0,
             upload_in_flight: 0,
             upload_retry_waiting: 0,
+            upload_planned_bytes_total: 0,
+            upload_completed_bytes_total: 0,
+            upload_remaining_bytes_total: 0,
+            upload_in_flight_bytes_done: 0,
+            upload_throttle_total: 0,
+            upload_throttle_last_minute: 0,
             remote_scan_complete: false,
             updated_at: now,
             remote_session_discovered_ids: HashSet::new(),
@@ -476,6 +500,12 @@ fn reset_remote_session_progress(status: &mut SyncRuntimeAccountStatus) {
     status.remote_download_failed_total = 0;
     status.remote_download_in_flight = 0;
     status.remote_download_retry_waiting = 0;
+    status.remote_download_planned_bytes_total = 0;
+    status.remote_download_completed_bytes_total = 0;
+    status.remote_download_remaining_bytes_total = 0;
+    status.remote_download_in_flight_bytes_done = 0;
+    status.remote_download_throttle_total = 0;
+    status.remote_download_throttle_last_minute = 0;
     status.remote_scan_complete = false;
     status.remote_session_discovered_ids.clear();
     status.remote_session_planned_ids.clear();
@@ -489,6 +519,12 @@ fn reset_upload_session_progress(status: &mut SyncRuntimeAccountStatus) {
     status.upload_failed_total = 0;
     status.upload_in_flight = 0;
     status.upload_retry_waiting = 0;
+    status.upload_planned_bytes_total = 0;
+    status.upload_completed_bytes_total = 0;
+    status.upload_remaining_bytes_total = 0;
+    status.upload_in_flight_bytes_done = 0;
+    status.upload_throttle_total = 0;
+    status.upload_throttle_last_minute = 0;
 }
 
 fn sync_upload_in_flight(status: &mut SyncRuntimeAccountStatus) {

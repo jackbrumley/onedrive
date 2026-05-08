@@ -44,6 +44,9 @@ async fn graph_get_text(
 
         let status = response.status();
         if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+            if status == StatusCode::TOO_MANY_REQUESTS {
+                let _ = record_throttle_event(&graph.profile_id, DOWNLOAD_JOB_DIRECTION);
+            }
             if attempt < MAX_DOWNLOAD_RETRIES {
                 let delay = parse_retry_after_delay(response.headers())
                     .unwrap_or_else(|| exponential_backoff_delay(attempt));
@@ -811,6 +814,9 @@ async fn upload_large_file_session(
 
             let status = response.status();
             if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+                if status == StatusCode::TOO_MANY_REQUESTS {
+                    let _ = record_throttle_event(&graph.profile_id, UPLOAD_JOB_DIRECTION);
+                }
                 if attempt < MAX_DOWNLOAD_RETRIES {
                     let delay = parse_retry_after_delay(response.headers())
                         .unwrap_or_else(|| exponential_backoff_delay(attempt));
@@ -953,6 +959,9 @@ async fn create_upload_session(
             continue;
         }
         if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+            if status == StatusCode::TOO_MANY_REQUESTS {
+                let _ = record_throttle_event(&graph.profile_id, UPLOAD_JOB_DIRECTION);
+            }
             let delay = parse_retry_after_delay(response.headers()).unwrap_or_else(|| Duration::from_secs(2));
             log::warn!(
                 "{} [cycle:{}] GRAPH_UPLOAD_SESSION_RETRY status={} path={} delay_ms={}",

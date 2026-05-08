@@ -118,11 +118,23 @@ export interface SyncRuntimeAccountStatus {
   remoteDownloadFailedTotal?: number;
   remoteDownloadInFlight?: number;
   remoteDownloadRetryWaiting?: number;
+  remoteDownloadPlannedBytesTotal?: number;
+  remoteDownloadCompletedBytesTotal?: number;
+  remoteDownloadRemainingBytesTotal?: number;
+  remoteDownloadInFlightBytesDone?: number;
+  remoteDownloadThrottleTotal?: number;
+  remoteDownloadThrottleLastMinute?: number;
   uploadPlannedTotal?: number;
   uploadCompletedTotal?: number;
   uploadFailedTotal?: number;
   uploadInFlight?: number;
   uploadRetryWaiting?: number;
+  uploadPlannedBytesTotal?: number;
+  uploadCompletedBytesTotal?: number;
+  uploadRemainingBytesTotal?: number;
+  uploadInFlightBytesDone?: number;
+  uploadThrottleTotal?: number;
+  uploadThrottleLastMinute?: number;
   remoteScanComplete?: boolean;
   updatedAt: string;
 }
