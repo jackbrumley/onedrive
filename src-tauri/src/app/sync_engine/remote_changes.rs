@@ -869,17 +869,15 @@ async fn process_remote_page_items(
                     backup_path.display()
                 );
                 let conflict_backup_relative = relative_path_for_issue(sync_root, &backup_path);
-                if let Ok(mut runtime_map) = graph.sync_runtime.lock() {
-                    sync_runtime::set_issue(
-                        &mut runtime_map,
-                        &graph.profile_id,
-                        "conflict_detected",
-                        "Conflict detected. A safe backup was created.",
-                        &["open_conflict", "open_sync_root", "retry_sync"],
-                        Some(&path),
-                        conflict_backup_relative.as_deref(),
-                    );
-                }
+                runtime_set_issue(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    "conflict_detected",
+                    "Conflict detected. A safe backup was created.",
+                    &["open_conflict", "open_sync_root", "retry_sync"],
+                    Some(&path),
+                    conflict_backup_relative.as_deref(),
+                );
             }
         }
 

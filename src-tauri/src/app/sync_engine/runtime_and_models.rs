@@ -335,6 +335,50 @@ fn runtime_clear_issue(runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>, profile_
     if let Ok(mut runtime_map) = runtime.lock() {
         sync_runtime::clear_issue(&mut runtime_map, profile_id);
     }
+    if let Err(error) = clear_persisted_sync_issue(profile_id) {
+        log::warn!(
+            "{} SYNC_ISSUE_CLEAR_PERSIST_FAILED error={}",
+            log_context::account_prefix(profile_id),
+            error
+        );
+    }
+}
+
+fn runtime_set_issue(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    issue_code: &str,
+    issue_message: &str,
+    issue_actions: &[&str],
+    issue_path: Option<&str>,
+    issue_secondary_path: Option<&str>,
+) {
+    if let Ok(mut runtime_map) = runtime.lock() {
+        sync_runtime::set_issue(
+            &mut runtime_map,
+            profile_id,
+            issue_code,
+            issue_message,
+            issue_actions,
+            issue_path,
+            issue_secondary_path,
+        );
+    }
+    if let Err(error) = persist_sync_issue(
+        profile_id,
+        issue_code,
+        issue_message,
+        issue_actions,
+        issue_path,
+        issue_secondary_path,
+    ) {
+        log::warn!(
+            "{} SYNC_ISSUE_PERSIST_FAILED code={} error={}",
+            log_context::account_prefix(profile_id),
+            issue_code,
+            error
+        );
+    }
 }
 
 fn runtime_set_remote_scan_complete(

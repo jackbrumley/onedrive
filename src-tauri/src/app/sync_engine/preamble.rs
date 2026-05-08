@@ -62,7 +62,6 @@ pub fn on_agent_state_changed(
         }
         if let Ok(mut runtime_map) = state.sync_runtime.lock() {
             sync_runtime::clear_in_progress(&mut runtime_map, profile_id);
-            sync_runtime::clear_issue(&mut runtime_map, profile_id);
             let (phase, message) = if agent_state == "paused" {
                 ("paused", "Synchronization paused")
             } else {
@@ -71,6 +70,7 @@ pub fn on_agent_state_changed(
             sync_runtime::set_phase(&mut runtime_map, profile_id, phase, message);
             sync_runtime::set_remote_transfer_progress(&mut runtime_map, profile_id, 0, 0, 0);
         }
+        runtime_clear_issue(&state.sync_runtime, profile_id);
     }
     Ok(())
 }
@@ -86,8 +86,8 @@ pub fn confirm_large_delete_guard(
     sync_state.large_delete_guard_approved = true;
     save_sync_state(profile_id, &sync_state)?;
 
+    runtime_clear_issue(&state.sync_runtime, profile_id);
     if let Ok(mut runtime_map) = state.sync_runtime.lock() {
-        sync_runtime::clear_issue(&mut runtime_map, profile_id);
         sync_runtime::set_phase(
             &mut runtime_map,
             profile_id,
@@ -110,8 +110,8 @@ pub fn keep_cloud_files_after_large_delete(
     sync_state.active_delta_next_link = None;
     save_sync_state(profile_id, &sync_state)?;
 
+    runtime_clear_issue(&state.sync_runtime, profile_id);
     if let Ok(mut runtime_map) = state.sync_runtime.lock() {
-        sync_runtime::clear_issue(&mut runtime_map, profile_id);
         sync_runtime::set_phase(
             &mut runtime_map,
             profile_id,

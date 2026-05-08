@@ -62,6 +62,15 @@ struct SyncFilePlannerCounters {
     conflict_total: usize,
 }
 
+#[derive(Debug, Clone)]
+struct PersistedSyncIssue {
+    issue_code: String,
+    issue_message: String,
+    issue_actions: Vec<String>,
+    issue_path: Option<String>,
+    issue_secondary_path: Option<String>,
+}
+
 fn sync_jobs_db_path(profile_id: &str) -> Result<PathBuf, String> {
     let config_dir =
         dirs::config_dir().ok_or_else(|| "Could not resolve config directory".to_string())?;
@@ -146,7 +155,16 @@ fn open_sync_jobs_connection(profile_id: &str) -> Result<Connection, String> {
              CREATE INDEX IF NOT EXISTS idx_sync_files_action
                  ON sync_files(profile_id, desired_action);
              CREATE INDEX IF NOT EXISTS idx_sync_files_remote_item
-                 ON sync_files(profile_id, remote_item_id);",
+                  ON sync_files(profile_id, remote_item_id);
+             CREATE TABLE IF NOT EXISTS sync_issue_state (
+                 profile_id TEXT PRIMARY KEY,
+                 issue_code TEXT NOT NULL,
+                 issue_message TEXT NOT NULL,
+                 issue_actions_json TEXT NOT NULL,
+                 issue_path TEXT,
+                 issue_secondary_path TEXT,
+                 updated_at INTEGER NOT NULL
+             );",
         )
         .map_err(|error| format!("Failed initializing sync jobs schema: {error}"))?;
 
@@ -1130,7 +1148,103 @@ pub fn hydrate_runtime_status_from_db(
     status.upload_in_flight = upload_counters.in_progress;
     status.upload_retry_waiting = upload_counters.retry_waiting;
 
+    if let Some(issue) = read_persisted_sync_issue(&profile_id)? {
+        status.issue_code = Some(issue.issue_code);
+        status.issue_message = Some(issue.issue_message);
+        status.issue_actions = issue.issue_actions;
+        status.issue_path = issue.issue_path;
+        status.issue_secondary_path = issue.issue_secondary_path;
+    } else {
+        status.issue_code = None;
+        status.issue_message = None;
+        status.issue_actions.clear();
+        status.issue_path = None;
+        status.issue_secondary_path = None;
+    }
+
     Ok(())
+}
+
+fn persist_sync_issue(
+    profile_id: &str,
+    issue_code: &str,
+    issue_message: &str,
+    issue_actions: &[&str],
+    issue_path: Option<&str>,
+    issue_secondary_path: Option<&str>,
+) -> Result<(), String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let now = current_unix_seconds();
+    let issue_actions_json = serde_json::to_string(issue_actions)
+        .map_err(|error| format!("Failed serializing issue actions: {error}"))?;
+    connection
+        .execute(
+            "INSERT INTO sync_issue_state (
+                profile_id,
+                issue_code,
+                issue_message,
+                issue_actions_json,
+                issue_path,
+                issue_secondary_path,
+                updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(profile_id)
+             DO UPDATE SET
+                issue_code = excluded.issue_code,
+                issue_message = excluded.issue_message,
+                issue_actions_json = excluded.issue_actions_json,
+                issue_path = excluded.issue_path,
+                issue_secondary_path = excluded.issue_secondary_path,
+                updated_at = excluded.updated_at",
+            params![
+                profile_id,
+                issue_code,
+                issue_message,
+                issue_actions_json,
+                issue_path,
+                issue_secondary_path,
+                now,
+            ],
+        )
+        .map_err(|error| format!("Failed persisting sync issue: {error}"))?;
+    Ok(())
+}
+
+fn clear_persisted_sync_issue(profile_id: &str) -> Result<(), String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    connection
+        .execute(
+            "DELETE FROM sync_issue_state WHERE profile_id = ?1",
+            params![profile_id],
+        )
+        .map_err(|error| format!("Failed clearing sync issue state: {error}"))?;
+    Ok(())
+}
+
+fn read_persisted_sync_issue(profile_id: &str) -> Result<Option<PersistedSyncIssue>, String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let row = connection
+        .query_row(
+            "SELECT issue_code, issue_message, issue_actions_json, issue_path, issue_secondary_path
+             FROM sync_issue_state
+             WHERE profile_id = ?1",
+            params![profile_id],
+            |row| {
+                let issue_actions_json: String = row.get(2)?;
+                let issue_actions = serde_json::from_str::<Vec<String>>(&issue_actions_json)
+                    .unwrap_or_default();
+                Ok(PersistedSyncIssue {
+                    issue_code: row.get(0)?,
+                    issue_message: row.get(1)?,
+                    issue_actions,
+                    issue_path: row.get(3)?,
+                    issue_secondary_path: row.get(4)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| format!("Failed reading sync issue state: {error}"))?;
+    Ok(row)
 }
 
 fn unix_seconds_to_rfc3339(value: i64) -> String {

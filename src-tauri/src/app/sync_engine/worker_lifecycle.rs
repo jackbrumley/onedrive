@@ -30,8 +30,8 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                 "Preparing next sync cycle",
             );
             sync_runtime::set_remote_transfer_progress(&mut runtime_map, &profile_id_owned, 0, 0, 0);
-            sync_runtime::clear_issue(&mut runtime_map, &profile_id_owned);
         }
+        runtime_clear_issue(&sync_runtime, &profile_id_owned);
         tauri::async_runtime::spawn(async move {
             let mut ticker = tokio::time::interval(std::time::Duration::from_secs(15));
             if let Some(delay) = initial_delay {
@@ -140,16 +140,16 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                                         "error",
                                         &format!("Sync error: {}", error),
                                     );
-                                    sync_runtime::set_issue(
-                                        &mut runtime_map,
-                                        &profile_id_owned,
-                                        issue_code,
-                                        &error,
-                                        issue_actions,
-                                        None,
-                                        None,
-                                    );
                                 }
+                                runtime_set_issue(
+                                    &sync_runtime,
+                                    &profile_id_owned,
+                                    issue_code,
+                                    &error,
+                                    issue_actions,
+                                    None,
+                                    None,
+                                );
                                 let _ = activity_log::append_event(
                                     &profile_id_owned,
                                     &log_context::account_identity(&profile_id_owned),

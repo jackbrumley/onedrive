@@ -221,22 +221,20 @@ async fn apply_local_changes(
             "Large deletion detected: {} items. Review before deleting from cloud.",
             pending_count
         );
-        if let Ok(mut runtime_map) = graph.sync_runtime.lock() {
-            sync_runtime::set_issue(
-                &mut runtime_map,
-                &graph.profile_id,
-                "large_delete_guard",
-                &issue_message,
-                &[
-                    "confirm_large_delete",
-                    "keep_cloud_files",
-                    "open_sync_root",
-                    "retry_sync",
-                ],
-                None,
-                None,
-            );
-        }
+        runtime_set_issue(
+            &graph.sync_runtime,
+            &graph.profile_id,
+            "large_delete_guard",
+            &issue_message,
+            &[
+                "confirm_large_delete",
+                "keep_cloud_files",
+                "open_sync_root",
+                "retry_sync",
+            ],
+            None,
+            None,
+        );
         runtime_set_phase(
             &graph.sync_runtime,
             &graph.profile_id,
@@ -267,22 +265,20 @@ async fn apply_local_changes(
                 "Large deletion detected: {} items. Review before deleting from cloud.",
                 pending_count
             );
-            if let Ok(mut runtime_map) = graph.sync_runtime.lock() {
-                sync_runtime::set_issue(
-                    &mut runtime_map,
-                    &graph.profile_id,
-                    "large_delete_guard",
-                    &issue_message,
-                    &[
-                        "confirm_large_delete",
-                        "keep_cloud_files",
-                        "open_sync_root",
-                        "retry_sync",
-                    ],
-                    None,
-                    None,
-                );
-            }
+            runtime_set_issue(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                "large_delete_guard",
+                &issue_message,
+                &[
+                    "confirm_large_delete",
+                    "keep_cloud_files",
+                    "open_sync_root",
+                    "retry_sync",
+                ],
+                None,
+                None,
+            );
             runtime_set_phase(
                 &graph.sync_runtime,
                 &graph.profile_id,
