@@ -21,7 +21,6 @@ async fn fetch_and_apply_delta_changes(
         "Fetching remote files",
     );
     runtime_set_remote_scan_complete(&graph.sync_runtime, &graph.profile_id, false);
-    reset_download_jobs(&graph.profile_id)?;
     runtime_set_remote_download_counters(&graph.sync_runtime, &graph.profile_id, 0, 0, 0, 0, 0);
     log::info!(
         "{} [cycle:{}] REMOTE_PIPELINE_START delta_queue_capacity={} download_queue_capacity={} download_concurrency={} checkpoint_flush_step={}",
@@ -650,6 +649,7 @@ async fn process_remote_page_items(
         ensure_not_cancelled(cancel_flag)?;
         runtime_record_remote_discovered(&graph.sync_runtime, &graph.profile_id, &item.id);
         if item.deleted.is_some() {
+            let _ = remove_download_job_by_item_id(&graph.profile_id, &item.id);
             if bootstrap_cloud_first {
                 if let Some(existing) = sync_state.remote_by_id.get(&item.id).cloned() {
                     sync_state.remote_by_id.remove(&item.id);
@@ -786,6 +786,7 @@ async fn process_remote_page_items(
         }
 
         if bootstrap_cloud_first {
+            upsert_remote_known_item(sync_state, remote_entry.clone());
             let inserted = upsert_download_job(
                 &graph.profile_id,
                 &item.id,

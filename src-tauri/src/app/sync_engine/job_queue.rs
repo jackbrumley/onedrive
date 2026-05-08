@@ -280,14 +280,17 @@ fn add_sync_jobs_column_if_missing(
     Ok(())
 }
 
-fn reset_download_jobs(profile_id: &str) -> Result<(), String> {
+fn remove_download_job_by_item_id(profile_id: &str, item_id: &str) -> Result<(), String> {
     let connection = open_sync_jobs_connection(profile_id)?;
     connection
         .execute(
-            "DELETE FROM sync_jobs WHERE profile_id = ?1 AND direction = ?2",
-            params![profile_id, DOWNLOAD_JOB_DIRECTION],
+            "DELETE FROM sync_jobs
+             WHERE profile_id = ?1
+               AND direction = ?2
+               AND item_id = ?3",
+            params![profile_id, DOWNLOAD_JOB_DIRECTION, item_id],
         )
-        .map_err(|error| format!("Failed resetting download jobs: {error}"))?;
+        .map_err(|error| format!("Failed removing download job by item id: {error}"))?;
     Ok(())
 }
 

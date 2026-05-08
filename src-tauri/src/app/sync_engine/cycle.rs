@@ -116,23 +116,47 @@ async fn tick_sync_cycle(
         )
         .await?;
     } else {
-        runtime_set_phase(
-            &graph.sync_runtime,
-            profile_id,
-            "applying_local",
-            "Preparing two-way sync - building your local baseline",
-        );
-        ensure_not_cancelled(cancel_flag)?;
-        reconcile_bootstrap_local_snapshot(
-            &mut graph,
-            &sync_root,
-            &local_snapshot,
-            &mut sync_state,
-            &mut stats,
-            cancel_flag,
-        )
-        .await?;
-        sync_state.two_way_ready = true;
+        let download_counters = read_download_job_counters(profile_id)?;
+        let bootstrap_ready_for_two_way = sync_state.active_delta_next_link.is_none()
+            && planner_counters.need_download_total == 0
+            && download_counters.remaining == 0
+            && download_counters.failed_terminal == 0;
+
+        if bootstrap_ready_for_two_way {
+            runtime_set_phase(
+                &graph.sync_runtime,
+                profile_id,
+                "applying_local",
+                "Preparing two-way sync - building your local baseline",
+            );
+            ensure_not_cancelled(cancel_flag)?;
+            reconcile_bootstrap_local_snapshot(
+                &mut graph,
+                &sync_root,
+                &local_snapshot,
+                &mut sync_state,
+                &mut stats,
+                cancel_flag,
+            )
+            .await?;
+            sync_state.two_way_ready = true;
+        } else {
+            runtime_set_phase(
+                &graph.sync_runtime,
+                profile_id,
+                "syncing",
+                "Initial sync in progress - downloading cloud files only",
+            );
+            log::warn!(
+                "{} [cycle:{}] BOOTSTRAP_TWO_WAY_BLOCKED cursor_active={} planner_need_download={} queue_remaining={} failed_terminal={}",
+                account_prefix,
+                cycle_id,
+                sync_state.active_delta_next_link.is_some(),
+                planner_counters.need_download_total,
+                download_counters.remaining,
+                download_counters.failed_terminal
+            );
+        }
     }
 
     sync_state.local_snapshot = collect_local_snapshot(&sync_root)?;
