@@ -37,6 +37,7 @@ struct DownloadJobCounters {
 struct UploadJobCounters {
     planned_total: usize,
     in_progress: usize,
+    retry_waiting: usize,
     completed: usize,
     failed_terminal: usize,
     remaining: usize,
@@ -46,6 +47,7 @@ struct UploadJobCounters {
 struct SyncJobActivityProjection {
     active: Vec<SyncRuntimeTransfer>,
     recent_completed: Vec<SyncRuntimeRecentItem>,
+    recent_retry_waiting: Vec<SyncRuntimeRecentItem>,
     recent_failed: Vec<SyncRuntimeRecentItem>,
     active_download_count: usize,
     active_upload_count: usize,
@@ -557,6 +559,44 @@ fn mark_download_job_failed(profile_id: &str, job_id: i64, error_text: &str) -> 
     Ok(())
 }
 
+fn mark_download_job_retry_wait(
+    profile_id: &str,
+    job_id: i64,
+    error_text: &str,
+    delay: Duration,
+) -> Result<(), String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let now = current_unix_seconds();
+    let delay_seconds = delay.as_secs().clamp(1, i64::MAX as u64) as i64;
+    let next_retry_at = now.saturating_add(delay_seconds);
+    connection
+        .execute(
+            "UPDATE sync_jobs
+             SET state = ?1,
+                 run_state = ?2,
+                 lease_owner = NULL,
+                 lease_until = NULL,
+                 last_error = ?3,
+                 next_retry_at = ?4,
+                 updated_at = ?5,
+                 finished_at = NULL,
+                 progress_updated_at = ?5
+             WHERE profile_id = ?6 AND direction = ?7 AND id = ?8",
+            params![
+                DOWNLOAD_JOB_STATE_RETRY_WAIT,
+                JOB_RUN_STATE_IDLE,
+                error_text,
+                next_retry_at,
+                now,
+                profile_id,
+                DOWNLOAD_JOB_DIRECTION,
+                job_id,
+            ],
+        )
+        .map_err(|error| format!("Failed marking download job retry wait: {error}"))?;
+    Ok(())
+}
+
 fn reset_running_sync_jobs_for_pause(profile_id: &str) -> Result<usize, String> {
     let connection = open_sync_jobs_connection(profile_id)?;
     let now = current_unix_seconds();
@@ -828,7 +868,7 @@ fn read_upload_job_counters(profile_id: &str) -> Result<UploadJobCounters, Strin
             }
             DOWNLOAD_JOB_STATE_DONE => counters.completed = count,
             DOWNLOAD_JOB_STATE_FAILED_TERMINAL => counters.failed_terminal = count,
-            DOWNLOAD_JOB_STATE_RETRY_WAIT => {}
+            DOWNLOAD_JOB_STATE_RETRY_WAIT => counters.retry_waiting = count,
             DOWNLOAD_JOB_STATE_QUEUED => {}
             DOWNLOAD_JOB_STATE_SKIPPED => {}
             _ => {}
@@ -1000,6 +1040,49 @@ fn read_sync_job_activity_projection(
             .push(row.map_err(|error| format!("Failed reading failed sync job row: {error}"))?);
     }
 
+    let mut retry_wait_statement = connection
+        .prepare(
+            "SELECT id,
+                    direction,
+                    path,
+                    bytes_total,
+                    COALESCE(next_retry_at, updated_at),
+                    last_error
+             FROM sync_jobs
+             WHERE profile_id = ?1
+               AND state = ?2
+             ORDER BY COALESCE(next_retry_at, updated_at) ASC
+             LIMIT ?3",
+        )
+        .map_err(|error| format!("Failed preparing retry-wait sync job query: {error}"))?;
+    let retry_wait_rows = retry_wait_statement
+        .query_map(
+            params![profile_id, DOWNLOAD_JOB_STATE_RETRY_WAIT, recent_limit as i64],
+            |row| {
+                let job_id: i64 = row.get(0)?;
+                let direction: String = row.get(1)?;
+                let path: String = row.get(2)?;
+                let bytes_total = row.get::<_, Option<i64>>(3)?.map(|value| value.max(0) as u64);
+                let retry_at_unix: i64 = row.get(4)?;
+                let error_text: Option<String> = row.get(5)?;
+                Ok(SyncRuntimeRecentItem {
+                    id: format!("job-{job_id}"),
+                    direction,
+                    path,
+                    bytes_total,
+                    finished_at: unix_seconds_to_rfc3339(retry_at_unix),
+                    status: "retry_waiting".to_string(),
+                    error: error_text,
+                })
+            },
+        )
+        .map_err(|error| format!("Failed querying retry-wait sync jobs: {error}"))?;
+    for row in retry_wait_rows {
+        projection.recent_retry_waiting.push(
+            row.map_err(|error| format!("Failed reading retry-wait sync job row: {error}"))?,
+        );
+    }
+
     Ok(projection)
 }
 
@@ -1030,6 +1113,7 @@ pub fn hydrate_runtime_status_from_db(
 
     status.in_progress = projection.active;
     status.recent_completed = projection.recent_completed;
+    status.recent_retry_waiting = projection.recent_retry_waiting;
     status.recent_failed = projection.recent_failed;
 
     status.remote_download_planned_total = download_counters.planned_total;
@@ -1044,6 +1128,7 @@ pub fn hydrate_runtime_status_from_db(
     status.upload_completed_total = upload_counters.completed;
     status.upload_failed_total = upload_counters.failed_terminal;
     status.upload_in_flight = upload_counters.in_progress;
+    status.upload_retry_waiting = upload_counters.retry_waiting;
 
     Ok(())
 }

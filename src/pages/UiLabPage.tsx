@@ -169,6 +169,7 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
             error: null,
           },
         ],
+        recentRetryWaiting: [],
         recentFailed: [],
       },
       "lab-2": {
@@ -183,6 +184,7 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
         updatedAt: new Date().toISOString(),
         inProgress: [],
         recentCompleted: [],
+        recentRetryWaiting: [],
         recentFailed: [],
       },
       "lab-3": {
@@ -207,6 +209,17 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
           },
         ],
         recentCompleted: [],
+        recentRetryWaiting: [
+          {
+            id: "lab-retry-1",
+            direction: "download",
+            path: "Shared/Assets/hero.psd",
+            bytesTotal: 7340032,
+            finishedAt: new Date(Date.now() + 15_000).toISOString(),
+            status: "retry_waiting",
+            error: "Retry queued after temporary transfer error",
+          },
+        ],
         recentFailed: [
           {
             id: "lab-failed-2",
@@ -250,6 +263,7 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
             error: null,
           },
         ],
+        recentRetryWaiting: [],
         recentFailed: [],
       },
       "lab-5": {
@@ -264,6 +278,7 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
         updatedAt: new Date().toISOString(),
         inProgress: [],
         recentCompleted: [],
+        recentRetryWaiting: [],
         recentFailed: [
           {
             id: "lab-failed-1",

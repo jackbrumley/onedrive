@@ -190,6 +190,9 @@ async fn download_remote_item_content(
     loop {
         ensure_not_cancelled(cancel_flag)?;
         attempt += 1;
+        if let Some(active_job_id) = job_id {
+            let _ = mark_download_job_running(&graph.profile_id, active_job_id);
+        }
         let access_token = graph.current_access_token().await;
         let response = tokio::select! {
             _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
@@ -208,6 +211,7 @@ async fn download_remote_item_content(
             Err(error) => {
                 if handle_download_retry(
                     graph,
+                    job_id,
                     cancel_flag,
                     &transfer_id,
                     attempt,
@@ -238,6 +242,23 @@ async fn download_remote_item_content(
             if attempt < MAX_DOWNLOAD_RETRIES {
                 let delay = parse_retry_after_delay(response.headers())
                     .unwrap_or_else(|| exponential_backoff_delay(attempt));
+                if let Some(active_job_id) = job_id {
+                    let retry_reason = format!("Download retry scheduled for HTTP status {status}");
+                    if let Err(error) = mark_download_job_retry_wait(
+                        &graph.profile_id,
+                        active_job_id,
+                        &retry_reason,
+                        delay,
+                    ) {
+                        log::warn!(
+                            "{} [cycle:{}] DOWNLOAD_RETRY_WAIT_PERSIST_FAILED path={} error={}",
+                            graph.account_prefix,
+                            graph.cycle_id,
+                            relative_path,
+                            error
+                        );
+                    }
+                }
                 log::warn!(
                     "{} [cycle:{}] DOWNLOAD_RETRY_HTTP attempt={} status={} path={} delay_ms={}",
                     graph.account_prefix,
@@ -335,6 +356,7 @@ async fn download_remote_item_content(
                     let reason = format!("Failed reading download stream: {error}");
                     if handle_download_retry(
                         graph,
+                        job_id,
                         cancel_flag,
                         &transfer_id,
                         attempt,
@@ -357,6 +379,7 @@ async fn download_remote_item_content(
                 let reason = format!("Failed writing download chunk: {error}");
                 if handle_download_retry(
                     graph,
+                    job_id,
                     cancel_flag,
                     &transfer_id,
                     attempt,
@@ -409,6 +432,7 @@ async fn download_remote_item_content(
             let reason = format!("Failed flushing temporary file: {error}");
             if handle_download_retry(
                 graph,
+                job_id,
                 cancel_flag,
                 &transfer_id,
                 attempt,
@@ -442,6 +466,7 @@ async fn download_remote_item_content(
             );
             if handle_download_retry(
                 graph,
+                job_id,
                 cancel_flag,
                 &transfer_id,
                 attempt,

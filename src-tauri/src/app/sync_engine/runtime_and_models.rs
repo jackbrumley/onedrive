@@ -267,6 +267,7 @@ fn build_unique_download_temp_path(
 
 async fn handle_download_retry(
     graph: &GraphContext,
+    job_id: Option<i64>,
     cancel_flag: &Arc<AtomicBool>,
     transfer_id: &Option<String>,
     attempt: u32,
@@ -280,6 +281,22 @@ async fn handle_download_retry(
     }
     if attempt < MAX_DOWNLOAD_RETRIES {
         let delay = exponential_backoff_delay(attempt);
+        if let Some(active_job_id) = job_id {
+            if let Err(error) = mark_download_job_retry_wait(
+                &graph.profile_id,
+                active_job_id,
+                reason,
+                delay,
+            ) {
+                log::warn!(
+                    "{} [cycle:{}] DOWNLOAD_RETRY_WAIT_PERSIST_FAILED path={} error={}",
+                    graph.account_prefix,
+                    graph.cycle_id,
+                    relative_path,
+                    error
+                );
+            }
+        }
         log::warn!(
             "{} [cycle:{}] DOWNLOAD_RETRY attempt={} path={} reason={} delay_ms={}",
             graph.account_prefix,

@@ -107,6 +107,7 @@ export interface SyncRuntimeAccountStatus {
   issueSecondaryPath: string | null;
   inProgress: SyncRuntimeTransfer[];
   recentCompleted: SyncRuntimeRecentItem[];
+  recentRetryWaiting: SyncRuntimeRecentItem[];
   recentFailed: SyncRuntimeRecentItem[];
   remoteDiscoveredCount?: number;
   remoteDownloadQueueCount?: number;
@@ -121,6 +122,7 @@ export interface SyncRuntimeAccountStatus {
   uploadCompletedTotal?: number;
   uploadFailedTotal?: number;
   uploadInFlight?: number;
+  uploadRetryWaiting?: number;
   remoteScanComplete?: boolean;
   updatedAt: string;
 }

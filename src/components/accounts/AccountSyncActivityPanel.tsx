@@ -97,21 +97,6 @@ function extractUploadCooldownHint(phaseMessage: string | null): { path: string;
   };
 }
 
-function isTransientTransferError(errorText: string | null): boolean {
-  if (!errorText) {
-    return false;
-  }
-  const normalized = errorText.toLowerCase();
-  return (
-    normalized.includes("failed reading download stream") ||
-    normalized.includes("error decoding response body") ||
-    normalized.includes("timed out") ||
-    normalized.includes("connection reset") ||
-    normalized.includes("connection aborted") ||
-    normalized.includes("temporary")
-  );
-}
-
 function extensionFromPath(path: string): string {
   const filename = path.split("/").pop() ?? "";
   const dotIndex = filename.lastIndexOf(".");
@@ -188,12 +173,13 @@ export function AccountSyncActivityPanel({
   const inProgress = runtimeStatus?.inProgress ?? [];
   const visibleInProgress = isPausedPhase ? [] : inProgress;
   const recentCompleted = runtimeStatus?.recentCompleted ?? [];
+  const recentRetryWaiting = runtimeStatus?.recentRetryWaiting ?? [];
   const recentFailed = runtimeStatus?.recentFailed ?? [];
-  const remoteDiscoveredCount = runtimeStatus?.remoteDiscoveredTotal ?? runtimeStatus?.remoteDiscoveredCount ?? 0;
-  const remoteDownloadPlannedCount = runtimeStatus?.remoteDownloadPlannedTotal ?? remoteDiscoveredCount;
-  const remoteDownloadedCount = runtimeStatus?.remoteDownloadCompletedTotal ?? runtimeStatus?.remoteDownloadedCount ?? 0;
+  const remoteDiscoveredCount = runtimeStatus?.remoteDiscoveredTotal ?? 0;
+  const remoteDownloadPlannedCount = runtimeStatus?.remoteDownloadPlannedTotal ?? 0;
+  const remoteDownloadedCount = runtimeStatus?.remoteDownloadCompletedTotal ?? 0;
   const remoteDownloadFailedCount = runtimeStatus?.remoteDownloadFailedTotal ?? 0;
-  const remoteDownloadInFlightRaw = runtimeStatus?.remoteDownloadInFlight ?? runtimeStatus?.remoteDownloadQueueCount ?? 0;
+  const remoteDownloadInFlightRaw = runtimeStatus?.remoteDownloadInFlight ?? 0;
   const remoteDownloadInFlight = isPausedPhase ? 0 : remoteDownloadInFlightRaw;
   const remoteDownloadRetryWaiting = runtimeStatus?.remoteDownloadRetryWaiting ?? 0;
   const remoteScanComplete = runtimeStatus?.remoteScanComplete ?? false;
@@ -204,11 +190,9 @@ export function AccountSyncActivityPanel({
   const uploadPlannedCount = runtimeStatus?.uploadPlannedTotal ?? 0;
   const activeUploadCountRaw = runtimeStatus?.uploadInFlight ?? visibleInProgress.filter((item) => item.direction.toLowerCase() === "upload").length;
   const activeUploadCount = isPausedPhase ? 0 : activeUploadCountRaw;
-  const uploadedCount = runtimeStatus?.uploadCompletedTotal ?? recentCompleted.filter((item) => item.direction.toLowerCase() === "upload").length;
-  const uploadFailedCount = runtimeStatus?.uploadFailedTotal ?? recentFailed.filter((item) => item.direction.toLowerCase() === "upload").length;
-  const uploadRetryWaitingCount = uploadPlannedCount > 0
-    ? Math.max(uploadPlannedCount - uploadedCount - uploadFailedCount - activeUploadCount, 0)
-    : 0;
+  const uploadedCount = runtimeStatus?.uploadCompletedTotal ?? 0;
+  const uploadFailedCount = runtimeStatus?.uploadFailedTotal ?? 0;
+  const uploadRetryWaitingCount = runtimeStatus?.uploadRetryWaiting ?? 0;
   const showTransferStats =
     remoteDiscoveredCount > 0 ||
     remoteDownloadPlannedCount > 0 ||
@@ -222,13 +206,17 @@ export function AccountSyncActivityPanel({
   const isRemoteScanActive = runtimeStatus?.phase === "scanning_remote";
   const uploadCooldownHint = extractUploadCooldownHint(runtimeStatus?.phaseMessage ?? null);
   const hasIssueSummary = Boolean(issueMessage);
-  const transientFailureCount = recentFailed.filter((item) => isTransientTransferError(item.error)).length;
-  const hasTransientRetryIssue = uploadCooldownHint !== null || transientFailureCount > 0;
+  const hasRetryWarnings =
+    remoteDownloadRetryWaiting > 0 ||
+    uploadRetryWaitingCount > 0 ||
+    uploadCooldownHint !== null ||
+    recentRetryWaiting.length > 0;
+  const hasErrorItems = hasIssueSummary || issueKind !== null || recentFailed.length > 0;
   const hasBlockingIssue = hasIssueSummary || issueKind !== null;
-  const hasIssueSection = hasIssueSummary || issueActions.length > 0 || recentFailed.length > 0 || uploadCooldownHint !== null;
+  const hasIssueSection = hasRetryWarnings || hasErrorItems || issueActions.length > 0;
   const issuesClassName = hasBlockingIssue
     ? "account-sync-preview-issues"
-    : hasTransientRetryIssue
+    : hasRetryWarnings
       ? "account-sync-preview-issues account-sync-preview-issues-warning"
       : "account-sync-preview-issues";
 
@@ -320,15 +308,16 @@ export function AccountSyncActivityPanel({
       )}
       {hasIssueSection && (
         <section class={issuesClassName}>
-          <p class="account-sync-preview-section-label">{hasBlockingIssue ? "Issues" : "Warnings"}</p>
-          {hasIssueSummary && (
-            <p class="account-sync-preview-issue-summary">{issueMessage}</p>
+          {hasRetryWarnings && (
+            <>
+              <p class="account-sync-preview-section-label">Warnings</p>
+              <p class="account-sync-preview-issue-warning-note">
+                Retrying transfers are queued and will resume automatically.
+              </p>
+            </>
           )}
-          {!hasBlockingIssue && hasTransientRetryIssue && (
-            <p class="account-sync-preview-issue-warning-note">
-              Temporary transfer issue detected. Sync will retry automatically.
-            </p>
-          )}
+          {hasErrorItems && <p class="account-sync-preview-section-label">Errors</p>}
+          {hasIssueSummary && <p class="account-sync-preview-issue-summary">{issueMessage}</p>}
           {uploadCooldownHint && (
             <p class="account-sync-preview-issue-cooldown">
               Retry queued in {uploadCooldownHint.retryIn}:{" "}
@@ -464,6 +453,39 @@ export function AccountSyncActivityPanel({
                   Showing first 40 paths.
                 </p>
               )}
+            </div>
+          )}
+          {recentRetryWaiting.length > 0 && (
+            <div class="account-sync-preview-list">
+              {recentRetryWaiting.map((item) => (
+                <article key={item.id} class="account-sync-preview-item">
+                  <button
+                    type="button"
+                    class="account-sync-preview-item-button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void onOpenItemFolder(item.path);
+                    }}
+                  >
+                    <div class="account-sync-preview-row">
+                      <span class="account-sync-preview-file-icon">{iconForFilePath(item.path)}</span>
+                      <div class="account-sync-preview-content">
+                        <p class="account-sync-preview-path">{item.path}</p>
+                        <p class="account-sync-preview-meta">
+                          <span>{item.error ?? "Retry queued"}</span>
+                          <span>retry after {new Date(item.finishedAt).toLocaleTimeString()}</span>
+                        </p>
+                      </div>
+                      <span class="account-sync-preview-right-icons">
+                        <span class="account-sync-preview-direction-icon">{iconForDirection(item.direction)}</span>
+                        <span class="account-sync-preview-status-icon">
+                          <IconRefresh size={ACTIVITY_ICON_SIZE} class="sync-preview-icon-active" />
+                        </span>
+                      </span>
+                    </div>
+                  </button>
+                </article>
+              ))}
             </div>
           )}
           {recentFailed.length > 0 && (
