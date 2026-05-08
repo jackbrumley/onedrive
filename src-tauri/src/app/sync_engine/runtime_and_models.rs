@@ -312,21 +312,63 @@ fn runtime_clear_issue(runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>, profile_
     }
 }
 
-fn runtime_set_remote_transfer_progress(
+fn runtime_set_remote_scan_complete(
     runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
     profile_id: &str,
-    discovered_count: usize,
-    download_queue_count: usize,
-    downloaded_count: usize,
+    complete: bool,
 ) {
     if let Ok(mut runtime_map) = runtime.lock() {
-        sync_runtime::set_remote_transfer_progress(
-            &mut runtime_map,
-            profile_id,
-            discovered_count,
-            download_queue_count,
-            downloaded_count,
-        );
+        sync_runtime::set_remote_scan_complete(&mut runtime_map, profile_id, complete);
+    }
+}
+
+fn runtime_record_remote_discovered(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    item_id: &str,
+) {
+    if let Ok(mut runtime_map) = runtime.lock() {
+        sync_runtime::record_remote_discovered(&mut runtime_map, profile_id, item_id);
+    }
+}
+
+fn runtime_record_remote_download_planned(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    item_id: &str,
+) {
+    if let Ok(mut runtime_map) = runtime.lock() {
+        sync_runtime::record_remote_download_planned(&mut runtime_map, profile_id, item_id);
+    }
+}
+
+fn runtime_record_remote_download_completed(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    item_id: &str,
+) {
+    if let Ok(mut runtime_map) = runtime.lock() {
+        sync_runtime::record_remote_download_completed(&mut runtime_map, profile_id, item_id);
+    }
+}
+
+fn runtime_record_remote_download_failed(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    item_id: &str,
+) {
+    if let Ok(mut runtime_map) = runtime.lock() {
+        sync_runtime::record_remote_download_failed(&mut runtime_map, profile_id, item_id);
+    }
+}
+
+fn runtime_set_remote_download_in_flight(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    in_flight: usize,
+) {
+    if let Ok(mut runtime_map) = runtime.lock() {
+        sync_runtime::set_remote_download_in_flight(&mut runtime_map, profile_id, in_flight);
     }
 }
 

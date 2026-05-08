@@ -187,12 +187,23 @@ export function AccountSyncActivityPanel({
   const inProgress = runtimeStatus?.inProgress ?? [];
   const recentCompleted = runtimeStatus?.recentCompleted ?? [];
   const recentFailed = runtimeStatus?.recentFailed ?? [];
-  const remoteDiscoveredCount = runtimeStatus?.remoteDiscoveredCount ?? 0;
-  const remoteDownloadQueueCount = runtimeStatus?.remoteDownloadQueueCount ?? 0;
-  const remoteDownloadedCount = runtimeStatus?.remoteDownloadedCount ?? 0;
+  const remoteDiscoveredCount = runtimeStatus?.remoteDiscoveredTotal ?? runtimeStatus?.remoteDiscoveredCount ?? 0;
+  const remoteDownloadPlannedCount = runtimeStatus?.remoteDownloadPlannedTotal ?? remoteDiscoveredCount;
+  const remoteDownloadedCount = runtimeStatus?.remoteDownloadCompletedTotal ?? runtimeStatus?.remoteDownloadedCount ?? 0;
+  const remoteDownloadFailedCount = runtimeStatus?.remoteDownloadFailedTotal ?? 0;
+  const remoteDownloadInFlight = runtimeStatus?.remoteDownloadInFlight ?? runtimeStatus?.remoteDownloadQueueCount ?? 0;
+  const remoteScanComplete = runtimeStatus?.remoteScanComplete ?? false;
+  const remoteDownloadRemainingCount = Math.max(
+    remoteDownloadPlannedCount - remoteDownloadedCount - remoteDownloadFailedCount,
+    0
+  );
   const activeUploadCount = inProgress.filter((item) => item.direction.toLowerCase() === "upload").length;
   const showTransferStats =
-    remoteDiscoveredCount > 0 || remoteDownloadQueueCount > 0 || remoteDownloadedCount > 0 || activeUploadCount > 0;
+    remoteDiscoveredCount > 0 ||
+    remoteDownloadPlannedCount > 0 ||
+    remoteDownloadedCount > 0 ||
+    remoteDownloadInFlight > 0 ||
+    activeUploadCount > 0;
   const isRemoteScanActive = runtimeStatus?.phase === "scanning_remote";
   const uploadCooldownHint = extractUploadCooldownHint(runtimeStatus?.phaseMessage ?? null);
   const hasIssueSummary = Boolean(issueMessage);
@@ -264,8 +275,13 @@ export function AccountSyncActivityPanel({
       {showTransferStats && (
         <p class="account-sync-preview-stats-line">
           <span>Discovered {remoteDiscoveredCount}</span>
-          <span>Queued {remoteDownloadQueueCount}</span>
+          <span>Planned {remoteDownloadPlannedCount}</span>
+          <span>
+            Remaining {remoteDownloadRemainingCount}
+            {!remoteScanComplete ? "+" : ""}
+          </span>
           <span>Downloaded {remoteDownloadedCount}</span>
+          <span>In flight {remoteDownloadInFlight}</span>
           <span>Uploading {activeUploadCount}</span>
         </p>
       )}

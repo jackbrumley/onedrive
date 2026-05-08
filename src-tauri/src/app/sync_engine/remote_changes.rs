@@ -20,7 +20,8 @@ async fn fetch_and_apply_delta_changes(
         "scanning_remote",
         "Fetching remote files",
     );
-    runtime_set_remote_transfer_progress(&graph.sync_runtime, &graph.profile_id, 0, 0, 0);
+    runtime_set_remote_scan_complete(&graph.sync_runtime, &graph.profile_id, false);
+    runtime_set_remote_download_in_flight(&graph.sync_runtime, &graph.profile_id, 0);
     log::info!(
         "{} [cycle:{}] REMOTE_PIPELINE_START delta_queue_capacity={} download_queue_capacity={} download_concurrency={} checkpoint_flush_step={}",
         graph.account_prefix,
@@ -138,10 +139,17 @@ async fn fetch_and_apply_delta_changes(
                         remote_entry: job.remote_entry,
                         outcome,
                     }),
-                    Err(error) => Err(format!(
-                        "Remote download failed item_id={} path={}: {}",
-                        job.item_id, job.path, error
-                    )),
+                    Err(error) => {
+                        runtime_record_remote_download_failed(
+                            &worker_graph.sync_runtime,
+                            &worker_graph.profile_id,
+                            &job.item_id,
+                        );
+                        Err(format!(
+                            "Remote download failed item_id={} path={}: {}",
+                            job.item_id, job.path, error
+                        ))
+                    }
                 };
 
                 if worker_result_tx.send(result).await.is_err() {
@@ -220,8 +228,7 @@ async fn fetch_and_apply_delta_changes(
                 if should_update_phase {
                     let elapsed_seconds = scan_started_at.elapsed().as_secs_f64();
                     let progress_message = format!(
-                        "Fetching remote files - {} discovered",
-                        stats.remote_items_received
+                        "Fetching remote files"
                     );
                     runtime_set_phase(
                         &graph.sync_runtime,
@@ -250,12 +257,10 @@ async fn fetch_and_apply_delta_changes(
                     last_phase_update_at = std::time::Instant::now();
                     last_phase_update_items = stats.remote_items_received;
                 }
-                runtime_set_remote_transfer_progress(
+                runtime_set_remote_download_in_flight(
                     &graph.sync_runtime,
                     &graph.profile_id,
-                    stats.remote_items_received,
                     pending_download_count,
-                    stats.downloaded_files,
                 );
 
                 log::info!(
@@ -282,6 +287,11 @@ async fn fetch_and_apply_delta_changes(
                     &mut pending_download_count,
                 )
                 .await?;
+                runtime_set_remote_download_in_flight(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    pending_download_count,
+                );
 
                 if let Some(next_link) = page_payload.next_link {
                     sync_state.active_delta_next_link = Some(next_link);
@@ -325,12 +335,10 @@ async fn fetch_and_apply_delta_changes(
                     download_results_since_flush = 0;
                 }
 
-                runtime_set_remote_transfer_progress(
+                runtime_set_remote_download_in_flight(
                     &graph.sync_runtime,
                     &graph.profile_id,
-                    stats.remote_items_received,
                     pending_download_count,
-                    stats.downloaded_files,
                 );
 
                 if producer_done && pending_download_count > 0 {
@@ -351,13 +359,8 @@ async fn fetch_and_apply_delta_changes(
     }
     sync_state.active_delta_next_link = None;
     save_sync_state(&graph.profile_id, sync_state)?;
-    runtime_set_remote_transfer_progress(
-        &graph.sync_runtime,
-        &graph.profile_id,
-        stats.remote_items_received,
-        0,
-        stats.downloaded_files,
-    );
+    runtime_set_remote_download_in_flight(&graph.sync_runtime, &graph.profile_id, 0);
+    runtime_set_remote_scan_complete(&graph.sync_runtime, &graph.profile_id, true);
 
     Ok(remote_applied_paths)
 }
@@ -376,6 +379,7 @@ async fn process_remote_page_items(
 ) -> Result<(), String> {
     for item in items {
         ensure_not_cancelled(cancel_flag)?;
+        runtime_record_remote_discovered(&graph.sync_runtime, &graph.profile_id, &item.id);
         if item.deleted.is_some() {
             if let Some(existing) = sync_state.remote_by_id.get(&item.id).cloned() {
                 log::info!(
@@ -600,6 +604,11 @@ async fn process_remote_page_items(
             remote_entry,
         };
         if pending_download_ids.insert(job.item_id.clone()) {
+            runtime_record_remote_download_planned(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                &job.item_id,
+            );
             download_tx
                 .send(job)
                 .await
@@ -624,6 +633,11 @@ fn apply_remote_download_result(
     pending_download_ids.remove(&result.remote_entry.id);
     match result.outcome {
         RemoteDownloadOutcome::Downloaded => {
+            runtime_record_remote_download_completed(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                &result.remote_entry.id,
+            );
             remote_applied_paths.insert(result.remote_entry.path.clone());
             upsert_remote_known_item(sync_state, result.remote_entry);
             stats.downloaded_files += 1;

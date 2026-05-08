@@ -1,6 +1,6 @@
 use chrono::Local;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const RECENT_COMPLETED_LIMIT: usize = 120;
@@ -48,7 +48,21 @@ pub struct SyncRuntimeAccountStatus {
     pub remote_discovered_count: usize,
     pub remote_download_queue_count: usize,
     pub remote_downloaded_count: usize,
+    pub remote_discovered_total: usize,
+    pub remote_download_planned_total: usize,
+    pub remote_download_completed_total: usize,
+    pub remote_download_failed_total: usize,
+    pub remote_download_in_flight: usize,
+    pub remote_scan_complete: bool,
     pub updated_at: String,
+    #[serde(skip_serializing)]
+    remote_session_discovered_ids: HashSet<String>,
+    #[serde(skip_serializing)]
+    remote_session_planned_ids: HashSet<String>,
+    #[serde(skip_serializing)]
+    remote_session_completed_ids: HashSet<String>,
+    #[serde(skip_serializing)]
+    remote_session_failed_ids: HashSet<String>,
 }
 
 impl SyncRuntimeAccountStatus {
@@ -69,7 +83,17 @@ impl SyncRuntimeAccountStatus {
             remote_discovered_count: 0,
             remote_download_queue_count: 0,
             remote_downloaded_count: 0,
+            remote_discovered_total: 0,
+            remote_download_planned_total: 0,
+            remote_download_completed_total: 0,
+            remote_download_failed_total: 0,
+            remote_download_in_flight: 0,
+            remote_scan_complete: false,
             updated_at: now,
+            remote_session_discovered_ids: HashSet::new(),
+            remote_session_planned_ids: HashSet::new(),
+            remote_session_completed_ids: HashSet::new(),
+            remote_session_failed_ids: HashSet::new(),
         }
     }
 }
@@ -148,9 +172,99 @@ pub fn set_remote_transfer_progress(
     downloaded_count: usize,
 ) {
     let status = ensure_account_status(runtime_map, profile_id);
+    if discovered_count == 0 && download_queue_count == 0 && downloaded_count == 0 {
+        reset_remote_session_progress(status);
+    }
     status.remote_discovered_count = discovered_count;
     status.remote_download_queue_count = download_queue_count;
     status.remote_downloaded_count = downloaded_count;
+    status.updated_at = now_rfc3339();
+    bump_runtime_revision();
+}
+
+pub fn set_remote_scan_complete(
+    runtime_map: &mut SyncRuntimeMap,
+    profile_id: &str,
+    complete: bool,
+) {
+    let status = ensure_account_status(runtime_map, profile_id);
+    status.remote_scan_complete = complete;
+    status.updated_at = now_rfc3339();
+    bump_runtime_revision();
+}
+
+pub fn record_remote_discovered(runtime_map: &mut SyncRuntimeMap, profile_id: &str, item_id: &str) {
+    let status = ensure_account_status(runtime_map, profile_id);
+    if status
+        .remote_session_discovered_ids
+        .insert(item_id.to_string())
+    {
+        status.remote_discovered_total += 1;
+        sync_legacy_remote_progress_fields(status);
+        status.updated_at = now_rfc3339();
+        bump_runtime_revision();
+    }
+}
+
+pub fn record_remote_download_planned(
+    runtime_map: &mut SyncRuntimeMap,
+    profile_id: &str,
+    item_id: &str,
+) {
+    let status = ensure_account_status(runtime_map, profile_id);
+    if status
+        .remote_session_planned_ids
+        .insert(item_id.to_string())
+    {
+        status.remote_download_planned_total += 1;
+        sync_legacy_remote_progress_fields(status);
+        status.updated_at = now_rfc3339();
+        bump_runtime_revision();
+    }
+}
+
+pub fn record_remote_download_completed(
+    runtime_map: &mut SyncRuntimeMap,
+    profile_id: &str,
+    item_id: &str,
+) {
+    let status = ensure_account_status(runtime_map, profile_id);
+    if status
+        .remote_session_completed_ids
+        .insert(item_id.to_string())
+    {
+        status.remote_download_completed_total += 1;
+    }
+    if status.remote_session_failed_ids.remove(item_id) {
+        status.remote_download_failed_total = status.remote_download_failed_total.saturating_sub(1);
+    }
+    sync_legacy_remote_progress_fields(status);
+    status.updated_at = now_rfc3339();
+    bump_runtime_revision();
+}
+
+pub fn record_remote_download_failed(
+    runtime_map: &mut SyncRuntimeMap,
+    profile_id: &str,
+    item_id: &str,
+) {
+    let status = ensure_account_status(runtime_map, profile_id);
+    if status.remote_session_failed_ids.insert(item_id.to_string()) {
+        status.remote_download_failed_total += 1;
+        sync_legacy_remote_progress_fields(status);
+        status.updated_at = now_rfc3339();
+        bump_runtime_revision();
+    }
+}
+
+pub fn set_remote_download_in_flight(
+    runtime_map: &mut SyncRuntimeMap,
+    profile_id: &str,
+    in_flight: usize,
+) {
+    let status = ensure_account_status(runtime_map, profile_id);
+    status.remote_download_in_flight = in_flight;
+    sync_legacy_remote_progress_fields(status);
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
 }
@@ -289,6 +403,25 @@ fn ensure_account_status<'a>(
     runtime_map
         .entry(profile_id.to_string())
         .or_insert_with(|| SyncRuntimeAccountStatus::new(profile_id))
+}
+
+fn reset_remote_session_progress(status: &mut SyncRuntimeAccountStatus) {
+    status.remote_discovered_total = 0;
+    status.remote_download_planned_total = 0;
+    status.remote_download_completed_total = 0;
+    status.remote_download_failed_total = 0;
+    status.remote_download_in_flight = 0;
+    status.remote_scan_complete = false;
+    status.remote_session_discovered_ids.clear();
+    status.remote_session_planned_ids.clear();
+    status.remote_session_completed_ids.clear();
+    status.remote_session_failed_ids.clear();
+}
+
+fn sync_legacy_remote_progress_fields(status: &mut SyncRuntimeAccountStatus) {
+    status.remote_discovered_count = status.remote_discovered_total;
+    status.remote_download_queue_count = status.remote_download_in_flight;
+    status.remote_downloaded_count = status.remote_download_completed_total;
 }
 
 fn now_rfc3339() -> String {

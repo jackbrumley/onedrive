@@ -111,6 +111,12 @@ export interface SyncRuntimeAccountStatus {
   remoteDiscoveredCount?: number;
   remoteDownloadQueueCount?: number;
   remoteDownloadedCount?: number;
+  remoteDiscoveredTotal?: number;
+  remoteDownloadPlannedTotal?: number;
+  remoteDownloadCompletedTotal?: number;
+  remoteDownloadFailedTotal?: number;
+  remoteDownloadInFlight?: number;
+  remoteScanComplete?: boolean;
   updatedAt: string;
 }
 
