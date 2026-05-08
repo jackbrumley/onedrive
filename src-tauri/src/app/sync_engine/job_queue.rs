@@ -187,8 +187,8 @@ fn open_sync_jobs_connection(profile_id: &str) -> Result<Connection, String> {
                  occurred_at INTEGER NOT NULL
              );
              CREATE INDEX IF NOT EXISTS idx_sync_throttle_events_lookup
-                 ON sync_throttle_events(profile_id, direction, occurred_at)
-             );",
+                  ON sync_throttle_events(profile_id, direction, occurred_at)
+             ;",
         )
         .map_err(|error| format!("Failed initializing sync jobs schema: {error}"))?;
 
