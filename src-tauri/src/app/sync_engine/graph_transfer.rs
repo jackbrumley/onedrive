@@ -620,7 +620,16 @@ async fn upload_file_by_path(
         )
         .await;
         if let Err(error) = &result {
-            let _ = mark_upload_job_failed(&graph.profile_id, upload_job_id, error);
+            if is_sync_cancelled_error(error) {
+                let _ = mark_upload_job_retry_wait(
+                    &graph.profile_id,
+                    upload_job_id,
+                    "Upload cancelled due to pause; retry scheduled on resume",
+                    Duration::from_secs(1),
+                );
+            } else {
+                let _ = mark_upload_job_failed(&graph.profile_id, upload_job_id, error);
+            }
         } else {
             let _ = mark_upload_job_done(&graph.profile_id, upload_job_id);
         }
@@ -639,7 +648,16 @@ async fn upload_file_by_path(
     )
     .await;
     if let Err(error) = &result {
-        let _ = mark_upload_job_failed(&graph.profile_id, upload_job_id, error);
+        if is_sync_cancelled_error(error) {
+            let _ = mark_upload_job_retry_wait(
+                &graph.profile_id,
+                upload_job_id,
+                "Upload cancelled due to pause; retry scheduled on resume",
+                Duration::from_secs(1),
+            );
+        } else {
+            let _ = mark_upload_job_failed(&graph.profile_id, upload_job_id, error);
+        }
     } else {
         let _ = mark_upload_job_done(&graph.profile_id, upload_job_id);
     }

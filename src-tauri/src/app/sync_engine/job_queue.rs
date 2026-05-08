@@ -862,6 +862,44 @@ fn mark_upload_job_failed(profile_id: &str, job_id: i64, error_text: &str) -> Re
     Ok(())
 }
 
+fn mark_upload_job_retry_wait(
+    profile_id: &str,
+    job_id: i64,
+    error_text: &str,
+    delay: Duration,
+) -> Result<(), String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let now = current_unix_seconds();
+    let delay_seconds = delay.as_secs().clamp(1, i64::MAX as u64) as i64;
+    let next_retry_at = now.saturating_add(delay_seconds);
+    connection
+        .execute(
+            "UPDATE sync_jobs
+             SET state = ?1,
+                 run_state = ?2,
+                 lease_owner = NULL,
+                 lease_until = NULL,
+                 last_error = ?3,
+                 next_retry_at = ?4,
+                 updated_at = ?5,
+                 finished_at = NULL,
+                 progress_updated_at = ?5
+             WHERE profile_id = ?6 AND direction = ?7 AND id = ?8",
+            params![
+                DOWNLOAD_JOB_STATE_RETRY_WAIT,
+                JOB_RUN_STATE_IDLE,
+                error_text,
+                next_retry_at,
+                now,
+                profile_id,
+                UPLOAD_JOB_DIRECTION,
+                job_id,
+            ],
+        )
+        .map_err(|error| format!("Failed marking upload job retry wait: {error}"))?;
+    Ok(())
+}
+
 fn update_upload_job_progress(
     profile_id: &str,
     job_id: i64,

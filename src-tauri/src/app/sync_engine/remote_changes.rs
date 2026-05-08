@@ -225,6 +225,12 @@ async fn fetch_and_apply_delta_changes(
                                 remote_entry: job.remote_entry,
                                 status: RemoteDownloadResultStatus::DeferredRetry,
                             }
+                        } else if is_sync_cancelled_error(&error) {
+                            RemoteDownloadResult {
+                                job_id: job.job_id,
+                                remote_entry: job.remote_entry,
+                                status: RemoteDownloadResultStatus::Cancelled,
+                            }
                         } else {
                             RemoteDownloadResult {
                                 job_id: job.job_id,
@@ -991,6 +997,22 @@ fn apply_remote_download_result(
         RemoteDownloadResultStatus::DeferredRetry => {
             log::info!(
                 "{} [cycle:{}] REMOTE_DOWNLOAD_JOB_RETRY_DEFERRED path={} id={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                result.remote_entry.path,
+                result.remote_entry.id
+            );
+        }
+        RemoteDownloadResultStatus::Cancelled => {
+            let retry_reason = "Download cancelled due to pause; retry scheduled on resume";
+            mark_download_job_retry_wait(
+                &graph.profile_id,
+                result.job_id,
+                retry_reason,
+                Duration::from_secs(1),
+            )?;
+            log::info!(
+                "{} [cycle:{}] REMOTE_DOWNLOAD_JOB_CANCELLED_RETRY_WAIT path={} id={}",
                 graph.account_prefix,
                 graph.cycle_id,
                 result.remote_entry.path,

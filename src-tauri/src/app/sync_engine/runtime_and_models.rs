@@ -37,6 +37,7 @@ struct RemoteDownloadJob {
 enum RemoteDownloadResultStatus {
     Success(RemoteDownloadOutcome),
     DeferredRetry,
+    Cancelled,
     Failed(String),
 }
 
