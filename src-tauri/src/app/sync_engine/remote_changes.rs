@@ -297,6 +297,14 @@ async fn fetch_and_apply_delta_changes(
                     }
                 }
                 Err(error) => {
+                    if error.contains("queue closed unexpectedly") {
+                        log::info!(
+                            "{} [cycle:{}] DOWNLOAD_DISPATCHER_STOP reason=queue_closed",
+                            dispatcher_graph.account_prefix,
+                            dispatcher_graph.cycle_id
+                        );
+                        break;
+                    }
                     log::warn!(
                         "{} [cycle:{}] DOWNLOAD_DISPATCHER_FAILED error={}",
                         dispatcher_graph.account_prefix,
@@ -312,9 +320,13 @@ async fn fetch_and_apply_delta_changes(
     let mut producer_done = false;
     let mut deferred_delta_link: Option<String> = None;
     let mut remote_applied_paths: HashSet<String> = HashSet::new();
+    let mut terminal_error: Option<String> = None;
 
     loop {
-        ensure_not_cancelled(cancel_flag)?;
+        if let Err(error) = ensure_not_cancelled(cancel_flag) {
+            terminal_error = Some(error);
+            break;
+        }
         let download_counters = sync_download_counters_from_db(graph)?;
         let current_pending_downloads = pending_download_count.load(Ordering::Relaxed);
         if producer_done && current_pending_downloads == 0 && download_counters.remaining == 0 {
@@ -340,8 +352,8 @@ async fn fetch_and_apply_delta_changes(
                             download_counters.remaining,
                             download_counters.retry_waiting
                         );
-                        dispatcher_stop.store(true, Ordering::Relaxed);
-                        return Err("Download worker channel closed unexpectedly".to_string());
+                        terminal_error = Some("Download worker channel closed unexpectedly".to_string());
+                        break;
                     },
                 };
                 last_progress_at = std::time::Instant::now();
@@ -409,11 +421,11 @@ async fn fetch_and_apply_delta_changes(
                         last_progress_at = std::time::Instant::now();
                         continue;
                     }
-                    dispatcher_stop.store(true, Ordering::Relaxed);
-                    return Err(format!(
+                    terminal_error = Some(format!(
                         "Remote sync stalled after {}s with no progress",
                         stall_timeout.as_secs()
                     ));
+                    break;
                 }
             }
             maybe_page = page_rx.recv(), if !producer_done => {
@@ -431,8 +443,8 @@ async fn fetch_and_apply_delta_changes(
                             download_counters.remaining,
                             download_counters.retry_waiting
                         );
-                        dispatcher_stop.store(true, Ordering::Relaxed);
-                        return Err(error);
+                        terminal_error = Some(error);
+                        break;
                     },
                     None => {
                         producer_done = true;
@@ -492,7 +504,7 @@ async fn fetch_and_apply_delta_changes(
                     page_payload.items.len()
                 );
 
-                process_remote_page_items(
+                let process_result = process_remote_page_items(
                     graph,
                     sync_root,
                     sync_state,
@@ -500,7 +512,11 @@ async fn fetch_and_apply_delta_changes(
                     cancel_flag,
                     page_payload.items,
                 )
-                .await?;
+                .await;
+                if let Err(error) = process_result {
+                    terminal_error = Some(error);
+                    break;
+                }
                 let _ = sync_download_counters_from_db(graph)?;
 
                 if let Some(next_link) = page_payload.next_link {
@@ -516,6 +532,9 @@ async fn fetch_and_apply_delta_changes(
 
     dispatcher_stop.store(true, Ordering::Relaxed);
     let _ = download_tx.take();
+    if let Some(error) = terminal_error {
+        return Err(error);
+    }
     log::info!(
         "{} [cycle:{}] REMOTE_PIPELINE_DRAIN producer_alive={} active_workers={} pending_downloads={} remaining_download_jobs={}",
         graph.account_prefix,
