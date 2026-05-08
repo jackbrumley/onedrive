@@ -28,8 +28,12 @@
 }
 
 @media (max-width: 700px) {
-  .workspace {
-    padding: 12px;
+  .page-chrome {
+    padding: 12px 12px 8px;
+  }
+
+  .page-scroll {
+    padding: 10px 12px 12px;
   }
 
   .button-row,

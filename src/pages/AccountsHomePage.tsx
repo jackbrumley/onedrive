@@ -29,57 +29,61 @@ export function AccountsHomePage({
 
   return (
     <section class="page accounts-page">
-      <div class="page-header">
-        <h2>Accounts</h2>
-      </div>
-      <div class="accounts-grid">
-        {accounts.map((account) => (
-          <AccountCard
-            key={account.id}
-            account={account}
-            runtimeStatus={syncRuntimeByAccountId[account.id] ?? null}
-            onOpenDetails={onOpenAccount}
-            onSetAgentState={onSetAgentState}
-            onOpenSyncRootFolder={onOpenSyncRootFolder}
-          />
-        ))}
-        <AddAccountCard onClick={() => setShowAddModal(true)} />
-      </div>
-
-      {showAddModal && (
-        <AddAccountModal
-          onClose={() => setShowAddModal(false)}
-          onCreateAccount={onCreateAccount}
-        />
-      )}
-
-      <footer class="accounts-page-footer" aria-label="Project links and application version">
-        <div class="accounts-page-footer-links">
-          <button
-            type="button"
-            class="accounts-page-footer-icon-btn accounts-page-footer-github-btn"
-            title="Open SomeDrive GitHub"
-            aria-label="Open SomeDrive GitHub"
-            onClick={() => {
-              void openUrl("https://github.com/jackbrumley/somedrive");
-            }}
-          >
-            <IconBrandGithub size={36} />
-          </button>
-          <button
-            type="button"
-            class="accounts-page-footer-icon-btn accounts-page-footer-heart-btn"
-            title="Support SomeDrive on GitHub"
-            aria-label="Support SomeDrive on GitHub"
-            onClick={() => {
-              void openUrl("https://github.com/jackbrumley/somedrive");
-            }}
-          >
-            <IconHeart size={36} />
-          </button>
+      <div class="page-chrome">
+        <div class="page-header">
+          <h2>Accounts</h2>
         </div>
-        <div class="accounts-page-footer-version">v{appVersion}</div>
-      </footer>
+      </div>
+      <div class="page-scroll accounts-page-scroll">
+        <div class="accounts-grid">
+          {accounts.map((account) => (
+            <AccountCard
+              key={account.id}
+              account={account}
+              runtimeStatus={syncRuntimeByAccountId[account.id] ?? null}
+              onOpenDetails={onOpenAccount}
+              onSetAgentState={onSetAgentState}
+              onOpenSyncRootFolder={onOpenSyncRootFolder}
+            />
+          ))}
+          <AddAccountCard onClick={() => setShowAddModal(true)} />
+        </div>
+
+        {showAddModal && (
+          <AddAccountModal
+            onClose={() => setShowAddModal(false)}
+            onCreateAccount={onCreateAccount}
+          />
+        )}
+
+        <footer class="accounts-page-footer" aria-label="Project links and application version">
+          <div class="accounts-page-footer-links">
+            <button
+              type="button"
+              class="accounts-page-footer-icon-btn accounts-page-footer-github-btn"
+              title="Open SomeDrive GitHub"
+              aria-label="Open SomeDrive GitHub"
+              onClick={() => {
+                void openUrl("https://github.com/jackbrumley/somedrive");
+              }}
+            >
+              <IconBrandGithub size={36} />
+            </button>
+            <button
+              type="button"
+              class="accounts-page-footer-icon-btn accounts-page-footer-heart-btn"
+              title="Support SomeDrive on GitHub"
+              aria-label="Support SomeDrive on GitHub"
+              onClick={() => {
+                void openUrl("https://github.com/jackbrumley/somedrive");
+              }}
+            >
+              <IconHeart size={36} />
+            </button>
+          </div>
+          <div class="accounts-page-footer-version">v{appVersion}</div>
+        </footer>
+        </div>
     </section>
   );
 }

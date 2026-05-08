@@ -114,9 +114,8 @@
   position: relative;
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 14px;
+  overflow: hidden;
+  padding: 0;
 }
 
 body.app-modal-open .workspace {

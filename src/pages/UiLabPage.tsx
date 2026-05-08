@@ -334,7 +334,7 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
 
   return (
     <section class="page">
-      <>
+      <div class="page-chrome">
         <div class="page-header">
           <a
             class="page-header-back-link"
@@ -350,6 +350,8 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
           </a>
           <h2>UI Lab</h2>
         </div>
+      </div>
+      <div class="page-scroll">
         {accounts.length === 0 ? (
           <p>No accounts configured yet. Show setup call-to-action.</p>
         ) : (
@@ -370,7 +372,7 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
             ))}
           </div>
         )}
-      </>
+      </div>
     </section>
   );
 }

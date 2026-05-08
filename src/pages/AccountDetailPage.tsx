@@ -176,45 +176,54 @@ export function AccountDetailPage({
   if (!account) {
     return (
       <section class="page account-detail-page">
-        <h2>Account Not Found</h2>
-        <article class="card">
-          <p>This account does not exist anymore. Return to the account list.</p>
-          <button onClick={onBack}>Back to Accounts</button>
-        </article>
+        <div class="page-chrome">
+          <div class="page-header">
+            <h2>Account Not Found</h2>
+          </div>
+        </div>
+        <div class="page-scroll">
+          <article class="card">
+            <p>This account does not exist anymore. Return to the account list.</p>
+            <button onClick={onBack}>Back to Accounts</button>
+          </article>
+        </div>
       </section>
     );
   }
 
   return (
     <section class="page account-detail-page">
-      <AccountDetailHeader
-        account={account}
-        runtimeStatus={runtimeStatus}
-        view={view}
-        onBack={onBack}
-        onOpenSettings={onOpenSettings}
-        onOpenSync={onOpenSync}
-        onSetAgentState={onSetAgentState}
-      />
-
-      <AccountDetailUnifiedPanel
-        account={account}
-        runtimeStatus={runtimeStatus}
-        mode={view}
-        onStartAuth={onStartAuth}
-        onRename={onRename}
-        onSetSyncRoot={onSetSyncRoot}
-        onClearAuth={onClearAuth}
-        onRemoveProfile={onRemoveProfile}
-        onOpenSyncRootFolder={onOpenSyncRootFolder}
-        onOpenItemFolder={onOpenItemFolder}
-        onReauthenticate={onReauthenticate}
-        onRetrySync={onRetrySync}
-        onConfirmLargeDelete={onConfirmLargeDelete}
-        onKeepCloudFiles={onKeepCloudFiles}
-        onFetchLargeDeletePreview={onFetchLargeDeletePreview}
-        onExportLargeDeletePreview={onExportLargeDeletePreview}
-      />
+      <div class="page-chrome">
+        <AccountDetailHeader
+          account={account}
+          runtimeStatus={runtimeStatus}
+          view={view}
+          onBack={onBack}
+          onOpenSettings={onOpenSettings}
+          onOpenSync={onOpenSync}
+          onSetAgentState={onSetAgentState}
+        />
+      </div>
+      <div class="page-scroll">
+        <AccountDetailUnifiedPanel
+          account={account}
+          runtimeStatus={runtimeStatus}
+          mode={view}
+          onStartAuth={onStartAuth}
+          onRename={onRename}
+          onSetSyncRoot={onSetSyncRoot}
+          onClearAuth={onClearAuth}
+          onRemoveProfile={onRemoveProfile}
+          onOpenSyncRootFolder={onOpenSyncRootFolder}
+          onOpenItemFolder={onOpenItemFolder}
+          onReauthenticate={onReauthenticate}
+          onRetrySync={onRetrySync}
+          onConfirmLargeDelete={onConfirmLargeDelete}
+          onKeepCloudFiles={onKeepCloudFiles}
+          onFetchLargeDeletePreview={onFetchLargeDeletePreview}
+          onExportLargeDeletePreview={onExportLargeDeletePreview}
+        />
+      </div>
     </section>
   );
 }
