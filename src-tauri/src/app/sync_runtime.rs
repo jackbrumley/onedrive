@@ -53,6 +53,11 @@ pub struct SyncRuntimeAccountStatus {
     pub remote_download_completed_total: usize,
     pub remote_download_failed_total: usize,
     pub remote_download_in_flight: usize,
+    pub remote_download_retry_waiting: usize,
+    pub upload_planned_total: usize,
+    pub upload_completed_total: usize,
+    pub upload_failed_total: usize,
+    pub upload_in_flight: usize,
     pub remote_scan_complete: bool,
     pub updated_at: String,
     #[serde(skip_serializing)]
@@ -88,6 +93,11 @@ impl SyncRuntimeAccountStatus {
             remote_download_completed_total: 0,
             remote_download_failed_total: 0,
             remote_download_in_flight: 0,
+            remote_download_retry_waiting: 0,
+            upload_planned_total: 0,
+            upload_completed_total: 0,
+            upload_failed_total: 0,
+            upload_in_flight: 0,
             remote_scan_complete: false,
             updated_at: now,
             remote_session_discovered_ids: HashSet::new(),
@@ -174,6 +184,7 @@ pub fn set_remote_transfer_progress(
     let status = ensure_account_status(runtime_map, profile_id);
     if discovered_count == 0 && download_queue_count == 0 && downloaded_count == 0 {
         reset_remote_session_progress(status);
+        reset_upload_session_progress(status);
     }
     status.remote_discovered_count = discovered_count;
     status.remote_download_queue_count = download_queue_count;
@@ -257,14 +268,39 @@ pub fn record_remote_download_failed(
     }
 }
 
-pub fn set_remote_download_in_flight(
+pub fn set_remote_download_counters(
     runtime_map: &mut SyncRuntimeMap,
     profile_id: &str,
+    planned_total: usize,
+    completed_total: usize,
+    failed_total: usize,
+    in_flight: usize,
+    retry_waiting: usize,
+) {
+    let status = ensure_account_status(runtime_map, profile_id);
+    status.remote_download_planned_total = planned_total;
+    status.remote_download_completed_total = completed_total;
+    status.remote_download_failed_total = failed_total;
+    status.remote_download_in_flight = in_flight;
+    status.remote_download_retry_waiting = retry_waiting;
+    sync_legacy_remote_progress_fields(status);
+    status.updated_at = now_rfc3339();
+    bump_runtime_revision();
+}
+
+pub fn set_upload_counters(
+    runtime_map: &mut SyncRuntimeMap,
+    profile_id: &str,
+    planned_total: usize,
+    completed_total: usize,
+    failed_total: usize,
     in_flight: usize,
 ) {
     let status = ensure_account_status(runtime_map, profile_id);
-    status.remote_download_in_flight = in_flight;
-    sync_legacy_remote_progress_fields(status);
+    status.upload_planned_total = planned_total;
+    status.upload_completed_total = completed_total;
+    status.upload_failed_total = failed_total;
+    status.upload_in_flight = in_flight;
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
 }
@@ -288,6 +324,10 @@ pub fn start_transfer(
         started_at: now.clone(),
         updated_at: now,
     });
+    if direction.eq_ignore_ascii_case("upload") {
+        status.upload_planned_total += 1;
+        sync_upload_in_flight(status);
+    }
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
     transfer_id
@@ -323,6 +363,9 @@ pub fn finish_transfer_success(
 ) {
     if let Some(item) = remove_transfer(runtime_map, profile_id, transfer_id) {
         let status = ensure_account_status(runtime_map, profile_id);
+        if item.direction.eq_ignore_ascii_case("upload") {
+            status.upload_completed_total += 1;
+        }
         status.recent_completed.insert(
             0,
             SyncRuntimeRecentItem {
@@ -338,6 +381,7 @@ pub fn finish_transfer_success(
         if status.recent_completed.len() > RECENT_COMPLETED_LIMIT {
             status.recent_completed.truncate(RECENT_COMPLETED_LIMIT);
         }
+        sync_upload_in_flight(status);
         status.updated_at = now_rfc3339();
         bump_runtime_revision();
     }
@@ -351,6 +395,9 @@ pub fn finish_transfer_error(
 ) {
     if let Some(item) = remove_transfer(runtime_map, profile_id, transfer_id) {
         let status = ensure_account_status(runtime_map, profile_id);
+        if item.direction.eq_ignore_ascii_case("upload") {
+            status.upload_failed_total += 1;
+        }
         status.recent_failed.insert(
             0,
             SyncRuntimeRecentItem {
@@ -366,6 +413,7 @@ pub fn finish_transfer_error(
         if status.recent_failed.len() > RECENT_FAILED_LIMIT {
             status.recent_failed.truncate(RECENT_FAILED_LIMIT);
         }
+        sync_upload_in_flight(status);
         status.updated_at = now_rfc3339();
         bump_runtime_revision();
     }
@@ -374,6 +422,7 @@ pub fn finish_transfer_error(
 pub fn clear_in_progress(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
     let status = ensure_account_status(runtime_map, profile_id);
     status.in_progress.clear();
+    sync_upload_in_flight(status);
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
 }
@@ -411,11 +460,27 @@ fn reset_remote_session_progress(status: &mut SyncRuntimeAccountStatus) {
     status.remote_download_completed_total = 0;
     status.remote_download_failed_total = 0;
     status.remote_download_in_flight = 0;
+    status.remote_download_retry_waiting = 0;
     status.remote_scan_complete = false;
     status.remote_session_discovered_ids.clear();
     status.remote_session_planned_ids.clear();
     status.remote_session_completed_ids.clear();
     status.remote_session_failed_ids.clear();
+}
+
+fn reset_upload_session_progress(status: &mut SyncRuntimeAccountStatus) {
+    status.upload_planned_total = 0;
+    status.upload_completed_total = 0;
+    status.upload_failed_total = 0;
+    status.upload_in_flight = 0;
+}
+
+fn sync_upload_in_flight(status: &mut SyncRuntimeAccountStatus) {
+    status.upload_in_flight = status
+        .in_progress
+        .iter()
+        .filter(|entry| entry.direction.eq_ignore_ascii_case("upload"))
+        .count();
 }
 
 fn sync_legacy_remote_progress_fields(status: &mut SyncRuntimeAccountStatus) {

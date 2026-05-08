@@ -21,7 +21,8 @@ async fn fetch_and_apply_delta_changes(
         "Fetching remote files",
     );
     runtime_set_remote_scan_complete(&graph.sync_runtime, &graph.profile_id, false);
-    runtime_set_remote_download_in_flight(&graph.sync_runtime, &graph.profile_id, 0);
+    reset_download_jobs(&graph.profile_id)?;
+    runtime_set_remote_download_counters(&graph.sync_runtime, &graph.profile_id, 0, 0, 0, 0, 0);
     log::info!(
         "{} [cycle:{}] REMOTE_PIPELINE_START delta_queue_capacity={} download_queue_capacity={} download_concurrency={} checkpoint_flush_step={}",
         graph.account_prefix,
@@ -46,15 +47,32 @@ async fn fetch_and_apply_delta_changes(
     heartbeat_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut watchdog_ticker = tokio::time::interval(Duration::from_secs(2));
     watchdog_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let producer_alive = Arc::new(AtomicBool::new(false));
+    let active_download_workers = Arc::new(AtomicUsize::new(0));
+    let mut last_page_progress_at: Option<std::time::Instant> = None;
+    let mut last_download_result_at: Option<std::time::Instant> = None;
 
     let (page_tx, mut page_rx) =
         mpsc::channel::<Result<DeltaPageWorkItem, String>>(delta_page_queue_capacity);
     let mut producer_graph = graph.clone();
     let producer_cancel = Arc::clone(cancel_flag);
+    let producer_alive_flag = Arc::clone(&producer_alive);
     tauri::async_runtime::spawn(async move {
+        producer_alive_flag.store(true, Ordering::Relaxed);
+        log::info!(
+            "{} [cycle:{}] DELTA_PRODUCER_STARTED",
+            producer_graph.account_prefix,
+            producer_graph.cycle_id
+        );
         let mut current_url = start_url;
         loop {
             if let Err(error) = ensure_not_cancelled(&producer_cancel) {
+                producer_alive_flag.store(false, Ordering::Relaxed);
+                log::info!(
+                    "{} [cycle:{}] DELTA_PRODUCER_STOP reason=cancelled",
+                    producer_graph.account_prefix,
+                    producer_graph.cycle_id
+                );
                 let _ = page_tx.send(Err(error)).await;
                 return;
             }
@@ -68,6 +86,13 @@ async fn fetch_and_apply_delta_changes(
             let response_text = match graph_get_text(&mut producer_graph, &current_url, &producer_cancel).await {
                 Ok(text) => text,
                 Err(error) => {
+                    producer_alive_flag.store(false, Ordering::Relaxed);
+                    log::warn!(
+                        "{} [cycle:{}] DELTA_PRODUCER_STOP reason=graph_get_error error={}",
+                        producer_graph.account_prefix,
+                        producer_graph.cycle_id,
+                        error
+                    );
                     let _ = page_tx.send(Err(error)).await;
                     return;
                 }
@@ -78,6 +103,13 @@ async fn fetch_and_apply_delta_changes(
             {
                 Ok(value) => value,
                 Err(error) => {
+                    producer_alive_flag.store(false, Ordering::Relaxed);
+                    log::warn!(
+                        "{} [cycle:{}] DELTA_PRODUCER_STOP reason=decode_error error={}",
+                        producer_graph.account_prefix,
+                        producer_graph.cycle_id,
+                        error
+                    );
                     let _ = page_tx.send(Err(error)).await;
                     return;
                 }
@@ -91,6 +123,12 @@ async fn fetch_and_apply_delta_changes(
             };
 
             if page_tx.send(Ok(payload)).await.is_err() {
+                producer_alive_flag.store(false, Ordering::Relaxed);
+                log::info!(
+                    "{} [cycle:{}] DELTA_PRODUCER_STOP reason=page_channel_closed",
+                    producer_graph.account_prefix,
+                    producer_graph.cycle_id
+                );
                 return;
             }
 
@@ -99,23 +137,37 @@ async fn fetch_and_apply_delta_changes(
                 continue;
             }
 
+            producer_alive_flag.store(false, Ordering::Relaxed);
+            log::info!(
+                "{} [cycle:{}] DELTA_PRODUCER_STOP reason=scan_complete",
+                producer_graph.account_prefix,
+                producer_graph.cycle_id
+            );
             return;
         }
     });
 
-    let (download_tx_raw, download_rx) =
-        mpsc::channel::<RemoteDownloadJob>(download_queue_capacity);
+    let (download_tx_raw, download_rx) = mpsc::channel::<RemoteDownloadJob>(download_queue_capacity);
     let mut download_tx = Some(download_tx_raw);
     let (download_result_tx, mut download_result_rx) =
-        mpsc::channel::<Result<RemoteDownloadResult, String>>(download_queue_capacity);
+        mpsc::channel::<RemoteDownloadResult>(download_queue_capacity);
     let download_rx = Arc::new(tokio::sync::Mutex::new(download_rx));
 
-    for _ in 0..download_concurrency {
+    for worker_index in 0..download_concurrency {
         let worker_graph = graph.clone();
         let worker_cancel = Arc::clone(cancel_flag);
         let worker_download_rx = Arc::clone(&download_rx);
         let worker_result_tx = download_result_tx.clone();
+        let active_worker_count = Arc::clone(&active_download_workers);
         tauri::async_runtime::spawn(async move {
+            active_worker_count.fetch_add(1, Ordering::Relaxed);
+            log::info!(
+                "{} [cycle:{}] DOWNLOAD_WORKER_STARTED worker_index={} active_workers={}",
+                worker_graph.account_prefix,
+                worker_graph.cycle_id,
+                worker_index,
+                active_worker_count.load(Ordering::Relaxed)
+            );
             loop {
                 let maybe_job = {
                     let mut receiver = worker_download_rx.lock().await;
@@ -123,7 +175,13 @@ async fn fetch_and_apply_delta_changes(
                 };
 
                 let Some(job) = maybe_job else {
-                    return;
+                    log::info!(
+                        "{} [cycle:{}] DOWNLOAD_WORKER_STOP worker_index={} reason=queue_closed",
+                        worker_graph.account_prefix,
+                        worker_graph.cycle_id,
+                        worker_index
+                    );
+                    break;
                 };
 
                 let result = match download_remote_item_content(
@@ -135,33 +193,45 @@ async fn fetch_and_apply_delta_changes(
                 )
                 .await
                 {
-                    Ok(outcome) => Ok(RemoteDownloadResult {
+                    Ok(outcome) => RemoteDownloadResult {
+                        job_id: job.job_id,
                         remote_entry: job.remote_entry,
-                        outcome,
-                    }),
-                    Err(error) => {
-                        runtime_record_remote_download_failed(
-                            &worker_graph.sync_runtime,
-                            &worker_graph.profile_id,
-                            &job.item_id,
-                        );
-                        Err(format!(
+                        status: RemoteDownloadResultStatus::Success(outcome),
+                    },
+                    Err(error) => RemoteDownloadResult {
+                        job_id: job.job_id,
+                        remote_entry: job.remote_entry,
+                        status: RemoteDownloadResultStatus::Failed(format!(
                             "Remote download failed item_id={} path={}: {}",
                             job.item_id, job.path, error
-                        ))
-                    }
+                        )),
+                    },
                 };
 
                 if worker_result_tx.send(result).await.is_err() {
-                    return;
+                    log::info!(
+                        "{} [cycle:{}] DOWNLOAD_WORKER_STOP worker_index={} reason=result_channel_closed",
+                        worker_graph.account_prefix,
+                        worker_graph.cycle_id,
+                        worker_index
+                    );
+                    break;
                 }
             }
+            let remaining = active_worker_count
+                .fetch_sub(1, Ordering::Relaxed)
+                .saturating_sub(1);
+            log::info!(
+                "{} [cycle:{}] DOWNLOAD_WORKER_EXITED worker_index={} active_workers={}",
+                worker_graph.account_prefix,
+                worker_graph.cycle_id,
+                worker_index,
+                remaining
+            );
         });
     }
     drop(download_result_tx);
 
-    let mut pending_download_ids: HashSet<String> = HashSet::new();
-    let mut staged_download_jobs: HashMap<String, RemoteDownloadJob> = HashMap::new();
     let mut pending_download_count: usize = 0;
     let mut download_results_since_flush: usize = 0;
     let mut producer_done = false;
@@ -170,34 +240,63 @@ async fn fetch_and_apply_delta_changes(
 
     loop {
         ensure_not_cancelled(cancel_flag)?;
-        if producer_done && pending_download_count == 0 {
+        let download_counters = sync_download_counters_from_db(graph)?;
+        if producer_done && pending_download_count == 0 && download_counters.remaining == 0 {
             break;
         }
 
         tokio::select! {
             _ = heartbeat_ticker.tick() => {
                 log::info!(
-                    "{} [cycle:{}] SYNC_HEARTBEAT phase=scanning_remote pages={} items={} pending_downloads={} staged_downloads={}",
+                    "{} [cycle:{}] SYNC_HEARTBEAT phase=scanning_remote pages={} items={} pending_downloads={} remaining_download_jobs={} retry_waiting={}",
                     graph.account_prefix,
                     graph.cycle_id,
                     stats.remote_pages,
                     stats.remote_items_received,
                     pending_download_count,
-                    staged_download_jobs.len()
+                    download_counters.remaining,
+                    download_counters.retry_waiting
                 );
+                let available_slots = download_concurrency.saturating_sub(pending_download_count);
+                if let Some(active_download_tx) = download_tx.as_ref() {
+                    pending_download_count += dispatch_claimed_download_jobs(
+                        graph,
+                        sync_root,
+                        active_download_tx,
+                        available_slots,
+                        pending_download_count,
+                        download_counters.remaining,
+                    )
+                    .await?;
+                }
             }
             _ = watchdog_ticker.tick() => {
                 if last_progress_at.elapsed() >= stall_timeout {
+                    let last_page_progress = last_page_progress_at
+                        .map(|instant| format!("{}s", instant.elapsed().as_secs()))
+                        .unwrap_or_else(|| "none".to_string());
+                    let last_download_progress = last_download_result_at
+                        .map(|instant| format!("{}s", instant.elapsed().as_secs()))
+                        .unwrap_or_else(|| "none".to_string());
                     log::warn!(
-                        "{} [cycle:{}] SYNC_STALLED phase=scanning_remote no_progress_for={}s pages={} items={} pending_downloads={} staged_downloads={}",
+                        "{} [cycle:{}] SYNC_STALLED phase=scanning_remote no_progress_for={}s pages={} items={} pending_downloads={} remaining_download_jobs={} retry_waiting={} producer_alive={} active_workers={} last_page_progress={} last_download_result_progress={}",
                         graph.account_prefix,
                         graph.cycle_id,
                         stall_timeout.as_secs(),
                         stats.remote_pages,
                         stats.remote_items_received,
                         pending_download_count,
-                        staged_download_jobs.len()
+                        download_counters.remaining,
+                        download_counters.retry_waiting,
+                        producer_alive.load(Ordering::Relaxed),
+                        active_download_workers.load(Ordering::Relaxed),
+                        last_page_progress,
+                        last_download_progress
                     );
+                    if producer_done && download_counters.retry_waiting > 0 {
+                        last_progress_at = std::time::Instant::now();
+                        continue;
+                    }
                     return Err(format!(
                         "Remote sync stalled after {}s with no progress",
                         stall_timeout.as_secs()
@@ -207,13 +306,27 @@ async fn fetch_and_apply_delta_changes(
             maybe_page = page_rx.recv(), if !producer_done => {
                 let page_payload = match maybe_page {
                     Some(Ok(value)) => value,
-                    Some(Err(error)) => return Err(error),
+                    Some(Err(error)) => {
+                        log::warn!(
+                            "{} [cycle:{}] REMOTE_PIPELINE_ABORT reason=producer_error error={} producer_alive={} active_workers={} pending_downloads={} remaining_download_jobs={} retry_waiting={}",
+                            graph.account_prefix,
+                            graph.cycle_id,
+                            error,
+                            producer_alive.load(Ordering::Relaxed),
+                            active_download_workers.load(Ordering::Relaxed),
+                            pending_download_count,
+                            download_counters.remaining,
+                            download_counters.retry_waiting
+                        );
+                        return Err(error);
+                    },
                     None => {
                         producer_done = true;
                         continue;
                     }
                 };
                 last_progress_at = std::time::Instant::now();
+                last_page_progress_at = Some(last_progress_at);
 
                 stats.remote_pages += 1;
                 stats.remote_items_received += page_payload.items.len();
@@ -257,12 +370,6 @@ async fn fetch_and_apply_delta_changes(
                     last_phase_update_at = std::time::Instant::now();
                     last_phase_update_items = stats.remote_items_received;
                 }
-                runtime_set_remote_download_in_flight(
-                    &graph.sync_runtime,
-                    &graph.profile_id,
-                    pending_download_count,
-                );
-
                 log::info!(
                     "{} [cycle:{}] DELTA_PAGE_RECEIVED page={} items={}",
                     graph.account_prefix,
@@ -281,17 +388,19 @@ async fn fetch_and_apply_delta_changes(
                     stats,
                     cancel_flag,
                     page_payload.items,
-                    active_download_tx,
-                    &mut pending_download_ids,
-                    &mut staged_download_jobs,
-                    &mut pending_download_count,
                 )
                 .await?;
-                runtime_set_remote_download_in_flight(
-                    &graph.sync_runtime,
-                    &graph.profile_id,
+                let available_slots = download_concurrency.saturating_sub(pending_download_count);
+                pending_download_count += dispatch_claimed_download_jobs(
+                    graph,
+                    sync_root,
+                    active_download_tx,
+                    available_slots,
                     pending_download_count,
-                );
+                    download_counters.remaining,
+                )
+                .await?;
+                let _ = sync_download_counters_from_db(graph)?;
 
                 if let Some(next_link) = page_payload.next_link {
                     sync_state.active_delta_next_link = Some(next_link);
@@ -303,50 +412,59 @@ async fn fetch_and_apply_delta_changes(
             }
             maybe_download_result = download_result_rx.recv(), if pending_download_count > 0 => {
                 let download_result = match maybe_download_result {
-                    Some(value) => value?,
-                    None => return Err("Download worker channel closed unexpectedly".to_string()),
+                    Some(value) => value,
+                    None => {
+                        log::warn!(
+                            "{} [cycle:{}] REMOTE_PIPELINE_ABORT reason=download_result_channel_closed producer_alive={} active_workers={} pending_downloads={} remaining_download_jobs={} retry_waiting={}",
+                            graph.account_prefix,
+                            graph.cycle_id,
+                            producer_alive.load(Ordering::Relaxed),
+                            active_download_workers.load(Ordering::Relaxed),
+                            pending_download_count,
+                            download_counters.remaining,
+                            download_counters.retry_waiting
+                        );
+                        return Err("Download worker channel closed unexpectedly".to_string());
+                    },
                 };
                 last_progress_at = std::time::Instant::now();
-                let completed_download_id = download_result.remote_entry.id.clone();
+                last_download_result_at = Some(last_progress_at);
                 apply_remote_download_result(
                     graph,
                     sync_state,
                     stats,
-                    &mut pending_download_ids,
                     &mut remote_applied_paths,
                     download_result,
-                );
+                )?;
                 pending_download_count = pending_download_count.saturating_sub(1);
                 download_results_since_flush += 1;
-
-                if let Some(next_job) = staged_download_jobs.remove(&completed_download_id) {
-                    let active_download_tx = download_tx
-                        .as_ref()
-                        .ok_or_else(|| "Remote download queue unavailable".to_string())?;
-                    active_download_tx
-                        .send(next_job)
-                        .await
-                        .map_err(|_| "Remote download queue closed unexpectedly".to_string())?;
-                    pending_download_count += 1;
-                }
 
                 if download_results_since_flush >= checkpoint_flush_step {
                     save_sync_state(&graph.profile_id, sync_state)?;
                     download_results_since_flush = 0;
                 }
 
-                runtime_set_remote_download_in_flight(
-                    &graph.sync_runtime,
-                    &graph.profile_id,
-                    pending_download_count,
-                );
+                let _ = sync_download_counters_from_db(graph)?;
+                let available_slots = download_concurrency.saturating_sub(pending_download_count);
+                if let Some(active_download_tx) = download_tx.as_ref() {
+                    pending_download_count += dispatch_claimed_download_jobs(
+                        graph,
+                        sync_root,
+                        active_download_tx,
+                        available_slots,
+                        pending_download_count,
+                        download_counters.remaining,
+                    )
+                    .await?;
+                }
 
-                if producer_done && pending_download_count > 0 {
+                let latest_counters = sync_download_counters_from_db(graph)?;
+                if producer_done && latest_counters.remaining > 0 {
                     runtime_set_phase(
                         &graph.sync_runtime,
                         &graph.profile_id,
                         "applying_remote",
-                        &format!("Finishing remote downloads - {} items remaining", pending_download_count),
+                        &format!("Finishing remote downloads - {} items remaining", latest_counters.remaining),
                     );
                 }
             }
@@ -354,15 +472,96 @@ async fn fetch_and_apply_delta_changes(
     }
 
     let _ = download_tx.take();
+    log::info!(
+        "{} [cycle:{}] REMOTE_PIPELINE_DRAIN producer_alive={} active_workers={} pending_downloads={} remaining_download_jobs={}",
+        graph.account_prefix,
+        graph.cycle_id,
+        producer_alive.load(Ordering::Relaxed),
+        active_download_workers.load(Ordering::Relaxed),
+        pending_download_count,
+        sync_download_counters_from_db(graph)?.remaining
+    );
     if let Some(delta_link) = deferred_delta_link {
         sync_state.delta_link = Some(delta_link);
     }
     sync_state.active_delta_next_link = None;
     save_sync_state(&graph.profile_id, sync_state)?;
-    runtime_set_remote_download_in_flight(&graph.sync_runtime, &graph.profile_id, 0);
+    let _ = sync_download_counters_from_db(graph)?;
     runtime_set_remote_scan_complete(&graph.sync_runtime, &graph.profile_id, true);
+    log::info!(
+        "{} [cycle:{}] REMOTE_PIPELINE_COMPLETE discovered={} downloaded={} skipped_missing={} producer_alive={} active_workers={}",
+        graph.account_prefix,
+        graph.cycle_id,
+        stats.remote_items_received,
+        stats.downloaded_files,
+        stats.remote_items_skipped_missing,
+        producer_alive.load(Ordering::Relaxed),
+        active_download_workers.load(Ordering::Relaxed)
+    );
 
     Ok(remote_applied_paths)
+}
+
+fn sync_download_counters_from_db(graph: &GraphContext) -> Result<DownloadJobCounters, String> {
+    let counters = read_download_job_counters(&graph.profile_id)?;
+    runtime_set_remote_download_counters(
+        &graph.sync_runtime,
+        &graph.profile_id,
+        counters.planned_total,
+        counters.completed,
+        counters.failed_terminal,
+        counters.in_progress,
+        counters.retry_waiting,
+    );
+    Ok(counters)
+}
+
+async fn dispatch_claimed_download_jobs(
+    graph: &GraphContext,
+    sync_root: &Path,
+    download_tx: &mpsc::Sender<RemoteDownloadJob>,
+    available_slots: usize,
+    pending_download_count: usize,
+    remaining_download_jobs: usize,
+) -> Result<usize, String> {
+    if available_slots == 0 {
+        return Ok(0);
+    }
+
+    let claimed = claim_download_jobs(&graph.profile_id, &graph.cycle_id, available_slots)?;
+    if claimed.is_empty() {
+        return Ok(0);
+    }
+
+    let mut dispatched: usize = 0;
+    for claimed_job in claimed {
+        let remote_entry = RemoteKnownItem {
+            id: claimed_job.item_id.clone(),
+            path: claimed_job.path.clone(),
+            is_dir: false,
+            size: claimed_job.remote_size,
+            modified_ts: claimed_job.remote_modified_ts,
+        };
+        let local_abs = sync_root.join(path_to_local(&claimed_job.path));
+        let job = RemoteDownloadJob {
+            job_id: claimed_job.job_id,
+            item_id: claimed_job.item_id,
+            path: claimed_job.path,
+            local_abs,
+            remote_entry,
+        };
+
+        send_download_job_with_logging(
+            graph,
+            download_tx,
+            job,
+            pending_download_count + dispatched,
+            remaining_download_jobs,
+        )
+        .await?;
+        dispatched += 1;
+    }
+    Ok(dispatched)
 }
 
 async fn process_remote_page_items(
@@ -372,10 +571,6 @@ async fn process_remote_page_items(
     stats: &mut SyncCycleStats,
     cancel_flag: &Arc<AtomicBool>,
     items: Vec<DeltaItem>,
-    download_tx: &mpsc::Sender<RemoteDownloadJob>,
-    pending_download_ids: &mut HashSet<String>,
-    staged_download_jobs: &mut HashMap<String, RemoteDownloadJob>,
-    pending_download_count: &mut usize,
 ) -> Result<(), String> {
     for item in items {
         ensure_not_cancelled(cancel_flag)?;
@@ -457,7 +652,6 @@ async fn process_remote_page_items(
                 sync_state.remote_by_id.remove(&item.id);
                 sync_state.remote_path_to_id.remove(&existing.path);
                 sync_state.local_snapshot.remove(&existing.path);
-                pending_download_ids.remove(&item.id);
                 remove_local_path(sync_root, &existing.path)?;
                 log::info!(
                     "{} [cycle:{}] LOCAL_DELETE_OK path={}",
@@ -597,41 +791,100 @@ async fn process_remote_page_items(
             }
         }
 
-        let job = RemoteDownloadJob {
-            item_id: item.id,
-            path,
-            local_abs,
-            remote_entry,
-        };
-        if pending_download_ids.insert(job.item_id.clone()) {
+        let inserted = upsert_download_job(
+            &graph.profile_id,
+            &item.id,
+            &path,
+            remote_entry.size,
+            remote_entry.modified_ts,
+        )?;
+        if inserted {
             runtime_record_remote_download_planned(
                 &graph.sync_runtime,
                 &graph.profile_id,
-                &job.item_id,
+                &item.id,
             );
-            download_tx
-                .send(job)
-                .await
-                .map_err(|_| "Remote download queue closed unexpectedly".to_string())?;
-            *pending_download_count += 1;
-        } else {
-            staged_download_jobs.insert(job.item_id.clone(), job);
         }
     }
 
     Ok(())
 }
 
+async fn send_download_job_with_logging(
+    graph: &GraphContext,
+    download_tx: &mpsc::Sender<RemoteDownloadJob>,
+    job: RemoteDownloadJob,
+    pending_download_count: usize,
+    remaining_download_jobs: usize,
+) -> Result<(), String> {
+    let item_id = job.item_id.clone();
+    let path = job.path.clone();
+    let enqueue_started_at = std::time::Instant::now();
+    let mut wait_logged = false;
+    let send_future = download_tx.send(job);
+    tokio::pin!(send_future);
+    loop {
+        tokio::select! {
+            send_result = &mut send_future => {
+                if wait_logged {
+                    log::info!(
+                        "{} [cycle:{}] DOWNLOAD_ENQUEUE_WAIT_DONE item_id={} path={} wait_s={} pending_downloads={} remaining_download_jobs={}",
+                        graph.account_prefix,
+                        graph.cycle_id,
+                        item_id,
+                        path,
+                        enqueue_started_at.elapsed().as_secs(),
+                        pending_download_count,
+                        remaining_download_jobs
+                    );
+                }
+                return send_result.map_err(|_| "Remote download queue closed unexpectedly".to_string());
+            }
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                wait_logged = true;
+                log::warn!(
+                    "{} [cycle:{}] DOWNLOAD_ENQUEUE_WAITING item_id={} path={} wait_s={} pending_downloads={} remaining_download_jobs={}",
+                    graph.account_prefix,
+                    graph.cycle_id,
+                    item_id,
+                    path,
+                    enqueue_started_at.elapsed().as_secs(),
+                    pending_download_count,
+                    remaining_download_jobs
+                );
+            }
+        }
+    }
+}
+
 fn apply_remote_download_result(
     graph: &GraphContext,
     sync_state: &mut PersistedSyncState,
     stats: &mut SyncCycleStats,
-    pending_download_ids: &mut HashSet<String>,
     remote_applied_paths: &mut HashSet<String>,
     result: RemoteDownloadResult,
-) {
-    pending_download_ids.remove(&result.remote_entry.id);
-    match result.outcome {
+) -> Result<(), String> {
+    match result.status {
+        RemoteDownloadResultStatus::Failed(error_text) => {
+            mark_download_job_failed(&graph.profile_id, result.job_id, &error_text)?;
+            runtime_record_remote_download_failed(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                &result.remote_entry.id,
+            );
+            log::warn!(
+                "{} [cycle:{}] REMOTE_DOWNLOAD_JOB_FAILED path={} id={} error={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                result.remote_entry.path,
+                result.remote_entry.id,
+                error_text
+            );
+        }
+        RemoteDownloadResultStatus::Success(outcome) => {
+            let skipped = matches!(outcome, RemoteDownloadOutcome::SkippedMissingRemote);
+            mark_download_job_done(&graph.profile_id, result.job_id, skipped)?;
+            match outcome {
         RemoteDownloadOutcome::Downloaded => {
             runtime_record_remote_download_completed(
                 &graph.sync_runtime,
@@ -657,5 +910,8 @@ fn apply_remote_download_result(
                 result.remote_entry.id
             );
         }
+            }
+        }
     }
+    Ok(())
 }

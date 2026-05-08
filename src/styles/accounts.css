@@ -373,6 +373,22 @@
   color: #4a6685;
 }
 
+.account-sync-preview-stats-stack {
+  margin: -2px 0 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.account-sync-preview-stats-section {
+  margin: 5px 0 0;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #476a8f;
+}
+
 .account-sync-preview-empty {
   margin: 0;
   color: var(--text-muted);

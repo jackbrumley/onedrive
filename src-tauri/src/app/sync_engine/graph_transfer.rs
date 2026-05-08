@@ -492,6 +492,20 @@ async fn upload_file_by_path(
         )
     })?;
     let content_len = metadata.len();
+    let modified_ts = metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|value| value.as_secs() as i64)
+        .unwrap_or(0);
+    let upload_job_id = begin_upload_job(
+        &graph.profile_id,
+        relative_path,
+        content_len,
+        modified_ts,
+        &graph.cycle_id,
+    )?;
+    sync_upload_counters_from_db(graph);
     let transfer_id = runtime_start_transfer(
         &graph.sync_runtime,
         &graph.profile_id,
@@ -517,7 +531,7 @@ async fn upload_file_by_path(
                 error
             )
         })?;
-        return upload_small_file_simple(
+        let result = upload_small_file_simple(
             graph,
             relative_path,
             content,
@@ -526,9 +540,16 @@ async fn upload_file_by_path(
             cancel_flag,
         )
         .await;
+        if let Err(error) = &result {
+            let _ = mark_upload_job_failed(&graph.profile_id, upload_job_id, error);
+        } else {
+            let _ = mark_upload_job_done(&graph.profile_id, upload_job_id);
+        }
+        sync_upload_counters_from_db(graph);
+        return result;
     }
 
-    upload_large_file_session(
+    let result = upload_large_file_session(
         graph,
         relative_path,
         &local_path,
@@ -536,7 +557,35 @@ async fn upload_file_by_path(
         transfer_id.as_deref(),
         cancel_flag,
     )
-    .await
+    .await;
+    if let Err(error) = &result {
+        let _ = mark_upload_job_failed(&graph.profile_id, upload_job_id, error);
+    } else {
+        let _ = mark_upload_job_done(&graph.profile_id, upload_job_id);
+    }
+    sync_upload_counters_from_db(graph);
+    result
+}
+
+fn sync_upload_counters_from_db(graph: &GraphContext) {
+    match read_upload_job_counters(&graph.profile_id) {
+        Ok(counters) => runtime_set_upload_counters(
+            &graph.sync_runtime,
+            &graph.profile_id,
+            counters.planned_total,
+            counters.completed,
+            counters.failed_terminal,
+            counters.in_progress,
+        ),
+        Err(error) => {
+            log::warn!(
+                "{} [cycle:{}] UPLOAD_COUNTERS_DB_SYNC_FAILED error={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                error
+            );
+        }
+    }
 }
 
 async fn upload_small_file_simple(

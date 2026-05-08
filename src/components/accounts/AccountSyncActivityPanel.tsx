@@ -192,18 +192,29 @@ export function AccountSyncActivityPanel({
   const remoteDownloadedCount = runtimeStatus?.remoteDownloadCompletedTotal ?? runtimeStatus?.remoteDownloadedCount ?? 0;
   const remoteDownloadFailedCount = runtimeStatus?.remoteDownloadFailedTotal ?? 0;
   const remoteDownloadInFlight = runtimeStatus?.remoteDownloadInFlight ?? runtimeStatus?.remoteDownloadQueueCount ?? 0;
+  const remoteDownloadRetryWaiting = runtimeStatus?.remoteDownloadRetryWaiting ?? 0;
   const remoteScanComplete = runtimeStatus?.remoteScanComplete ?? false;
   const remoteDownloadRemainingCount = Math.max(
-    remoteDownloadPlannedCount - remoteDownloadedCount - remoteDownloadFailedCount,
+    remoteDownloadPlannedCount - remoteDownloadedCount - remoteDownloadFailedCount - remoteDownloadInFlight - remoteDownloadRetryWaiting,
     0
   );
-  const activeUploadCount = inProgress.filter((item) => item.direction.toLowerCase() === "upload").length;
+  const uploadPlannedCount = runtimeStatus?.uploadPlannedTotal ?? 0;
+  const activeUploadCount = runtimeStatus?.uploadInFlight ?? inProgress.filter((item) => item.direction.toLowerCase() === "upload").length;
+  const uploadedCount = runtimeStatus?.uploadCompletedTotal ?? recentCompleted.filter((item) => item.direction.toLowerCase() === "upload").length;
+  const uploadFailedCount = runtimeStatus?.uploadFailedTotal ?? recentFailed.filter((item) => item.direction.toLowerCase() === "upload").length;
+  const uploadRetryWaitingCount = uploadPlannedCount > 0
+    ? Math.max(uploadPlannedCount - uploadedCount - uploadFailedCount - activeUploadCount, 0)
+    : 0;
   const showTransferStats =
     remoteDiscoveredCount > 0 ||
     remoteDownloadPlannedCount > 0 ||
     remoteDownloadedCount > 0 ||
+    remoteDownloadRetryWaiting > 0 ||
     remoteDownloadInFlight > 0 ||
-    activeUploadCount > 0;
+    uploadPlannedCount > 0 ||
+    activeUploadCount > 0 ||
+    uploadedCount > 0 ||
+    uploadFailedCount > 0;
   const isRemoteScanActive = runtimeStatus?.phase === "scanning_remote";
   const uploadCooldownHint = extractUploadCooldownHint(runtimeStatus?.phaseMessage ?? null);
   const hasIssueSummary = Boolean(issueMessage);
@@ -273,17 +284,35 @@ export function AccountSyncActivityPanel({
         {runtimeStatus ? <span class="account-sync-preview-updated">updated {relativeUpdatedAt(runtimeStatus.updatedAt)}</span> : null}
       </p>
       {showTransferStats && (
-        <p class="account-sync-preview-stats-line">
-          <span>Discovered {remoteDiscoveredCount}</span>
-          <span>Planned {remoteDownloadPlannedCount}</span>
-          <span>
-            Remaining {remoteDownloadRemainingCount}
-            {!remoteScanComplete ? "+" : ""}
-          </span>
-          <span>Downloaded {remoteDownloadedCount}</span>
-          <span>In flight {remoteDownloadInFlight}</span>
-          <span>Uploading {activeUploadCount}</span>
-        </p>
+        <div class="account-sync-preview-stats-stack">
+          <p class="account-sync-preview-stats-section">Discovery</p>
+          <p class="account-sync-preview-stats-line">
+            <span>Files discovered in cloud {remoteDiscoveredCount}</span>
+            <span>Online scan status {remoteScanComplete ? "Complete" : "Scanning"}</span>
+          </p>
+
+          <p class="account-sync-preview-stats-section">Downloads</p>
+          <p class="account-sync-preview-stats-line">
+            <span>Need download {remoteDownloadPlannedCount}</span>
+            <span>Downloading now {remoteDownloadInFlight}</span>
+            <span>Downloaded {remoteDownloadedCount}</span>
+            <span>Download retry waiting {remoteDownloadRetryWaiting}</span>
+            <span>Download failed {remoteDownloadFailedCount}</span>
+            <span>
+              Download remaining {remoteDownloadRemainingCount}
+              {!remoteScanComplete ? "+" : ""}
+            </span>
+          </p>
+
+          <p class="account-sync-preview-stats-section">Uploads</p>
+          <p class="account-sync-preview-stats-line">
+            <span>Need upload {uploadPlannedCount}</span>
+            <span>Uploading now {activeUploadCount}</span>
+            <span>Uploaded {uploadedCount}</span>
+            <span>Upload retry waiting {uploadRetryWaitingCount}</span>
+            <span>Upload failed {uploadFailedCount}</span>
+          </p>
+        </div>
       )}
       {hasIssueSection && (
         <section class={issuesClassName}>

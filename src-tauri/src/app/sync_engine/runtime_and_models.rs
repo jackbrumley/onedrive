@@ -27,15 +27,22 @@ struct DeltaPageWorkItem {
 }
 
 struct RemoteDownloadJob {
+    job_id: i64,
     item_id: String,
     path: String,
     local_abs: PathBuf,
     remote_entry: RemoteKnownItem,
 }
 
+enum RemoteDownloadResultStatus {
+    Success(RemoteDownloadOutcome),
+    Failed(String),
+}
+
 struct RemoteDownloadResult {
+    job_id: i64,
     remote_entry: RemoteKnownItem,
-    outcome: RemoteDownloadOutcome,
+    status: RemoteDownloadResultStatus,
 }
 
 #[derive(Clone)]
@@ -362,13 +369,45 @@ fn runtime_record_remote_download_failed(
     }
 }
 
-fn runtime_set_remote_download_in_flight(
+fn runtime_set_remote_download_counters(
     runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
     profile_id: &str,
+    planned_total: usize,
+    completed_total: usize,
+    failed_total: usize,
+    in_flight: usize,
+    retry_waiting: usize,
+) {
+    if let Ok(mut runtime_map) = runtime.lock() {
+        sync_runtime::set_remote_download_counters(
+            &mut runtime_map,
+            profile_id,
+            planned_total,
+            completed_total,
+            failed_total,
+            in_flight,
+            retry_waiting,
+        );
+    }
+}
+
+fn runtime_set_upload_counters(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    planned_total: usize,
+    completed_total: usize,
+    failed_total: usize,
     in_flight: usize,
 ) {
     if let Ok(mut runtime_map) = runtime.lock() {
-        sync_runtime::set_remote_download_in_flight(&mut runtime_map, profile_id, in_flight);
+        sync_runtime::set_upload_counters(
+            &mut runtime_map,
+            profile_id,
+            planned_total,
+            completed_total,
+            failed_total,
+            in_flight,
+        );
     }
 }
 
