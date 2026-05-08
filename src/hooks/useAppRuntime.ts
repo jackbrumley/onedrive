@@ -56,6 +56,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
   const [isDocumentVisible, setIsDocumentVisible] = useState(document.visibilityState === "visible");
   const [autostartEnabled, setAutostartEnabled] = useState(false);
   const [rawLoggerMode, setRawLoggerMode] = useState(false);
+  const [syncDownloadConcurrency, setSyncDownloadConcurrency] = useState(8);
 
   const navigation = useMemo(() => createNavigationActions({ setRouteState }), [setRouteState]);
   const refreshActions = useMemo(
@@ -103,6 +104,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     void refreshActions.refreshActivity();
     void systemActions.getAutostartEnabled().then(setAutostartEnabled);
     void systemActions.fetchRawLoggerMode().then(setRawLoggerMode);
+    void systemActions.fetchSyncDownloadConcurrency().then(setSyncDownloadConcurrency);
     return () => {
       isDisposed = true;
       window.removeEventListener("hashchange", syncRoute);
@@ -152,6 +154,13 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     }
   };
 
+  const updateSyncDownloadConcurrency = async (value: number) => {
+    const updated = await systemActions.setSyncDownloadConcurrency(value);
+    if (typeof updated === "number") {
+      setSyncDownloadConcurrency(updated);
+    }
+  };
+
   return {
     routeState,
     status,
@@ -192,6 +201,8 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     toggleAutostart,
     rawLoggerMode,
     toggleRawLoggerMode,
+    syncDownloadConcurrency,
+    updateSyncDownloadConcurrency,
     fetchSessionLogText: systemActions.fetchSessionLogText,
     copySessionLog: systemActions.copySessionLog,
     openSessionLog: systemActions.openSessionLog,

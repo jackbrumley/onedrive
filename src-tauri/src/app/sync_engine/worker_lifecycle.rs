@@ -58,6 +58,13 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                 tokio::select! {
                     _ = &mut rx => {
                         log::info!("{} SYNC_WORKER_STOP_SIGNAL", log_context::account_prefix(&profile_id_owned));
+                        if let Err(error) = reset_running_sync_jobs_for_pause(&profile_id_owned) {
+                            log::warn!(
+                                "{} SYNC_WORKER_STOP_DRAIN_FAILED error={}",
+                                log_context::account_prefix(&profile_id_owned),
+                                error
+                            );
+                        }
                         if let Ok(mut runtime_map) = sync_runtime.lock() {
                             sync_runtime::clear_in_progress(&mut runtime_map, &profile_id_owned);
                             sync_runtime::set_remote_transfer_progress(&mut runtime_map, &profile_id_owned, 0, 0, 0);
@@ -105,6 +112,13 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                                         "{} SYNC_CYCLE_CANCELLED",
                                         log_context::account_prefix(&profile_id_owned)
                                     );
+                                    if let Err(error) = reset_running_sync_jobs_for_pause(&profile_id_owned) {
+                                        log::warn!(
+                                            "{} SYNC_CANCEL_DRAIN_FAILED error={}",
+                                            log_context::account_prefix(&profile_id_owned),
+                                            error
+                                        );
+                                    }
                                     if let Ok(mut runtime_map) = sync_runtime.lock() {
                                         sync_runtime::clear_in_progress(&mut runtime_map, &profile_id_owned);
                                         sync_runtime::set_remote_transfer_progress(&mut runtime_map, &profile_id_owned, 0, 0, 0);

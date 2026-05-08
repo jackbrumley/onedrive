@@ -557,6 +557,37 @@ fn mark_download_job_failed(profile_id: &str, job_id: i64, error_text: &str) -> 
     Ok(())
 }
 
+fn reset_running_sync_jobs_for_pause(profile_id: &str) -> Result<usize, String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let now = current_unix_seconds();
+    connection
+        .execute(
+            "UPDATE sync_jobs
+             SET state = CASE
+                     WHEN state = ?1 THEN ?2
+                     ELSE state
+                 END,
+                 run_state = ?3,
+                 lease_owner = NULL,
+                 lease_until = NULL,
+                 next_retry_at = NULL,
+                 updated_at = ?4,
+                 progress_updated_at = COALESCE(progress_updated_at, ?4)
+             WHERE profile_id = ?5
+               AND run_state IN (?6, ?7)",
+            params![
+                DOWNLOAD_JOB_STATE_IN_PROGRESS,
+                DOWNLOAD_JOB_STATE_QUEUED,
+                JOB_RUN_STATE_IDLE,
+                now,
+                profile_id,
+                JOB_RUN_STATE_RUNNING,
+                JOB_RUN_STATE_CLAIMED,
+            ],
+        )
+        .map_err(|error| format!("Failed resetting running sync jobs for pause: {error}"))
+}
+
 fn read_download_job_counters(profile_id: &str) -> Result<DownloadJobCounters, String> {
     let connection = open_sync_jobs_connection(profile_id)?;
     let mut statement = connection

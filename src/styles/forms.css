@@ -212,6 +212,42 @@ input::placeholder {
   gap: 10px;
 }
 
+.settings-range-field {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: linear-gradient(145deg, #f8fbff 0%, #eef4fc 100%);
+}
+
+.settings-range-label {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.settings-range-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-range-control input[type="range"] {
+  flex: 1;
+}
+
+.settings-range-value {
+  min-width: 2.8ch;
+  text-align: right;
+  color: var(--text-main);
+  font-weight: 700;
+}
+
+.settings-range-description {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
 .settings-list + .button-row,
 .settings-list + .inline-form-row,
 .inline-form-row + .button-row,

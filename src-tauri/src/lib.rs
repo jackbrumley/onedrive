@@ -36,6 +36,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_status_snapshot,
             get_sync_runtime_snapshot,
+            get_sync_download_concurrency,
+            set_sync_download_concurrency,
             check_for_updates,
             list_account_profiles,
             create_account_profile,

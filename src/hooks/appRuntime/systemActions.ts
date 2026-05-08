@@ -112,6 +112,28 @@ export function createSystemActions({ showToast }: SystemActionsFactoryParams) {
     }
   };
 
+  const fetchSyncDownloadConcurrency = async () => {
+    try {
+      return await invoke<number>("get_sync_download_concurrency");
+    } catch (error) {
+      showToast(`Failed to read download concurrency setting: ${error}`, "error", 4200);
+      return 8;
+    }
+  };
+
+  const setSyncDownloadConcurrency = async (value: number) => {
+    try {
+      const updated = await invoke<number>("set_sync_download_concurrency", {
+        value,
+      });
+      showToast(`Download concurrency set to ${updated}.`, "success", 2200);
+      return updated;
+    } catch (error) {
+      showToast(`Failed to update download concurrency: ${error}`, "error", 4200);
+      return null;
+    }
+  };
+
   return {
     getAutostartEnabled,
     setAutostartEnabled,
@@ -121,6 +143,8 @@ export function createSystemActions({ showToast }: SystemActionsFactoryParams) {
     openProfileLog,
     fetchRawLoggerMode,
     setRawLoggerMode,
+    fetchSyncDownloadConcurrency,
+    setSyncDownloadConcurrency,
     openAccountItemFolder,
     openAccountSyncRootFolder,
   };

@@ -184,14 +184,17 @@ export function AccountSyncActivityPanel({
   onExportLargeDeletePreview,
 }: AccountSyncActivityPanelProps) {
   const modeMessage = syncModeMessage(runtimeStatus, hasCompletedInitialSync);
+  const isPausedPhase = runtimeStatus?.phase === "paused";
   const inProgress = runtimeStatus?.inProgress ?? [];
+  const visibleInProgress = isPausedPhase ? [] : inProgress;
   const recentCompleted = runtimeStatus?.recentCompleted ?? [];
   const recentFailed = runtimeStatus?.recentFailed ?? [];
   const remoteDiscoveredCount = runtimeStatus?.remoteDiscoveredTotal ?? runtimeStatus?.remoteDiscoveredCount ?? 0;
   const remoteDownloadPlannedCount = runtimeStatus?.remoteDownloadPlannedTotal ?? remoteDiscoveredCount;
   const remoteDownloadedCount = runtimeStatus?.remoteDownloadCompletedTotal ?? runtimeStatus?.remoteDownloadedCount ?? 0;
   const remoteDownloadFailedCount = runtimeStatus?.remoteDownloadFailedTotal ?? 0;
-  const remoteDownloadInFlight = runtimeStatus?.remoteDownloadInFlight ?? runtimeStatus?.remoteDownloadQueueCount ?? 0;
+  const remoteDownloadInFlightRaw = runtimeStatus?.remoteDownloadInFlight ?? runtimeStatus?.remoteDownloadQueueCount ?? 0;
+  const remoteDownloadInFlight = isPausedPhase ? 0 : remoteDownloadInFlightRaw;
   const remoteDownloadRetryWaiting = runtimeStatus?.remoteDownloadRetryWaiting ?? 0;
   const remoteScanComplete = runtimeStatus?.remoteScanComplete ?? false;
   const remoteDownloadRemainingCount = Math.max(
@@ -199,7 +202,8 @@ export function AccountSyncActivityPanel({
     0
   );
   const uploadPlannedCount = runtimeStatus?.uploadPlannedTotal ?? 0;
-  const activeUploadCount = runtimeStatus?.uploadInFlight ?? inProgress.filter((item) => item.direction.toLowerCase() === "upload").length;
+  const activeUploadCountRaw = runtimeStatus?.uploadInFlight ?? visibleInProgress.filter((item) => item.direction.toLowerCase() === "upload").length;
+  const activeUploadCount = isPausedPhase ? 0 : activeUploadCountRaw;
   const uploadedCount = runtimeStatus?.uploadCompletedTotal ?? recentCompleted.filter((item) => item.direction.toLowerCase() === "upload").length;
   const uploadFailedCount = runtimeStatus?.uploadFailedTotal ?? recentFailed.filter((item) => item.direction.toLowerCase() === "upload").length;
   const uploadRetryWaitingCount = uploadPlannedCount > 0
@@ -229,7 +233,7 @@ export function AccountSyncActivityPanel({
       : "account-sync-preview-issues";
 
   const items = [
-    ...inProgress.map((transfer) => ({
+    ...visibleInProgress.map((transfer) => ({
       id: transfer.id,
       kind: "active" as const,
       direction: transfer.direction,

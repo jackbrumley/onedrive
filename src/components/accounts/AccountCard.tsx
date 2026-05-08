@@ -62,7 +62,6 @@ export function AccountCard({ account, runtimeStatus, onOpenDetails, onSetAgentS
   const nonBlockingIssueCount = recentIssueTotal + (runtimeIssueCode && !hasBlockingIssue ? 1 : 0);
   const syncActive =
     account.agentState === "syncing" ||
-    (runtimeStatus?.inProgress.length ?? 0) > 0 ||
     isSyncPhaseActive(runtimeStatus?.phase);
   const syncState = hasBlockingIssue ? "stopped" : syncActive ? "syncing" : "paused";
   const showIssueBadge = syncState === "syncing" && hasNonBlockingIssue && nonBlockingIssueCount > 0;

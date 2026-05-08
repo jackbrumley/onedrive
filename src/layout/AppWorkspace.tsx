@@ -65,6 +65,8 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
           onToggleAutostart={runtime.toggleAutostart}
           rawLoggerMode={runtime.rawLoggerMode}
           onToggleRawLoggerMode={runtime.toggleRawLoggerMode}
+          syncDownloadConcurrency={runtime.syncDownloadConcurrency}
+          onChangeSyncDownloadConcurrency={runtime.updateSyncDownloadConcurrency}
           onGoDebug={runtime.goDebug}
           onBack={runtime.goHome}
         />

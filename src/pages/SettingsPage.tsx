@@ -6,6 +6,8 @@ interface SettingsPageProps {
   onToggleAutostart: (enabled: boolean) => Promise<void>;
   rawLoggerMode: boolean;
   onToggleRawLoggerMode: (enabled: boolean) => Promise<void>;
+  syncDownloadConcurrency: number;
+  onChangeSyncDownloadConcurrency: (value: number) => Promise<void>;
   onGoDebug: () => void;
   onBack: () => void;
 }
@@ -15,6 +17,8 @@ export function SettingsPage({
   onToggleAutostart,
   rawLoggerMode,
   onToggleRawLoggerMode,
+  syncDownloadConcurrency,
+  onChangeSyncDownloadConcurrency,
   onGoDebug,
   onBack,
 }: SettingsPageProps) {
@@ -49,6 +53,34 @@ export function SettingsPage({
               checked={autostartEnabled}
               onChange={onToggleAutostart}
             />
+          </div>
+        </article>
+
+        <article class="card">
+          <h3>Sync Performance</h3>
+          <p>Set the number of simultaneous cloud downloads. Higher values may increase speed but can trigger retries.</p>
+          <div class="settings-list">
+            <label class="settings-range-field" htmlFor="download-concurrency-slider">
+              <span class="settings-range-label">Simultaneous downloads</span>
+              <div class="settings-range-control">
+                <input
+                  id="download-concurrency-slider"
+                  type="range"
+                  min={8}
+                  max={32}
+                  step={1}
+                  value={syncDownloadConcurrency}
+                  onChange={(event) => {
+                    const input = event.currentTarget as HTMLInputElement;
+                    void onChangeSyncDownloadConcurrency(Number.parseInt(input.value, 10));
+                  }}
+                />
+                <output class="settings-range-value" htmlFor="download-concurrency-slider">
+                  {syncDownloadConcurrency}
+                </output>
+              </div>
+              <span class="settings-range-description">Range: 8 to 32. Changes apply to subsequent sync cycles.</span>
+            </label>
           </div>
         </article>
 

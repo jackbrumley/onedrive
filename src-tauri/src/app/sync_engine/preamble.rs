@@ -17,7 +17,6 @@ use tokio::sync::mpsc;
 
 const GRAPH_ROOT: &str = "https://graph.microsoft.com/v1.0";
 const DEFAULT_DOWNLOAD_CONCURRENCY: usize = 8;
-const MAX_DOWNLOAD_CONCURRENCY: usize = 32;
 const MAX_DOWNLOAD_RETRIES: u32 = 5;
 const MAX_RETRY_DELAY_SECONDS: u64 = 30;
 const DEFAULT_REQUEST_TIMEOUT_SECONDS: u64 = 60;
@@ -43,6 +42,24 @@ pub fn on_agent_state_changed(
     } else {
         let _ = set_cancel_flag(state, profile_id, true)?;
         stop_sync_worker(state, profile_id)?;
+        match reset_running_sync_jobs_for_pause(profile_id) {
+            Ok(cleared_jobs) => {
+                if cleared_jobs > 0 {
+                    log::info!(
+                        "{} SYNC_PAUSE_DRAINED running_jobs_cleared={}",
+                        log_context::account_prefix(profile_id),
+                        cleared_jobs
+                    );
+                }
+            }
+            Err(error) => {
+                log::warn!(
+                    "{} SYNC_PAUSE_DRAIN_FAILED error={}",
+                    log_context::account_prefix(profile_id),
+                    error
+                );
+            }
+        }
         if let Ok(mut runtime_map) = state.sync_runtime.lock() {
             sync_runtime::clear_in_progress(&mut runtime_map, profile_id);
             sync_runtime::clear_issue(&mut runtime_map, profile_id);
