@@ -320,46 +320,46 @@ export function AccountSyncActivityPanel({
         <div class="account-sync-preview-stats-stack">
           <section class="account-sync-preview-stats-group">
             <p class="account-sync-preview-stats-section">Discovery</p>
-            <div class="account-sync-preview-metrics-grid account-sync-preview-metrics-grid-compact">
-              <p class="account-sync-preview-metric">
+            <div class="account-sync-preview-metrics-grid">
+              <div class="account-sync-preview-metric">
                 <span class="account-sync-preview-metric-label">Files discovered in cloud</span>
                 <span class="account-sync-preview-metric-value">{remoteDiscoveredCount}</span>
-              </p>
+              </div>
             </div>
           </section>
 
           <section class="account-sync-preview-stats-group">
             <p class="account-sync-preview-stats-section">Downloads</p>
             <div class="account-sync-preview-metrics-grid">
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Download queue</span><span class="account-sync-preview-metric-value">{remoteDownloadPlannedCount}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Download queue size</span><span class="account-sync-preview-metric-value">{formatBytes(remoteDownloadPlannedBytesTotal)}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Downloading now</span><span class="account-sync-preview-metric-value">{remoteDownloadInFlight}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Download speed</span><span class="account-sync-preview-metric-value">{formatTransferRate(downloadBytesPerSecond)}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Downloaded</span><span class="account-sync-preview-metric-value">{remoteDownloadedCount}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Downloaded size</span><span class="account-sync-preview-metric-value">{formatBytes(remoteDownloadCompletedBytesTotal)}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Download retry waiting</span><span class="account-sync-preview-metric-value">{remoteDownloadRetryWaiting}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Download failed</span><span class="account-sync-preview-metric-value">{remoteDownloadFailedCount}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Rate limit hits (past 1 minute)</span><span class="account-sync-preview-metric-value">{remoteDownloadThrottleLastMinute}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Rate limit hits (total)</span><span class="account-sync-preview-metric-value">{remoteDownloadThrottleTotal}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Download remaining</span><span class="account-sync-preview-metric-value">{remoteDownloadRemainingCount}{!remoteScanComplete ? "+" : ""}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Download remaining size</span><span class="account-sync-preview-metric-value">{formatBytes(remoteDownloadRemainingBytesTotal)}{!remoteScanComplete ? "+" : ""}</span></p>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Download queue</span><span class="account-sync-preview-metric-value">{remoteDownloadPlannedCount}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Download queue size</span><span class="account-sync-preview-metric-value">{formatBytes(remoteDownloadPlannedBytesTotal)}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Downloading now</span><span class="account-sync-preview-metric-value">{remoteDownloadInFlight}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Download speed</span><span class="account-sync-preview-metric-value">{formatTransferRate(downloadBytesPerSecond)}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Downloaded</span><span class="account-sync-preview-metric-value">{remoteDownloadedCount}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Downloaded size</span><span class="account-sync-preview-metric-value">{formatBytes(remoteDownloadCompletedBytesTotal)}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Download retry waiting</span><span class="account-sync-preview-metric-value">{remoteDownloadRetryWaiting}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Download failed</span><span class="account-sync-preview-metric-value">{remoteDownloadFailedCount}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Rate limit hits (past 1 minute)</span><span class="account-sync-preview-metric-value">{remoteDownloadThrottleLastMinute}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Rate limit hits (total)</span><span class="account-sync-preview-metric-value">{remoteDownloadThrottleTotal}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Download remaining</span><span class="account-sync-preview-metric-value">{remoteDownloadRemainingCount}{!remoteScanComplete ? "+" : ""}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Download remaining size</span><span class="account-sync-preview-metric-value">{formatBytes(remoteDownloadRemainingBytesTotal)}{!remoteScanComplete ? "+" : ""}</span></div>
             </div>
           </section>
 
           <section class="account-sync-preview-stats-group">
             <p class="account-sync-preview-stats-section">Uploads</p>
             <div class="account-sync-preview-metrics-grid">
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Upload queue</span><span class="account-sync-preview-metric-value">{uploadPlannedCount}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Upload queue size</span><span class="account-sync-preview-metric-value">{formatBytes(uploadPlannedBytesTotal)}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Uploading now</span><span class="account-sync-preview-metric-value">{activeUploadCount}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Upload speed</span><span class="account-sync-preview-metric-value">{formatTransferRate(uploadBytesPerSecond)}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Uploaded</span><span class="account-sync-preview-metric-value">{uploadedCount}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Uploaded size</span><span class="account-sync-preview-metric-value">{formatBytes(uploadCompletedBytesTotal)}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Upload retry waiting</span><span class="account-sync-preview-metric-value">{uploadRetryWaitingCount}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Upload failed</span><span class="account-sync-preview-metric-value">{uploadFailedCount}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Rate limit hits (past 1 minute)</span><span class="account-sync-preview-metric-value">{uploadThrottleLastMinute}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Rate limit hits (total)</span><span class="account-sync-preview-metric-value">{uploadThrottleTotal}</span></p>
-              <p class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Upload remaining size</span><span class="account-sync-preview-metric-value">{formatBytes(uploadRemainingBytesTotal)}</span></p>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Upload queue</span><span class="account-sync-preview-metric-value">{uploadPlannedCount}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Upload queue size</span><span class="account-sync-preview-metric-value">{formatBytes(uploadPlannedBytesTotal)}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Uploading now</span><span class="account-sync-preview-metric-value">{activeUploadCount}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Upload speed</span><span class="account-sync-preview-metric-value">{formatTransferRate(uploadBytesPerSecond)}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Uploaded</span><span class="account-sync-preview-metric-value">{uploadedCount}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Uploaded size</span><span class="account-sync-preview-metric-value">{formatBytes(uploadCompletedBytesTotal)}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Upload retry waiting</span><span class="account-sync-preview-metric-value">{uploadRetryWaitingCount}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Upload failed</span><span class="account-sync-preview-metric-value">{uploadFailedCount}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Rate limit hits (past 1 minute)</span><span class="account-sync-preview-metric-value">{uploadThrottleLastMinute}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Rate limit hits (total)</span><span class="account-sync-preview-metric-value">{uploadThrottleTotal}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Upload remaining size</span><span class="account-sync-preview-metric-value">{formatBytes(uploadRemainingBytesTotal)}</span></div>
             </div>
           </section>
         </div>
