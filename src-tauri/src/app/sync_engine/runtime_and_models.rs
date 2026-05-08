@@ -243,6 +243,58 @@ async fn sleep_with_cancellation(
     }
 }
 
+fn build_unique_download_temp_path(
+    local_path: &Path,
+    item_id: &str,
+    relative_path: &str,
+    cycle_id: &str,
+) -> PathBuf {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::hash::Hash::hash(item_id, &mut hasher);
+    std::hash::Hash::hash(relative_path, &mut hasher);
+    std::hash::Hash::hash(cycle_id, &mut hasher);
+    let suffix = format!("{:016x}", std::hash::Hasher::finish(&hasher));
+    local_path.with_extension(format!("somedrive-part-{suffix}"))
+}
+
+async fn handle_download_retry(
+    graph: &GraphContext,
+    cancel_flag: &Arc<AtomicBool>,
+    transfer_id: &Option<String>,
+    attempt: u32,
+    relative_path: &str,
+    reason: &str,
+    temp_path: Option<&Path>,
+    final_error: &str,
+) -> Result<bool, String> {
+    if let Some(path) = temp_path {
+        let _ = std::fs::remove_file(path);
+    }
+    if attempt < MAX_DOWNLOAD_RETRIES {
+        let delay = exponential_backoff_delay(attempt);
+        log::warn!(
+            "{} [cycle:{}] DOWNLOAD_RETRY attempt={} path={} reason={} delay_ms={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            attempt,
+            relative_path,
+            reason,
+            delay.as_millis()
+        );
+        sleep_with_cancellation(cancel_flag, delay).await?;
+        return Ok(true);
+    }
+    if let Some(active_transfer_id) = transfer_id {
+        runtime_finish_transfer_error(
+            &graph.sync_runtime,
+            &graph.profile_id,
+            active_transfer_id,
+            final_error,
+        );
+    }
+    Ok(false)
+}
+
 fn runtime_set_phase(
     runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
     profile_id: &str,
@@ -386,6 +438,34 @@ fn runtime_finish_transfer_error(
 ) {
     if let Ok(mut runtime_map) = runtime.lock() {
         sync_runtime::finish_transfer_error(&mut runtime_map, profile_id, transfer_id, error);
+    }
+}
+
+fn runtime_finish_transfer_cancelled(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    transfer_id: &Option<String>,
+) {
+    if let Some(active_transfer_id) = transfer_id {
+        runtime_finish_transfer_error(runtime, profile_id, active_transfer_id, SYNC_CANCELLED_ERROR);
+    }
+}
+
+fn runtime_finish_transfer_download_success(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    transfer_id: &Option<String>,
+    downloaded_bytes: u64,
+) {
+    if let Some(active_transfer_id) = transfer_id {
+        runtime_update_transfer_progress(
+            runtime,
+            profile_id,
+            active_transfer_id,
+            downloaded_bytes,
+            Some(downloaded_bytes),
+        );
+        runtime_finish_transfer_success(runtime, profile_id, active_transfer_id);
     }
 }
 

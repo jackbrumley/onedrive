@@ -189,14 +189,7 @@ async fn download_remote_item_content(
         let access_token = graph.current_access_token().await;
         let response = tokio::select! {
             _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
-                if let Some(active_transfer_id) = &transfer_id {
-                    runtime_finish_transfer_error(
-                        &graph.sync_runtime,
-                        &graph.profile_id,
-                        active_transfer_id,
-                        SYNC_CANCELLED_ERROR,
-                    );
-                }
+                runtime_finish_transfer_cancelled(&graph.sync_runtime, &graph.profile_id, &transfer_id);
                 return Err(SYNC_CANCELLED_ERROR.to_string());
             }
             value = client
@@ -209,27 +202,19 @@ async fn download_remote_item_content(
         let response = match response {
             Ok(value) => value,
             Err(error) => {
-                if attempt < MAX_DOWNLOAD_RETRIES {
-                    let delay = exponential_backoff_delay(attempt);
-                    log::warn!(
-                        "{} [cycle:{}] DOWNLOAD_RETRY attempt={} path={} reason={} delay_ms={}",
-                        graph.account_prefix,
-                        graph.cycle_id,
-                        attempt,
-                        relative_path,
-                        error,
-                        delay.as_millis()
-                    );
-                    sleep_with_cancellation(cancel_flag, delay).await?;
+                if handle_download_retry(
+                    graph,
+                    cancel_flag,
+                    &transfer_id,
+                    attempt,
+                    relative_path,
+                    &error,
+                    None,
+                    &error,
+                )
+                .await?
+                {
                     continue;
-                }
-                if let Some(active_transfer_id) = &transfer_id {
-                    runtime_finish_transfer_error(
-                        &graph.sync_runtime,
-                        &graph.profile_id,
-                        active_transfer_id,
-                        &error,
-                    );
                 }
                 return Err(error);
             }
@@ -318,7 +303,8 @@ async fn download_remote_item_content(
             })?;
         }
 
-        let temp_path = local_path.with_extension("somedrive-part");
+        let temp_path = build_unique_download_temp_path(local_path, item_id, relative_path, &graph.cycle_id);
+        let _ = std::fs::remove_file(&temp_path);
         let mut output_file = std::fs::File::create(&temp_path).map_err(|error| {
             format!(
                 "Failed creating temporary download file '{}': {}",
@@ -329,29 +315,31 @@ async fn download_remote_item_content(
 
         let mut stream = response.bytes_stream();
         let mut downloaded_bytes: u64 = 0;
+        let mut should_retry_download = false;
         while let Some(chunk_result) = stream.next().await {
             if cancel_flag.load(Ordering::Relaxed) {
-                if let Some(active_transfer_id) = &transfer_id {
-                    runtime_finish_transfer_error(
-                        &graph.sync_runtime,
-                        &graph.profile_id,
-                        active_transfer_id,
-                        SYNC_CANCELLED_ERROR,
-                    );
-                }
+                runtime_finish_transfer_cancelled(&graph.sync_runtime, &graph.profile_id, &transfer_id);
                 let _ = std::fs::remove_file(&temp_path);
                 return Err(SYNC_CANCELLED_ERROR.to_string());
             }
             let chunk = match chunk_result {
                 Ok(value) => value,
                 Err(error) => {
-                    if let Some(active_transfer_id) = &transfer_id {
-                        runtime_finish_transfer_error(
-                            &graph.sync_runtime,
-                            &graph.profile_id,
-                            active_transfer_id,
-                            &format!("Failed reading download stream: {}", error),
-                        );
+                    let reason = format!("Failed reading download stream: {error}");
+                    if handle_download_retry(
+                        graph,
+                        cancel_flag,
+                        &transfer_id,
+                        attempt,
+                        relative_path,
+                        &reason,
+                        None,
+                        &reason,
+                    )
+                    .await?
+                    {
+                        should_retry_download = true;
+                        break;
                     }
                     let _ = std::fs::remove_file(&temp_path);
                     return Err(format!("Failed reading download bytes stream: {error}"));
@@ -359,13 +347,21 @@ async fn download_remote_item_content(
             };
 
             if let Err(error) = output_file.write_all(&chunk) {
-                if let Some(active_transfer_id) = &transfer_id {
-                    runtime_finish_transfer_error(
-                        &graph.sync_runtime,
-                        &graph.profile_id,
-                        active_transfer_id,
-                        &format!("Failed writing download chunk: {}", error),
-                    );
+                let reason = format!("Failed writing download chunk: {error}");
+                if handle_download_retry(
+                    graph,
+                    cancel_flag,
+                    &transfer_id,
+                    attempt,
+                    relative_path,
+                    &reason,
+                    None,
+                    &reason,
+                )
+                .await?
+                {
+                    should_retry_download = true;
+                    break;
                 }
                 let _ = std::fs::remove_file(&temp_path);
                 return Err(format!(
@@ -387,16 +383,29 @@ async fn download_remote_item_content(
             }
         }
 
-        if let Err(error) = output_file.flush() {
-            if let Some(active_transfer_id) = &transfer_id {
-                runtime_finish_transfer_error(
-                    &graph.sync_runtime,
-                    &graph.profile_id,
-                    active_transfer_id,
-                    &format!("Failed flushing temporary file: {}", error),
-                );
-            }
+        if should_retry_download {
+            drop(output_file);
             let _ = std::fs::remove_file(&temp_path);
+            continue;
+        }
+
+        if let Err(error) = output_file.flush() {
+            drop(output_file);
+            let reason = format!("Failed flushing temporary file: {error}");
+            if handle_download_retry(
+                graph,
+                cancel_flag,
+                &transfer_id,
+                attempt,
+                relative_path,
+                &reason,
+                Some(&temp_path),
+                &reason,
+            )
+            .await?
+            {
+                continue;
+            }
             return Err(format!(
                 "Failed flushing temporary file '{}': {}",
                 temp_path.display(),
@@ -405,28 +414,31 @@ async fn download_remote_item_content(
         }
 
         if cancel_flag.load(Ordering::Relaxed) {
-            if let Some(active_transfer_id) = &transfer_id {
-                runtime_finish_transfer_error(
-                    &graph.sync_runtime,
-                    &graph.profile_id,
-                    active_transfer_id,
-                    SYNC_CANCELLED_ERROR,
-                );
-            }
+            runtime_finish_transfer_cancelled(&graph.sync_runtime, &graph.profile_id, &transfer_id);
             let _ = std::fs::remove_file(&temp_path);
             return Err(SYNC_CANCELLED_ERROR.to_string());
         }
 
         if let Err(error) = std::fs::rename(&temp_path, local_path) {
-            if let Some(active_transfer_id) = &transfer_id {
-                runtime_finish_transfer_error(
-                    &graph.sync_runtime,
-                    &graph.profile_id,
-                    active_transfer_id,
-                    &format!("Failed finalizing local file: {}", error),
-                );
+            let reason = format!(
+                "Failed finalizing local file: {} (temp_path={})",
+                error,
+                temp_path.display()
+            );
+            if handle_download_retry(
+                graph,
+                cancel_flag,
+                &transfer_id,
+                attempt,
+                relative_path,
+                &reason,
+                Some(&temp_path),
+                &reason,
+            )
+            .await?
+            {
+                continue;
             }
-            let _ = std::fs::remove_file(&temp_path);
             return Err(format!(
                 "Failed moving '{}' to '{}': {}",
                 temp_path.display(),
@@ -435,20 +447,12 @@ async fn download_remote_item_content(
             ));
         }
 
-        if let Some(active_transfer_id) = &transfer_id {
-            runtime_update_transfer_progress(
-                &graph.sync_runtime,
-                &graph.profile_id,
-                active_transfer_id,
-                downloaded_bytes,
-                Some(downloaded_bytes),
-            );
-            runtime_finish_transfer_success(
-                &graph.sync_runtime,
-                &graph.profile_id,
-                active_transfer_id,
-            );
-        }
+        runtime_finish_transfer_download_success(
+            &graph.sync_runtime,
+            &graph.profile_id,
+            &transfer_id,
+            downloaded_bytes,
+        );
 
         if attempt > 1 {
             log::info!(
