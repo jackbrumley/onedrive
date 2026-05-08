@@ -425,34 +425,68 @@
   color: #385875;
 }
 
-.account-sync-preview-updated {
-  margin-left: 6px;
-  color: #6c7f95;
-}
-
-.account-sync-preview-stats-line {
-  margin: -2px 0 7px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  font-size: 0.71rem;
-  color: #4a6685;
-}
-
 .account-sync-preview-stats-stack {
-  margin: -2px 0 7px;
+  margin: 2px 0 8px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 8px;
+}
+
+.account-sync-preview-stats-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .account-sync-preview-stats-section {
-  margin: 5px 0 0;
+  margin: 4px 0 0;
   font-size: 0.66rem;
   font-weight: 700;
   letter-spacing: 0.03em;
   text-transform: uppercase;
   color: #476a8f;
+}
+
+.account-sync-preview-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 8px;
+}
+
+.account-sync-preview-metrics-grid-compact {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.account-sync-preview-metric {
+  margin: 0;
+  padding: 4px 6px;
+  border: 1px solid rgba(91, 123, 156, 0.18);
+  background: rgba(233, 243, 253, 0.46);
+  border-radius: 6px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.account-sync-preview-metric-label {
+  color: #456789;
+  font-size: 0.69rem;
+  line-height: 1.25;
+}
+
+.account-sync-preview-metric-value {
+  color: #244765;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .account-sync-preview-metrics-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .account-sync-preview-empty {
