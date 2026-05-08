@@ -241,7 +241,42 @@ async fn download_remote_item_content(
             token_refreshed = true;
             continue;
         }
-        if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+        if status == StatusCode::TOO_MANY_REQUESTS {
+            let _ = record_throttle_event(&graph.profile_id, DOWNLOAD_JOB_DIRECTION);
+            let response_headers = response.headers().clone();
+            let response_text = response.text().await.unwrap_or_default();
+            let delay = parse_retry_after_delay(&response_headers)
+                .or_else(|| parse_retry_after_seconds_from_json_body(&response_text))
+                .unwrap_or_else(|| exponential_backoff_delay(attempt));
+            if let Some(active_job_id) = job_id {
+                let retry_reason = format!("Download retry scheduled for HTTP status {status}");
+                if let Err(error) = mark_download_job_retry_wait(
+                    &graph.profile_id,
+                    active_job_id,
+                    &retry_reason,
+                    delay,
+                ) {
+                    log::warn!(
+                        "{} [cycle:{}] DOWNLOAD_RETRY_WAIT_PERSIST_FAILED path={} error={}",
+                        graph.account_prefix,
+                        graph.cycle_id,
+                        relative_path,
+                        error
+                    );
+                }
+            }
+            runtime_finish_transfer_cancelled(&graph.sync_runtime, &graph.profile_id, &transfer_id);
+            log::warn!(
+                "{} [cycle:{}] DOWNLOAD_RETRY_DEFERRED status={} path={} delay_ms={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                status,
+                relative_path,
+                delay.as_millis()
+            );
+            return Err(DOWNLOAD_RETRY_DEFERRED_ERROR.to_string());
+        }
+        if status.is_server_error() {
             if attempt < MAX_DOWNLOAD_RETRIES {
                 let delay = parse_retry_after_delay(response.headers())
                     .unwrap_or_else(|| exponential_backoff_delay(attempt));

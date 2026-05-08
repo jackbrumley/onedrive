@@ -23,6 +23,7 @@ const DEFAULT_REQUEST_TIMEOUT_SECONDS: u64 = 60;
 const DEFAULT_CONNECT_TIMEOUT_SECONDS: u64 = 15;
 const DEFAULT_STALL_TIMEOUT_SECONDS: u64 = 60;
 const SYNC_CANCELLED_ERROR: &str = "Synchronization cancelled";
+const DOWNLOAD_RETRY_DEFERRED_ERROR: &str = "Download retry deferred";
 const CANCEL_POLL_INTERVAL_MILLIS: u64 = 100;
 
 pub fn on_agent_state_changed(

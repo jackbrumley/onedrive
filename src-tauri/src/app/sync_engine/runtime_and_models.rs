@@ -36,6 +36,7 @@ struct RemoteDownloadJob {
 
 enum RemoteDownloadResultStatus {
     Success(RemoteDownloadOutcome),
+    DeferredRetry,
     Failed(String),
 }
 
@@ -181,6 +182,26 @@ fn parse_retry_after_delay(headers: &reqwest::header::HeaderMap) -> Option<Durat
     }
     let seconds = text.parse::<u64>().ok()?;
     Some(Duration::from_secs(seconds.min(MAX_RETRY_DELAY_SECONDS)))
+}
+
+fn parse_retry_after_seconds_from_json_body(body: &str) -> Option<Duration> {
+    if body.trim().is_empty() {
+        return None;
+    }
+    let parsed = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    let value = parsed
+        .get("error")
+        .and_then(|error| error.get("retryAfterSeconds").or_else(|| error.get("retry_after_seconds")))
+        .or_else(|| parsed.get("retryAfterSeconds").or_else(|| parsed.get("retry_after_seconds")))?;
+
+    let seconds = if let Some(number) = value.as_u64() {
+        number
+    } else if let Some(text) = value.as_str() {
+        text.trim().parse::<u64>().ok()?
+    } else {
+        return None;
+    };
+    Some(Duration::from_secs(seconds.clamp(1, 3600)))
 }
 
 fn exponential_backoff_delay(attempt: u32) -> Duration {

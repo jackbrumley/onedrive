@@ -201,14 +201,24 @@ async fn fetch_and_apply_delta_changes(
                         remote_entry: job.remote_entry,
                         status: RemoteDownloadResultStatus::Success(outcome),
                     },
-                    Err(error) => RemoteDownloadResult {
-                        job_id: job.job_id,
-                        remote_entry: job.remote_entry,
-                        status: RemoteDownloadResultStatus::Failed(format!(
-                            "Remote download failed item_id={} path={}: {}",
-                            job.item_id, job.path, error
-                        )),
-                    },
+                    Err(error) => {
+                        if error == DOWNLOAD_RETRY_DEFERRED_ERROR {
+                            RemoteDownloadResult {
+                                job_id: job.job_id,
+                                remote_entry: job.remote_entry,
+                                status: RemoteDownloadResultStatus::DeferredRetry,
+                            }
+                        } else {
+                            RemoteDownloadResult {
+                                job_id: job.job_id,
+                                remote_entry: job.remote_entry,
+                                status: RemoteDownloadResultStatus::Failed(format!(
+                                    "Remote download failed item_id={} path={}: {}",
+                                    job.item_id, job.path, error
+                                )),
+                            }
+                        }
+                    }
                 };
                 let _ = worker_pending_download_count.fetch_update(
                     Ordering::Relaxed,
@@ -955,6 +965,15 @@ fn apply_remote_download_result(
     result: RemoteDownloadResult,
 ) -> Result<(), String> {
     match result.status {
+        RemoteDownloadResultStatus::DeferredRetry => {
+            log::info!(
+                "{} [cycle:{}] REMOTE_DOWNLOAD_JOB_RETRY_DEFERRED path={} id={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                result.remote_entry.path,
+                result.remote_entry.id
+            );
+        }
         RemoteDownloadResultStatus::Failed(error_text) => {
             mark_download_job_failed(&graph.profile_id, result.job_id, &error_text)?;
             runtime_record_remote_download_failed(

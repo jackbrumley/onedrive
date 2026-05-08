@@ -13,6 +13,7 @@ const DOWNLOAD_JOB_STATE_SKIPPED: &str = "skipped";
 const JOB_RUN_STATE_IDLE: &str = "idle";
 const JOB_RUN_STATE_CLAIMED: &str = "claimed";
 const JOB_RUN_STATE_RUNNING: &str = "running";
+const DOWNLOAD_JOB_LEASE_SECONDS: i64 = 900;
 
 #[derive(Debug, Clone)]
 struct ClaimedDownloadJob {
@@ -377,7 +378,7 @@ fn claim_download_jobs(
         .transaction()
         .map_err(|error| format!("Failed starting download claim transaction: {error}"))?;
     let now = current_unix_seconds();
-    let lease_until = now.saturating_add(120);
+    let lease_until = now.saturating_add(DOWNLOAD_JOB_LEASE_SECONDS);
 
     transaction
         .execute(
@@ -517,19 +518,22 @@ fn mark_download_job_done(profile_id: &str, job_id: i64, skipped: bool) -> Resul
 fn mark_download_job_running(profile_id: &str, job_id: i64) -> Result<(), String> {
     let connection = open_sync_jobs_connection(profile_id)?;
     let now = current_unix_seconds();
+    let lease_until = now.saturating_add(DOWNLOAD_JOB_LEASE_SECONDS);
     connection
         .execute(
             "UPDATE sync_jobs
              SET state = ?1,
                  run_state = ?2,
                  started_at = COALESCE(started_at, ?3),
+                 lease_until = ?4,
                  updated_at = ?3,
                  progress_updated_at = ?3
-             WHERE profile_id = ?4 AND direction = ?5 AND id = ?6",
+              WHERE profile_id = ?5 AND direction = ?6 AND id = ?7",
             params![
                 DOWNLOAD_JOB_STATE_IN_PROGRESS,
                 JOB_RUN_STATE_RUNNING,
                 now,
+                lease_until,
                 profile_id,
                 DOWNLOAD_JOB_DIRECTION,
                 job_id,
@@ -547,6 +551,7 @@ fn update_download_job_progress(
 ) -> Result<(), String> {
     let connection = open_sync_jobs_connection(profile_id)?;
     let now = current_unix_seconds();
+    let lease_until = now.saturating_add(DOWNLOAD_JOB_LEASE_SECONDS);
     connection
         .execute(
             "UPDATE sync_jobs
@@ -554,15 +559,17 @@ fn update_download_job_progress(
                  run_state = ?2,
                  bytes_done = ?3,
                  bytes_total = COALESCE(?4, bytes_total),
+                 lease_until = ?6,
                  updated_at = ?5,
                  progress_updated_at = ?5
-             WHERE profile_id = ?6 AND direction = ?7 AND id = ?8",
+             WHERE profile_id = ?7 AND direction = ?8 AND id = ?9",
             params![
                 DOWNLOAD_JOB_STATE_IN_PROGRESS,
                 JOB_RUN_STATE_RUNNING,
                 bytes_done as i64,
                 bytes_total.map(|value| value as i64),
                 now,
+                lease_until,
                 profile_id,
                 DOWNLOAD_JOB_DIRECTION,
                 job_id,
