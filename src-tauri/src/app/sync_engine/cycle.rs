@@ -118,6 +118,7 @@ async fn tick_sync_cycle(
     } else {
         let download_counters = read_download_job_counters(profile_id)?;
         let bootstrap_ready_for_two_way = sync_state.active_delta_next_link.is_none()
+            && sync_state.bootstrap_full_scan_completed
             && planner_counters.need_download_total == 0
             && download_counters.remaining == 0
             && download_counters.failed_terminal == 0;
@@ -148,10 +149,11 @@ async fn tick_sync_cycle(
                 "Initial sync in progress - downloading cloud files only",
             );
             log::warn!(
-                "{} [cycle:{}] BOOTSTRAP_TWO_WAY_BLOCKED cursor_active={} planner_need_download={} queue_remaining={} failed_terminal={}",
+                "{} [cycle:{}] BOOTSTRAP_TWO_WAY_BLOCKED cursor_active={} bootstrap_full_scan_completed={} planner_need_download={} queue_remaining={} failed_terminal={}",
                 account_prefix,
                 cycle_id,
                 sync_state.active_delta_next_link.is_some(),
+                sync_state.bootstrap_full_scan_completed,
                 planner_counters.need_download_total,
                 download_counters.remaining,
                 download_counters.failed_terminal

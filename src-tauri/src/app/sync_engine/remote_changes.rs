@@ -32,11 +32,29 @@ async fn fetch_and_apply_delta_changes(
         checkpoint_flush_step
     );
 
-    let start_url = sync_state
-        .active_delta_next_link
-        .clone()
-        .or_else(|| sync_state.delta_link.clone())
-        .unwrap_or_else(|| format!("{GRAPH_ROOT}/me/drive/root/delta"));
+    let bootstrap_requires_authoritative_scan =
+        !sync_state.two_way_ready && !sync_state.bootstrap_full_scan_completed;
+    let start_url = if bootstrap_requires_authoritative_scan {
+        if let Some(active_next_link) = sync_state.active_delta_next_link.clone() {
+            active_next_link
+        } else {
+            if !sync_state.bootstrap_scan_initialized {
+                log::info!(
+                    "{} [cycle:{}] BOOTSTRAP_SCAN_START mode=authoritative_root_delta",
+                    graph.account_prefix,
+                    graph.cycle_id
+                );
+            }
+            sync_state.bootstrap_scan_initialized = true;
+            format!("{GRAPH_ROOT}/me/drive/root/delta")
+        }
+    } else {
+        sync_state
+            .active_delta_next_link
+            .clone()
+            .or_else(|| sync_state.delta_link.clone())
+            .unwrap_or_else(|| format!("{GRAPH_ROOT}/me/drive/root/delta"))
+    };
     let scan_started_at = std::time::Instant::now();
     let mut last_phase_update_at = scan_started_at;
     let mut last_phase_update_items: usize = 0;
@@ -557,6 +575,10 @@ async fn fetch_and_apply_delta_changes(
         sync_state.delta_link = Some(delta_link);
     }
     sync_state.active_delta_next_link = None;
+    if !sync_state.two_way_ready {
+        sync_state.bootstrap_full_scan_completed = true;
+        sync_state.bootstrap_scan_initialized = true;
+    }
     save_sync_state(&graph.profile_id, sync_state)?;
     let _ = sync_download_counters_from_db(graph)?;
     runtime_set_remote_scan_complete(&graph.sync_runtime, &graph.profile_id, true);

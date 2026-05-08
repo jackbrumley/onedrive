@@ -663,7 +663,7 @@ struct RemoteKnownItem {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 struct PersistedSyncState {
     delta_link: Option<String>,
     active_delta_next_link: Option<String>,
@@ -673,6 +673,8 @@ struct PersistedSyncState {
     upload_failure_counts_by_path: HashMap<String, u32>,
     upload_retry_after_by_path: HashMap<String, i64>,
     two_way_ready: bool,
+    bootstrap_scan_initialized: bool,
+    bootstrap_full_scan_completed: bool,
     large_delete_guard_approved: bool,
     large_delete_pending_paths: Vec<String>,
     last_cycle_at: Option<String>,
