@@ -73,6 +73,23 @@ async fn tick_sync_cycle(
         "Scanning local files",
     );
     let local_snapshot = collect_local_snapshot(&sync_root)?;
+    rebuild_sync_file_index(profile_id, &sync_state, &local_snapshot)?;
+    let planner_counters = recompute_sync_file_actions(profile_id, sync_state.two_way_ready)?;
+    runtime_set_upload_planned_total(
+        &graph.sync_runtime,
+        profile_id,
+        planner_counters.need_upload_total,
+    );
+    log::info!(
+        "{} [cycle:{}] SYNC_PLANNER_SUMMARY cloud_discovered={} local_discovered={} need_download={} need_upload={} conflicts={}",
+        account_prefix,
+        cycle_id,
+        planner_counters.cloud_discovered_total,
+        planner_counters.local_discovered_total,
+        planner_counters.need_download_total,
+        planner_counters.need_upload_total,
+        planner_counters.conflict_total,
+    );
     stats.local_items_seen = local_snapshot.len();
     log::info!(
         "{} [cycle:{}] LOCAL_SCAN_SUMMARY items={}",
@@ -150,6 +167,21 @@ async fn tick_sync_cycle(
         "Idle - waiting for next sync cycle",
     );
     Ok(stats)
+}
+
+fn rebuild_sync_file_index(
+    profile_id: &str,
+    sync_state: &PersistedSyncState,
+    local_snapshot: &HashMap<String, LocalSnapshotEntry>,
+) -> Result<(), String> {
+    reset_sync_file_index(profile_id)?;
+    for remote_item in sync_state.remote_by_id.values() {
+        upsert_remote_sync_file(profile_id, remote_item)?;
+    }
+    for (path, local_entry) in local_snapshot {
+        upsert_local_sync_file(profile_id, path, local_entry)?;
+    }
+    Ok(())
 }
 
 fn new_cycle_id() -> String {

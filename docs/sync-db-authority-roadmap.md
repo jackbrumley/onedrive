@@ -49,6 +49,23 @@ Scope:
 5. Remove hybrid authority from in-memory sets and JSON operational state.
 6. Finalize crash-recovery and restart determinism across all action types.
 
+### Phase 3 status (current implementation)
+
+Implemented foundation:
+
+1. Added DB planner index table `sync_files`.
+2. Added planner recompute step for desired actions (`download`, `upload`, `none`, `conflict`).
+3. Added per-cycle index rebuild from durable remote-known state + local snapshot.
+4. Added planner summary diagnostics in cycle logs.
+5. Hooked upload planned totals to planner-derived values.
+
+Still pending to complete full Phase 3:
+
+1. Move all execution planning to `sync_files` transitions (remove legacy branching in apply paths).
+2. Expand job materialization to all action types (deletes/conflict actions) from planner output.
+3. Remove remaining JSON/in-memory operational authority (`sync_state.json` for flow-critical planning).
+4. Add strict transition tests for planner and action materialization.
+
 ## Data Model (Target)
 
 ## `sync_jobs`

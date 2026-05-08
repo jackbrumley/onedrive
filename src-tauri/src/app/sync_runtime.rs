@@ -305,6 +305,17 @@ pub fn set_upload_counters(
     bump_runtime_revision();
 }
 
+pub fn set_upload_planned_total(
+    runtime_map: &mut SyncRuntimeMap,
+    profile_id: &str,
+    planned_total: usize,
+) {
+    let status = ensure_account_status(runtime_map, profile_id);
+    status.upload_planned_total = planned_total;
+    status.updated_at = now_rfc3339();
+    bump_runtime_revision();
+}
+
 pub fn start_transfer(
     runtime_map: &mut SyncRuntimeMap,
     profile_id: &str,

@@ -37,6 +37,15 @@ struct UploadJobCounters {
     remaining: usize,
 }
 
+#[derive(Debug, Clone, Default)]
+struct SyncFilePlannerCounters {
+    cloud_discovered_total: usize,
+    local_discovered_total: usize,
+    need_download_total: usize,
+    need_upload_total: usize,
+    conflict_total: usize,
+}
+
 fn sync_jobs_db_path(profile_id: &str) -> Result<PathBuf, String> {
     let config_dir =
         dirs::config_dir().ok_or_else(|| "Could not resolve config directory".to_string())?;
@@ -94,7 +103,28 @@ fn open_sync_jobs_connection(profile_id: &str) -> Result<Connection, String> {
              CREATE INDEX IF NOT EXISTS idx_sync_jobs_scheduler
                  ON sync_jobs(profile_id, direction, state, next_retry_at);
              CREATE INDEX IF NOT EXISTS idx_sync_jobs_leases
-                 ON sync_jobs(profile_id, direction, lease_until);",
+                 ON sync_jobs(profile_id, direction, lease_until);
+             CREATE TABLE IF NOT EXISTS sync_files (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 profile_id TEXT NOT NULL,
+                 path TEXT NOT NULL,
+                 is_dir INTEGER NOT NULL DEFAULT 0,
+                 remote_item_id TEXT,
+                 remote_present INTEGER NOT NULL DEFAULT 0,
+                 local_present INTEGER NOT NULL DEFAULT 0,
+                 remote_size INTEGER NOT NULL DEFAULT 0,
+                 local_size INTEGER NOT NULL DEFAULT 0,
+                 remote_modified_ts INTEGER NOT NULL DEFAULT 0,
+                 local_modified_ts INTEGER NOT NULL DEFAULT 0,
+                 desired_action TEXT NOT NULL DEFAULT 'none',
+                 conflict_state TEXT,
+                 updated_at INTEGER NOT NULL,
+                 UNIQUE(profile_id, path)
+             );
+             CREATE INDEX IF NOT EXISTS idx_sync_files_action
+                 ON sync_files(profile_id, desired_action);
+             CREATE INDEX IF NOT EXISTS idx_sync_files_remote_item
+                 ON sync_files(profile_id, remote_item_id);",
         )
         .map_err(|error| format!("Failed initializing sync jobs schema: {error}"))?;
 
@@ -536,5 +566,219 @@ fn read_upload_job_counters(profile_id: &str) -> Result<UploadJobCounters, Strin
         .planned_total
         .saturating_sub(counters.completed)
         .saturating_sub(counters.failed_terminal);
+    Ok(counters)
+}
+
+fn reset_sync_file_index(profile_id: &str) -> Result<(), String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    connection
+        .execute(
+            "DELETE FROM sync_files WHERE profile_id = ?1",
+            params![profile_id],
+        )
+        .map_err(|error| format!("Failed resetting sync file index: {error}"))?;
+    Ok(())
+}
+
+fn upsert_remote_sync_file(profile_id: &str, remote_item: &RemoteKnownItem) -> Result<(), String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let now = current_unix_seconds();
+    connection
+        .execute(
+            "INSERT INTO sync_files (
+                profile_id, path, is_dir, remote_item_id,
+                remote_present, local_present,
+                remote_size, local_size,
+                remote_modified_ts, local_modified_ts,
+                desired_action, conflict_state, updated_at
+             ) VALUES (
+                ?1, ?2, ?3, ?4,
+                1, 0,
+                ?5, 0,
+                ?6, 0,
+                'none', NULL, ?7
+             )
+             ON CONFLICT(profile_id, path)
+             DO UPDATE SET
+                is_dir = excluded.is_dir,
+                remote_item_id = excluded.remote_item_id,
+                remote_present = 1,
+                remote_size = excluded.remote_size,
+                remote_modified_ts = excluded.remote_modified_ts,
+                updated_at = excluded.updated_at",
+            params![
+                profile_id,
+                remote_item.path,
+                if remote_item.is_dir { 1 } else { 0 },
+                remote_item.id,
+                remote_item.size as i64,
+                remote_item.modified_ts,
+                now,
+            ],
+        )
+        .map_err(|error| format!("Failed upserting remote sync file row: {error}"))?;
+    Ok(())
+}
+
+fn upsert_local_sync_file(
+    profile_id: &str,
+    relative_path: &str,
+    local_entry: &LocalSnapshotEntry,
+) -> Result<(), String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let now = current_unix_seconds();
+    connection
+        .execute(
+            "INSERT INTO sync_files (
+                profile_id, path, is_dir, remote_item_id,
+                remote_present, local_present,
+                remote_size, local_size,
+                remote_modified_ts, local_modified_ts,
+                desired_action, conflict_state, updated_at
+             ) VALUES (
+                ?1, ?2, ?3, NULL,
+                0, 1,
+                0, ?4,
+                0, ?5,
+                'none', NULL, ?6
+             )
+             ON CONFLICT(profile_id, path)
+             DO UPDATE SET
+                is_dir = excluded.is_dir,
+                local_present = 1,
+                local_size = excluded.local_size,
+                local_modified_ts = excluded.local_modified_ts,
+                updated_at = excluded.updated_at",
+            params![
+                profile_id,
+                relative_path,
+                if local_entry.is_dir { 1 } else { 0 },
+                local_entry.size as i64,
+                local_entry.modified_ts,
+                now,
+            ],
+        )
+        .map_err(|error| format!("Failed upserting local sync file row: {error}"))?;
+    Ok(())
+}
+
+fn recompute_sync_file_actions(
+    profile_id: &str,
+    two_way_ready: bool,
+) -> Result<SyncFilePlannerCounters, String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+
+    connection
+        .execute(
+            "UPDATE sync_files
+             SET desired_action = 'none',
+                 conflict_state = NULL
+             WHERE profile_id = ?1",
+            params![profile_id],
+        )
+        .map_err(|error| format!("Failed clearing sync file actions: {error}"))?;
+
+    connection
+        .execute(
+            "UPDATE sync_files
+             SET desired_action = 'download'
+             WHERE profile_id = ?1
+               AND is_dir = 0
+               AND remote_present = 1
+               AND local_present = 0",
+            params![profile_id],
+        )
+        .map_err(|error| format!("Failed deriving download actions: {error}"))?;
+
+    if two_way_ready {
+        connection
+            .execute(
+                "UPDATE sync_files
+                 SET desired_action = 'upload'
+                 WHERE profile_id = ?1
+                   AND is_dir = 0
+                   AND local_present = 1
+                   AND remote_present = 0",
+                params![profile_id],
+            )
+            .map_err(|error| format!("Failed deriving upload actions for local-only files: {error}"))?;
+    }
+
+    let local_dominates_action = if two_way_ready { "upload" } else { "none" };
+    connection
+        .execute(
+            "UPDATE sync_files
+             SET desired_action = CASE
+                 WHEN remote_modified_ts > local_modified_ts THEN 'download'
+                 WHEN local_modified_ts > remote_modified_ts THEN ?2
+                 WHEN remote_size != local_size THEN 'conflict'
+                 ELSE 'none'
+             END,
+             conflict_state = CASE
+                 WHEN remote_modified_ts = local_modified_ts AND remote_size != local_size
+                     THEN 'metadata_mismatch'
+                 ELSE NULL
+             END
+             WHERE profile_id = ?1
+               AND is_dir = 0
+               AND remote_present = 1
+               AND local_present = 1",
+            params![profile_id, local_dominates_action],
+        )
+        .map_err(|error| format!("Failed deriving overlap actions: {error}"))?;
+
+    read_sync_file_planner_counters(profile_id)
+}
+
+fn read_sync_file_planner_counters(profile_id: &str) -> Result<SyncFilePlannerCounters, String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let mut counters = SyncFilePlannerCounters::default();
+
+    counters.cloud_discovered_total = connection
+        .query_row(
+            "SELECT COUNT(1) FROM sync_files WHERE profile_id = ?1 AND remote_present = 1",
+            params![profile_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| format!("Failed reading cloud discovered counter: {error}"))?
+        .max(0) as usize;
+
+    counters.local_discovered_total = connection
+        .query_row(
+            "SELECT COUNT(1) FROM sync_files WHERE profile_id = ?1 AND local_present = 1",
+            params![profile_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| format!("Failed reading local discovered counter: {error}"))?
+        .max(0) as usize;
+
+    let mut statement = connection
+        .prepare(
+            "SELECT desired_action, COUNT(1)
+             FROM sync_files
+             WHERE profile_id = ?1
+             GROUP BY desired_action",
+        )
+        .map_err(|error| format!("Failed preparing sync file action counters query: {error}"))?;
+
+    let rows = statement
+        .query_map(params![profile_id], |row| {
+            let action: String = row.get(0)?;
+            let count: i64 = row.get(1)?;
+            Ok((action, count.max(0) as usize))
+        })
+        .map_err(|error| format!("Failed querying sync file action counters: {error}"))?;
+
+    for row in rows {
+        let (action, count) =
+            row.map_err(|error| format!("Failed reading sync file action counters: {error}"))?;
+        match action.as_str() {
+            "download" => counters.need_download_total = count,
+            "upload" => counters.need_upload_total = count,
+            "conflict" => counters.conflict_total = count,
+            _ => {}
+        }
+    }
+
     Ok(counters)
 }

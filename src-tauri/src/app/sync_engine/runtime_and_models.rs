@@ -411,6 +411,16 @@ fn runtime_set_upload_counters(
     }
 }
 
+fn runtime_set_upload_planned_total(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    planned_total: usize,
+) {
+    if let Ok(mut runtime_map) = runtime.lock() {
+        sync_runtime::set_upload_planned_total(&mut runtime_map, profile_id, planned_total);
+    }
+}
+
 fn classify_sync_issue(error: &str) -> (&'static str, &'static [&'static str]) {
     let normalized = error.to_lowercase();
     if normalized.contains("re-authentication")
