@@ -395,6 +395,7 @@ async fn reconcile_bootstrap_local_snapshot(
         );
         let outcome = download_remote_item_content(
             graph,
+            None,
             &remote_item.id,
             &remote_item.path,
             &local_abs,

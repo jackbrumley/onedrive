@@ -1,3 +1,5 @@
+use crate::app::sync_runtime::{SyncRuntimeRecentItem, SyncRuntimeTransfer};
+use chrono::{Local, TimeZone};
 use rusqlite::{params, Connection, OptionalExtension};
 
 const DOWNLOAD_JOB_DIRECTION: &str = "download";
@@ -8,6 +10,9 @@ const DOWNLOAD_JOB_STATE_RETRY_WAIT: &str = "retry_wait";
 const DOWNLOAD_JOB_STATE_DONE: &str = "done";
 const DOWNLOAD_JOB_STATE_FAILED_TERMINAL: &str = "failed_terminal";
 const DOWNLOAD_JOB_STATE_SKIPPED: &str = "skipped";
+const JOB_RUN_STATE_IDLE: &str = "idle";
+const JOB_RUN_STATE_CLAIMED: &str = "claimed";
+const JOB_RUN_STATE_RUNNING: &str = "running";
 
 #[derive(Debug, Clone)]
 struct ClaimedDownloadJob {
@@ -35,6 +40,15 @@ struct UploadJobCounters {
     completed: usize,
     failed_terminal: usize,
     remaining: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SyncJobActivityProjection {
+    active: Vec<SyncRuntimeTransfer>,
+    recent_completed: Vec<SyncRuntimeRecentItem>,
+    recent_failed: Vec<SyncRuntimeRecentItem>,
+    active_download_count: usize,
+    active_upload_count: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -89,11 +103,15 @@ fn open_sync_jobs_connection(profile_id: &str) -> Result<Connection, String> {
                  remote_size INTEGER NOT NULL DEFAULT 0,
                  remote_modified_ts INTEGER NOT NULL DEFAULT 0,
                  state TEXT NOT NULL,
+                 run_state TEXT NOT NULL DEFAULT 'idle',
                  attempt_count INTEGER NOT NULL DEFAULT 0,
                  last_error TEXT,
                  next_retry_at INTEGER,
                  lease_owner TEXT,
                  lease_until INTEGER,
+                 bytes_done INTEGER NOT NULL DEFAULT 0,
+                 bytes_total INTEGER,
+                 progress_updated_at INTEGER,
                  created_at INTEGER NOT NULL,
                  updated_at INTEGER NOT NULL,
                  started_at INTEGER,
@@ -103,7 +121,9 @@ fn open_sync_jobs_connection(profile_id: &str) -> Result<Connection, String> {
              CREATE INDEX IF NOT EXISTS idx_sync_jobs_scheduler
                  ON sync_jobs(profile_id, direction, state, next_retry_at);
              CREATE INDEX IF NOT EXISTS idx_sync_jobs_leases
-                 ON sync_jobs(profile_id, direction, lease_until);
+                  ON sync_jobs(profile_id, direction, lease_until);
+             CREATE INDEX IF NOT EXISTS idx_sync_jobs_activity
+                 ON sync_jobs(profile_id, direction, state, run_state, progress_updated_at);
              CREATE TABLE IF NOT EXISTS sync_files (
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
                  profile_id TEXT NOT NULL,
@@ -128,7 +148,91 @@ fn open_sync_jobs_connection(profile_id: &str) -> Result<Connection, String> {
         )
         .map_err(|error| format!("Failed initializing sync jobs schema: {error}"))?;
 
+    run_sync_jobs_migrations(&connection)?;
+
     Ok(connection)
+}
+
+fn run_sync_jobs_migrations(connection: &Connection) -> Result<(), String> {
+    let current_version = connection
+        .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+        .map_err(|error| format!("Failed reading sync_jobs schema version: {error}"))?;
+
+    if current_version < 1 {
+        add_sync_jobs_column_if_missing(
+            connection,
+            "run_state",
+            "ALTER TABLE sync_jobs ADD COLUMN run_state TEXT NOT NULL DEFAULT 'idle'",
+        )?;
+        add_sync_jobs_column_if_missing(
+            connection,
+            "bytes_done",
+            "ALTER TABLE sync_jobs ADD COLUMN bytes_done INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_sync_jobs_column_if_missing(
+            connection,
+            "bytes_total",
+            "ALTER TABLE sync_jobs ADD COLUMN bytes_total INTEGER",
+        )?;
+        add_sync_jobs_column_if_missing(
+            connection,
+            "progress_updated_at",
+            "ALTER TABLE sync_jobs ADD COLUMN progress_updated_at INTEGER",
+        )?;
+        connection
+            .execute_batch(
+                "UPDATE sync_jobs SET run_state = 'idle' WHERE run_state IS NULL;
+                 UPDATE sync_jobs
+                 SET run_state = 'idle'
+                 WHERE state IN ('done', 'failed_terminal', 'retry_wait', 'queued', 'skipped');
+                 UPDATE sync_jobs
+                 SET run_state = 'claimed'
+                 WHERE state = 'in_progress' AND run_state = 'idle';
+                 UPDATE sync_jobs
+                 SET progress_updated_at = COALESCE(progress_updated_at, updated_at)
+                 WHERE progress_updated_at IS NULL;
+                 PRAGMA user_version = 1;",
+            )
+            .map_err(|error| format!("Failed applying sync_jobs schema migration v1: {error}"))?;
+    }
+
+    let current_version = connection
+        .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+        .map_err(|error| format!("Failed re-reading sync_jobs schema version: {error}"))?;
+    if current_version < 2 {
+        connection
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_sync_jobs_activity
+                     ON sync_jobs(profile_id, direction, state, run_state, progress_updated_at);
+                 PRAGMA user_version = 2;",
+            )
+            .map_err(|error| format!("Failed applying sync_jobs schema migration v2: {error}"))?;
+    }
+
+    Ok(())
+}
+
+fn add_sync_jobs_column_if_missing(
+    connection: &Connection,
+    column_name: &str,
+    alter_sql: &str,
+) -> Result<(), String> {
+    let mut statement = connection
+        .prepare("PRAGMA table_info(sync_jobs)")
+        .map_err(|error| format!("Failed preparing sync_jobs schema query: {error}"))?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| format!("Failed querying sync_jobs schema info: {error}"))?;
+    for row in rows {
+        let existing = row.map_err(|error| format!("Failed reading sync_jobs schema row: {error}"))?;
+        if existing == column_name {
+            return Ok(());
+        }
+    }
+    connection
+        .execute(alter_sql, [])
+        .map_err(|error| format!("Failed adding sync_jobs column '{column_name}': {error}"))?;
+    Ok(())
 }
 
 fn reset_download_jobs(profile_id: &str) -> Result<(), String> {
@@ -166,12 +270,14 @@ fn upsert_download_job(
             .execute(
                 "INSERT INTO sync_jobs (
                     profile_id, direction, item_id, path, remote_size, remote_modified_ts,
-                    state, attempt_count, last_error, next_retry_at, lease_owner, lease_until,
+                    state, run_state, attempt_count, last_error, next_retry_at, lease_owner, lease_until,
+                    bytes_done, bytes_total, progress_updated_at,
                     created_at, updated_at, started_at, finished_at
                 ) VALUES (
                     ?1, ?2, ?3, ?4, ?5, ?6,
-                    ?7, 0, NULL, NULL, NULL, NULL,
-                    ?8, ?8, NULL, NULL
+                    ?7, ?8, 0, NULL, NULL, NULL, NULL,
+                    0, NULL, ?9,
+                    ?9, ?9, NULL, NULL
                 )",
                 params![
                     profile_id,
@@ -181,6 +287,7 @@ fn upsert_download_job(
                     remote_size as i64,
                     remote_modified_ts,
                     DOWNLOAD_JOB_STATE_QUEUED,
+                    JOB_RUN_STATE_IDLE,
                     now,
                 ],
             )
@@ -194,6 +301,8 @@ fn upsert_download_job(
              SET path = ?1,
                  remote_size = ?2,
                  remote_modified_ts = ?3,
+                 bytes_total = CASE WHEN ?2 > 0 THEN ?2 ELSE bytes_total END,
+                 progress_updated_at = COALESCE(progress_updated_at, ?4),
                  updated_at = ?4
              WHERE profile_id = ?5 AND direction = ?6 AND item_id = ?7",
             params![
@@ -230,17 +339,20 @@ fn claim_download_jobs(
         .execute(
             "UPDATE sync_jobs
              SET state = ?1,
+                 run_state = ?2,
                  lease_owner = NULL,
                  lease_until = NULL,
                  next_retry_at = NULL,
-                 updated_at = ?2
-             WHERE profile_id = ?3
-               AND direction = ?4
-               AND state = ?5
+                 updated_at = ?3,
+                 progress_updated_at = COALESCE(progress_updated_at, ?3)
+             WHERE profile_id = ?4
+               AND direction = ?5
+               AND state = ?6
                AND lease_until IS NOT NULL
-               AND lease_until <= ?2",
+               AND lease_until <= ?3",
             params![
                 DOWNLOAD_JOB_STATE_QUEUED,
+                JOB_RUN_STATE_IDLE,
                 now,
                 profile_id,
                 DOWNLOAD_JOB_DIRECTION,
@@ -295,16 +407,21 @@ fn claim_download_jobs(
             .execute(
                 "UPDATE sync_jobs
                  SET state = ?1,
+                     run_state = ?2,
                      attempt_count = attempt_count + 1,
-                     lease_owner = ?2,
-                     lease_until = ?3,
-                     started_at = COALESCE(started_at, ?4),
-                     updated_at = ?4,
+                     lease_owner = ?3,
+                     lease_until = ?4,
+                     started_at = COALESCE(started_at, ?5),
+                     updated_at = ?5,
                      last_error = NULL,
-                     next_retry_at = NULL
-                 WHERE id = ?5",
+                     next_retry_at = NULL,
+                     bytes_done = 0,
+                     bytes_total = CASE WHEN remote_size > 0 THEN remote_size ELSE NULL END,
+                     progress_updated_at = ?5
+                 WHERE id = ?6",
                 params![
                     DOWNLOAD_JOB_STATE_IN_PROGRESS,
+                    JOB_RUN_STATE_CLAIMED,
                     lease_owner,
                     lease_until,
                     now,
@@ -332,13 +449,17 @@ fn mark_download_job_done(profile_id: &str, job_id: i64, skipped: bool) -> Resul
         .execute(
             "UPDATE sync_jobs
              SET state = ?1,
+                 run_state = ?2,
                  lease_owner = NULL,
                  lease_until = NULL,
-                 updated_at = ?2,
-                 finished_at = ?2
-             WHERE profile_id = ?3 AND direction = ?4 AND id = ?5",
+                 bytes_done = COALESCE(bytes_total, bytes_done),
+                 updated_at = ?3,
+                 finished_at = ?3,
+                 progress_updated_at = ?3
+             WHERE profile_id = ?4 AND direction = ?5 AND id = ?6",
             params![
                 final_state,
+                JOB_RUN_STATE_IDLE,
                 now,
                 profile_id,
                 DOWNLOAD_JOB_DIRECTION,
@@ -349,6 +470,64 @@ fn mark_download_job_done(profile_id: &str, job_id: i64, skipped: bool) -> Resul
     Ok(())
 }
 
+fn mark_download_job_running(profile_id: &str, job_id: i64) -> Result<(), String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let now = current_unix_seconds();
+    connection
+        .execute(
+            "UPDATE sync_jobs
+             SET state = ?1,
+                 run_state = ?2,
+                 started_at = COALESCE(started_at, ?3),
+                 updated_at = ?3,
+                 progress_updated_at = ?3
+             WHERE profile_id = ?4 AND direction = ?5 AND id = ?6",
+            params![
+                DOWNLOAD_JOB_STATE_IN_PROGRESS,
+                JOB_RUN_STATE_RUNNING,
+                now,
+                profile_id,
+                DOWNLOAD_JOB_DIRECTION,
+                job_id,
+            ],
+        )
+        .map_err(|error| format!("Failed marking download job running: {error}"))?;
+    Ok(())
+}
+
+fn update_download_job_progress(
+    profile_id: &str,
+    job_id: i64,
+    bytes_done: u64,
+    bytes_total: Option<u64>,
+) -> Result<(), String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let now = current_unix_seconds();
+    connection
+        .execute(
+            "UPDATE sync_jobs
+             SET state = ?1,
+                 run_state = ?2,
+                 bytes_done = ?3,
+                 bytes_total = COALESCE(?4, bytes_total),
+                 updated_at = ?5,
+                 progress_updated_at = ?5
+             WHERE profile_id = ?6 AND direction = ?7 AND id = ?8",
+            params![
+                DOWNLOAD_JOB_STATE_IN_PROGRESS,
+                JOB_RUN_STATE_RUNNING,
+                bytes_done as i64,
+                bytes_total.map(|value| value as i64),
+                now,
+                profile_id,
+                DOWNLOAD_JOB_DIRECTION,
+                job_id,
+            ],
+        )
+        .map_err(|error| format!("Failed updating download job progress: {error}"))?;
+    Ok(())
+}
+
 fn mark_download_job_failed(profile_id: &str, job_id: i64, error_text: &str) -> Result<(), String> {
     let connection = open_sync_jobs_connection(profile_id)?;
     let now = current_unix_seconds();
@@ -356,14 +535,17 @@ fn mark_download_job_failed(profile_id: &str, job_id: i64, error_text: &str) -> 
         .execute(
             "UPDATE sync_jobs
              SET state = ?1,
+                 run_state = ?2,
                  lease_owner = NULL,
                  lease_until = NULL,
-                 last_error = ?2,
-                 updated_at = ?3,
-                 finished_at = ?3
-             WHERE profile_id = ?4 AND direction = ?5 AND id = ?6",
+                 last_error = ?3,
+                 updated_at = ?4,
+                 finished_at = ?4,
+                 progress_updated_at = ?4
+             WHERE profile_id = ?5 AND direction = ?6 AND id = ?7",
             params![
                 DOWNLOAD_JOB_STATE_FAILED_TERMINAL,
+                JOB_RUN_STATE_IDLE,
                 error_text,
                 now,
                 profile_id,
@@ -379,10 +561,10 @@ fn read_download_job_counters(profile_id: &str) -> Result<DownloadJobCounters, S
     let connection = open_sync_jobs_connection(profile_id)?;
     let mut statement = connection
         .prepare(
-            "SELECT state, COUNT(1)
+            "SELECT state, run_state, COUNT(1)
              FROM sync_jobs
              WHERE profile_id = ?1 AND direction = ?2
-             GROUP BY state",
+             GROUP BY state, run_state",
         )
         .map_err(|error| format!("Failed preparing download counters query: {error}"))?;
 
@@ -390,16 +572,22 @@ fn read_download_job_counters(profile_id: &str) -> Result<DownloadJobCounters, S
     let rows = statement
         .query_map(params![profile_id, DOWNLOAD_JOB_DIRECTION], |row| {
             let state: String = row.get(0)?;
-            let count: i64 = row.get(1)?;
-            Ok((state, count.max(0) as usize))
+            let run_state: String = row.get(1)?;
+            let count: i64 = row.get(2)?;
+            Ok((state, run_state, count.max(0) as usize))
         })
         .map_err(|error| format!("Failed querying download counters: {error}"))?;
 
     for row in rows {
-        let (state, count) = row.map_err(|error| format!("Failed reading download counters: {error}"))?;
+        let (state, run_state, count) =
+            row.map_err(|error| format!("Failed reading download counters: {error}"))?;
         counters.planned_total += count;
         match state.as_str() {
-            DOWNLOAD_JOB_STATE_IN_PROGRESS => counters.in_progress = count,
+            DOWNLOAD_JOB_STATE_IN_PROGRESS => {
+                if run_state == JOB_RUN_STATE_RUNNING {
+                    counters.in_progress = count;
+                }
+            }
             DOWNLOAD_JOB_STATE_RETRY_WAIT => counters.retry_waiting = count,
             DOWNLOAD_JOB_STATE_DONE => counters.completed = count,
             DOWNLOAD_JOB_STATE_FAILED_TERMINAL => counters.failed_terminal = count,
@@ -432,12 +620,14 @@ fn begin_upload_job(
         .execute(
             "INSERT INTO sync_jobs (
                 profile_id, direction, item_id, path, remote_size, remote_modified_ts,
-                state, attempt_count, last_error, next_retry_at, lease_owner, lease_until,
+                state, run_state, attempt_count, last_error, next_retry_at, lease_owner, lease_until,
+                bytes_done, bytes_total, progress_updated_at,
                 created_at, updated_at, started_at, finished_at
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6,
-                ?7, 1, NULL, NULL, ?8, ?9,
-                ?10, ?10, ?10, NULL
+                ?7, ?8, 1, NULL, NULL, ?9, ?10,
+                0, ?11, ?11,
+                ?11, ?11, ?11, NULL
             )
             ON CONFLICT(profile_id, direction, item_id)
             DO UPDATE SET
@@ -445,11 +635,15 @@ fn begin_upload_job(
                 remote_size = excluded.remote_size,
                 remote_modified_ts = excluded.remote_modified_ts,
                 state = excluded.state,
+                run_state = excluded.run_state,
                 attempt_count = sync_jobs.attempt_count + 1,
                 last_error = NULL,
                 next_retry_at = NULL,
                 lease_owner = excluded.lease_owner,
                 lease_until = excluded.lease_until,
+                bytes_done = 0,
+                bytes_total = excluded.bytes_total,
+                progress_updated_at = excluded.progress_updated_at,
                 started_at = COALESCE(sync_jobs.started_at, excluded.started_at),
                 finished_at = NULL,
                 updated_at = excluded.updated_at",
@@ -461,8 +655,10 @@ fn begin_upload_job(
                 size_bytes as i64,
                 modified_ts,
                 DOWNLOAD_JOB_STATE_IN_PROGRESS,
+                JOB_RUN_STATE_RUNNING,
                 lease_owner,
                 lease_until,
+                size_bytes as i64,
                 now,
             ],
         )
@@ -485,13 +681,17 @@ fn mark_upload_job_done(profile_id: &str, job_id: i64) -> Result<(), String> {
         .execute(
             "UPDATE sync_jobs
              SET state = ?1,
+                 run_state = ?2,
                  lease_owner = NULL,
                  lease_until = NULL,
-                 updated_at = ?2,
-                 finished_at = ?2
-             WHERE profile_id = ?3 AND direction = ?4 AND id = ?5",
+                 bytes_done = COALESCE(bytes_total, bytes_done),
+                 updated_at = ?3,
+                 finished_at = ?3,
+                 progress_updated_at = ?3
+             WHERE profile_id = ?4 AND direction = ?5 AND id = ?6",
             params![
                 DOWNLOAD_JOB_STATE_DONE,
+                JOB_RUN_STATE_IDLE,
                 now,
                 profile_id,
                 UPLOAD_JOB_DIRECTION,
@@ -509,14 +709,17 @@ fn mark_upload_job_failed(profile_id: &str, job_id: i64, error_text: &str) -> Re
         .execute(
             "UPDATE sync_jobs
              SET state = ?1,
+                 run_state = ?2,
                  lease_owner = NULL,
                  lease_until = NULL,
-                 last_error = ?2,
-                 updated_at = ?3,
-                 finished_at = ?3
-             WHERE profile_id = ?4 AND direction = ?5 AND id = ?6",
+                 last_error = ?3,
+                 updated_at = ?4,
+                 finished_at = ?4,
+                 progress_updated_at = ?4
+             WHERE profile_id = ?5 AND direction = ?6 AND id = ?7",
             params![
                 DOWNLOAD_JOB_STATE_FAILED_TERMINAL,
+                JOB_RUN_STATE_IDLE,
                 error_text,
                 now,
                 profile_id,
@@ -528,14 +731,47 @@ fn mark_upload_job_failed(profile_id: &str, job_id: i64, error_text: &str) -> Re
     Ok(())
 }
 
+fn update_upload_job_progress(
+    profile_id: &str,
+    job_id: i64,
+    bytes_done: u64,
+    bytes_total: Option<u64>,
+) -> Result<(), String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let now = current_unix_seconds();
+    connection
+        .execute(
+            "UPDATE sync_jobs
+             SET state = ?1,
+                 run_state = ?2,
+                 bytes_done = ?3,
+                 bytes_total = COALESCE(?4, bytes_total),
+                 updated_at = ?5,
+                 progress_updated_at = ?5
+             WHERE profile_id = ?6 AND direction = ?7 AND id = ?8",
+            params![
+                DOWNLOAD_JOB_STATE_IN_PROGRESS,
+                JOB_RUN_STATE_RUNNING,
+                bytes_done as i64,
+                bytes_total.map(|value| value as i64),
+                now,
+                profile_id,
+                UPLOAD_JOB_DIRECTION,
+                job_id,
+            ],
+        )
+        .map_err(|error| format!("Failed updating upload job progress: {error}"))?;
+    Ok(())
+}
+
 fn read_upload_job_counters(profile_id: &str) -> Result<UploadJobCounters, String> {
     let connection = open_sync_jobs_connection(profile_id)?;
     let mut statement = connection
         .prepare(
-            "SELECT state, COUNT(1)
+            "SELECT state, run_state, COUNT(1)
              FROM sync_jobs
              WHERE profile_id = ?1 AND direction = ?2
-             GROUP BY state",
+             GROUP BY state, run_state",
         )
         .map_err(|error| format!("Failed preparing upload counters query: {error}"))?;
 
@@ -543,16 +779,22 @@ fn read_upload_job_counters(profile_id: &str) -> Result<UploadJobCounters, Strin
     let rows = statement
         .query_map(params![profile_id, UPLOAD_JOB_DIRECTION], |row| {
             let state: String = row.get(0)?;
-            let count: i64 = row.get(1)?;
-            Ok((state, count.max(0) as usize))
+            let run_state: String = row.get(1)?;
+            let count: i64 = row.get(2)?;
+            Ok((state, run_state, count.max(0) as usize))
         })
         .map_err(|error| format!("Failed querying upload counters: {error}"))?;
 
     for row in rows {
-        let (state, count) = row.map_err(|error| format!("Failed reading upload counters: {error}"))?;
+        let (state, run_state, count) =
+            row.map_err(|error| format!("Failed reading upload counters: {error}"))?;
         counters.planned_total += count;
         match state.as_str() {
-            DOWNLOAD_JOB_STATE_IN_PROGRESS => counters.in_progress = count,
+            DOWNLOAD_JOB_STATE_IN_PROGRESS => {
+                if run_state == JOB_RUN_STATE_RUNNING {
+                    counters.in_progress = count;
+                }
+            }
             DOWNLOAD_JOB_STATE_DONE => counters.completed = count,
             DOWNLOAD_JOB_STATE_FAILED_TERMINAL => counters.failed_terminal = count,
             DOWNLOAD_JOB_STATE_RETRY_WAIT => {}
@@ -567,6 +809,220 @@ fn read_upload_job_counters(profile_id: &str) -> Result<UploadJobCounters, Strin
         .saturating_sub(counters.completed)
         .saturating_sub(counters.failed_terminal);
     Ok(counters)
+}
+
+fn read_sync_job_activity_projection(
+    profile_id: &str,
+    active_limit: usize,
+    recent_limit: usize,
+) -> Result<SyncJobActivityProjection, String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let mut projection = SyncJobActivityProjection::default();
+
+    let mut active_statement = connection
+        .prepare(
+            "SELECT id,
+                    direction,
+                    path,
+                    bytes_done,
+                    bytes_total,
+                    COALESCE(started_at, updated_at),
+                    COALESCE(progress_updated_at, updated_at)
+             FROM sync_jobs
+             WHERE profile_id = ?1
+               AND state = ?2
+               AND run_state = ?3
+             ORDER BY COALESCE(progress_updated_at, updated_at) DESC
+             LIMIT ?4",
+        )
+        .map_err(|error| format!("Failed preparing active sync job query: {error}"))?;
+    let active_rows = active_statement
+        .query_map(
+            params![
+                profile_id,
+                DOWNLOAD_JOB_STATE_IN_PROGRESS,
+                JOB_RUN_STATE_RUNNING,
+                active_limit as i64,
+            ],
+            |row| {
+                let job_id: i64 = row.get(0)?;
+                let direction: String = row.get(1)?;
+                let path: String = row.get(2)?;
+                let bytes_done = row.get::<_, i64>(3)?.max(0) as u64;
+                let bytes_total = row.get::<_, Option<i64>>(4)?.map(|value| value.max(0) as u64);
+                let started_at_unix: i64 = row.get(5)?;
+                let updated_at_unix: i64 = row.get(6)?;
+                Ok((
+                    SyncRuntimeTransfer {
+                        id: format!("job-{job_id}"),
+                        direction,
+                        path,
+                        bytes_done,
+                        bytes_total,
+                        started_at: unix_seconds_to_rfc3339(started_at_unix),
+                        updated_at: unix_seconds_to_rfc3339(updated_at_unix),
+                    },
+                    job_id,
+                ))
+            },
+        )
+        .map_err(|error| format!("Failed querying active sync jobs: {error}"))?;
+    for row in active_rows {
+        let (transfer, _) =
+            row.map_err(|error| format!("Failed reading active sync job row: {error}"))?;
+        if transfer.direction.eq_ignore_ascii_case(DOWNLOAD_JOB_DIRECTION) {
+            projection.active_download_count += 1;
+        } else if transfer.direction.eq_ignore_ascii_case(UPLOAD_JOB_DIRECTION) {
+            projection.active_upload_count += 1;
+        }
+        projection.active.push(transfer);
+    }
+
+    let mut completed_statement = connection
+        .prepare(
+            "SELECT id,
+                    direction,
+                    path,
+                    bytes_total,
+                    finished_at
+             FROM sync_jobs
+             WHERE profile_id = ?1
+               AND state IN (?2, ?3)
+               AND finished_at IS NOT NULL
+             ORDER BY finished_at DESC
+             LIMIT ?4",
+        )
+        .map_err(|error| format!("Failed preparing completed sync job query: {error}"))?;
+    let completed_rows = completed_statement
+        .query_map(
+            params![
+                profile_id,
+                DOWNLOAD_JOB_STATE_DONE,
+                DOWNLOAD_JOB_STATE_SKIPPED,
+                recent_limit as i64,
+            ],
+            |row| {
+                let job_id: i64 = row.get(0)?;
+                let direction: String = row.get(1)?;
+                let path: String = row.get(2)?;
+                let bytes_total = row.get::<_, Option<i64>>(3)?.map(|value| value.max(0) as u64);
+                let finished_at_unix: i64 = row.get(4)?;
+                Ok(SyncRuntimeRecentItem {
+                    id: format!("job-{job_id}"),
+                    direction,
+                    path,
+                    bytes_total,
+                    finished_at: unix_seconds_to_rfc3339(finished_at_unix),
+                    status: "completed".to_string(),
+                    error: None,
+                })
+            },
+        )
+        .map_err(|error| format!("Failed querying completed sync jobs: {error}"))?;
+    for row in completed_rows {
+        projection.recent_completed.push(
+            row.map_err(|error| format!("Failed reading completed sync job row: {error}"))?,
+        );
+    }
+
+    let mut failed_statement = connection
+        .prepare(
+            "SELECT id,
+                    direction,
+                    path,
+                    bytes_total,
+                    finished_at,
+                    last_error
+             FROM sync_jobs
+             WHERE profile_id = ?1
+               AND state = ?2
+               AND finished_at IS NOT NULL
+             ORDER BY finished_at DESC
+             LIMIT ?3",
+        )
+        .map_err(|error| format!("Failed preparing failed sync job query: {error}"))?;
+    let failed_rows = failed_statement
+        .query_map(
+            params![profile_id, DOWNLOAD_JOB_STATE_FAILED_TERMINAL, recent_limit as i64],
+            |row| {
+                let job_id: i64 = row.get(0)?;
+                let direction: String = row.get(1)?;
+                let path: String = row.get(2)?;
+                let bytes_total = row.get::<_, Option<i64>>(3)?.map(|value| value.max(0) as u64);
+                let finished_at_unix: i64 = row.get(4)?;
+                let error_text: Option<String> = row.get(5)?;
+                Ok(SyncRuntimeRecentItem {
+                    id: format!("job-{job_id}"),
+                    direction,
+                    path,
+                    bytes_total,
+                    finished_at: unix_seconds_to_rfc3339(finished_at_unix),
+                    status: "failed".to_string(),
+                    error: error_text,
+                })
+            },
+        )
+        .map_err(|error| format!("Failed querying failed sync jobs: {error}"))?;
+    for row in failed_rows {
+        projection
+            .recent_failed
+            .push(row.map_err(|error| format!("Failed reading failed sync job row: {error}"))?);
+    }
+
+    Ok(projection)
+}
+
+pub fn hydrate_runtime_status_from_db(
+    status: &mut sync_runtime::SyncRuntimeAccountStatus,
+) -> Result<(), String> {
+    let profile_id = status.profile_id.clone();
+    let projection = read_sync_job_activity_projection(&profile_id, 64, 120)?;
+    let download_counters = read_download_job_counters(&profile_id)?;
+    let upload_counters = read_upload_job_counters(&profile_id)?;
+
+    if projection.active_download_count != download_counters.in_progress {
+        log::warn!(
+            "{} SYNC_ACTIVITY_INVARIANT_MISMATCH lane=download running_rows={} counter_in_flight={}",
+            log_context::account_prefix(&profile_id),
+            projection.active_download_count,
+            download_counters.in_progress
+        );
+    }
+    if projection.active_upload_count != upload_counters.in_progress {
+        log::warn!(
+            "{} SYNC_ACTIVITY_INVARIANT_MISMATCH lane=upload running_rows={} counter_in_flight={}",
+            log_context::account_prefix(&profile_id),
+            projection.active_upload_count,
+            upload_counters.in_progress
+        );
+    }
+
+    status.in_progress = projection.active;
+    status.recent_completed = projection.recent_completed;
+    status.recent_failed = projection.recent_failed;
+
+    status.remote_download_planned_total = download_counters.planned_total;
+    status.remote_download_completed_total = download_counters.completed;
+    status.remote_download_failed_total = download_counters.failed_terminal;
+    status.remote_download_in_flight = download_counters.in_progress;
+    status.remote_download_retry_waiting = download_counters.retry_waiting;
+    status.remote_download_queue_count = status.remote_download_in_flight;
+    status.remote_downloaded_count = status.remote_download_completed_total;
+
+    status.upload_planned_total = upload_counters.planned_total;
+    status.upload_completed_total = upload_counters.completed;
+    status.upload_failed_total = upload_counters.failed_terminal;
+    status.upload_in_flight = upload_counters.in_progress;
+
+    Ok(())
+}
+
+fn unix_seconds_to_rfc3339(value: i64) -> String {
+    Local
+        .timestamp_opt(value, 0)
+        .single()
+        .map(|instant| instant.to_rfc3339())
+        .unwrap_or_else(|| Local::now().to_rfc3339())
 }
 
 fn reset_sync_file_index(profile_id: &str) -> Result<(), String> {

@@ -158,6 +158,7 @@ async fn graph_delete(graph: &GraphContext, url: &str) -> Result<(), String> {
 
 async fn download_remote_item_content(
     graph: &GraphContext,
+    job_id: Option<i64>,
     item_id: &str,
     relative_path: &str,
     local_path: &Path,
@@ -183,6 +184,9 @@ async fn download_remote_item_content(
         relative_path,
         None,
     );
+    if let Some(active_job_id) = job_id {
+        let _ = mark_download_job_running(&graph.profile_id, active_job_id);
+    }
     loop {
         ensure_not_cancelled(cancel_flag)?;
         attempt += 1;
@@ -283,6 +287,9 @@ async fn download_remote_item_content(
         }
 
         let total = response.content_length();
+        if let Some(active_job_id) = job_id {
+            let _ = update_download_job_progress(&graph.profile_id, active_job_id, 0, total);
+        }
         if let Some(active_transfer_id) = &transfer_id {
             runtime_update_transfer_progress(
                 &graph.sync_runtime,
@@ -372,6 +379,14 @@ async fn download_remote_item_content(
             }
 
             downloaded_bytes += chunk.len() as u64;
+            if let Some(active_job_id) = job_id {
+                let _ = update_download_job_progress(
+                    &graph.profile_id,
+                    active_job_id,
+                    downloaded_bytes,
+                    total,
+                );
+            }
             if let Some(active_transfer_id) = &transfer_id {
                 runtime_update_transfer_progress(
                     &graph.sync_runtime,
@@ -533,6 +548,7 @@ async fn upload_file_by_path(
         })?;
         let result = upload_small_file_simple(
             graph,
+            upload_job_id,
             relative_path,
             content,
             content_len,
@@ -551,6 +567,7 @@ async fn upload_file_by_path(
 
     let result = upload_large_file_session(
         graph,
+        upload_job_id,
         relative_path,
         &local_path,
         content_len,
@@ -590,6 +607,7 @@ fn sync_upload_counters_from_db(graph: &GraphContext) {
 
 async fn upload_small_file_simple(
     graph: &mut GraphContext,
+    upload_job_id: i64,
     relative_path: &str,
     content: Vec<u8>,
     content_len: u64,
@@ -670,6 +688,12 @@ async fn upload_small_file_simple(
         }
         let parsed = serde_json::from_str::<DriveItemResponse>(&text)
             .map_err(|error| format!("Failed decoding upload response JSON: {error}"))?;
+        let _ = update_upload_job_progress(
+            &graph.profile_id,
+            upload_job_id,
+            content_len,
+            Some(content_len),
+        );
         if let Some(active_transfer_id) = transfer_id {
             runtime_update_transfer_progress(
                 &graph.sync_runtime,
@@ -698,6 +722,7 @@ async fn upload_small_file_simple(
 
 async fn upload_large_file_session(
     graph: &mut GraphContext,
+    upload_job_id: i64,
     relative_path: &str,
     local_path: &Path,
     content_len: u64,
@@ -782,6 +807,12 @@ async fn upload_large_file_session(
             let text = response.text().await.unwrap_or_default();
             if status == StatusCode::ACCEPTED {
                 offset += read_len as u64;
+                let _ = update_upload_job_progress(
+                    &graph.profile_id,
+                    upload_job_id,
+                    offset,
+                    Some(content_len),
+                );
                 if let Some(active_transfer_id) = transfer_id {
                     runtime_update_transfer_progress(
                         &graph.sync_runtime,
@@ -798,6 +829,12 @@ async fn upload_large_file_session(
                 let parsed = serde_json::from_str::<DriveItemResponse>(&text).map_err(|error| {
                     format!("Failed decoding upload-session completion response JSON: {error}")
                 })?;
+                let _ = update_upload_job_progress(
+                    &graph.profile_id,
+                    upload_job_id,
+                    content_len,
+                    Some(content_len),
+                );
                 if let Some(active_transfer_id) = transfer_id {
                     runtime_update_transfer_progress(
                         &graph.sync_runtime,
