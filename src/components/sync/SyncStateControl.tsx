@@ -1,5 +1,5 @@
-import { useMemo, useState } from "preact/hooks";
-import { IconPlayerPauseFilled, IconPlayerPlayFilled, IconRefresh } from "@tabler/icons-preact";
+import { useMemo } from "preact/hooks";
+import { IconPlayerPauseFilled, IconPlayerPlayFilled } from "@tabler/icons-preact";
 
 interface SyncStateControlProps {
   state: "syncing" | "paused" | "inactive";
@@ -9,8 +9,6 @@ interface SyncStateControlProps {
 }
 
 export function SyncStateControl({ state, onToggle, disabled = false, size = 16 }: SyncStateControlProps) {
-  const [hovered, setHovered] = useState(false);
-
   const nextState: "syncing" | "paused" = state === "syncing" ? "paused" : "syncing";
 
   const title = useMemo(() => {
@@ -21,10 +19,10 @@ export function SyncStateControl({ state, onToggle, disabled = false, size = 16 
       return "Synchronization unavailable";
     }
     if (state === "syncing") {
-      return hovered ? "Pause synchronization" : "Synchronizing";
+      return "Pause synchronization";
     }
-    return hovered ? "Resume synchronization" : "Synchronization paused";
-  }, [disabled, hovered, state]);
+    return "Resume synchronization";
+  }, [disabled, state]);
 
   return (
     <button
@@ -32,8 +30,6 @@ export function SyncStateControl({ state, onToggle, disabled = false, size = 16 
       disabled={disabled || state === "inactive"}
       title={title}
       aria-label={title}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       onClick={() => {
         if (state === "inactive") {
           return;
@@ -44,15 +40,9 @@ export function SyncStateControl({ state, onToggle, disabled = false, size = 16 
       {state === "inactive" ? (
         <IconPlayerPauseFilled size={size} />
       ) : state === "syncing" ? (
-        hovered ? (
-          <IconPlayerPauseFilled size={size} />
-        ) : (
-          <IconRefresh class="sync-icon-spinning" size={size} />
-        )
-      ) : hovered ? (
-        <IconPlayerPlayFilled size={size} />
-      ) : (
         <IconPlayerPauseFilled size={size} />
+      ) : (
+        <IconPlayerPlayFilled size={size} />
       )}
     </button>
   );

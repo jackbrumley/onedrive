@@ -19,10 +19,10 @@
 .accounts-page-footer {
   margin-top: auto;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 10px 0 4px;
+  align-items: flex-end;
+  justify-content: center;
+  position: relative;
+  padding: 0;
   opacity: 0.66;
 }
 
@@ -30,14 +30,20 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  margin: 0;
+  padding: 0;
+  line-height: 0;
 }
 
 .accounts-page-footer-icon-btn {
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
   border: none;
   background: transparent;
   border-radius: 999px;
+  margin: 0;
+  padding: 4px;
+  line-height: 0;
   color: var(--text-muted);
   display: inline-flex;
   align-items: center;
@@ -46,7 +52,7 @@
 }
 
 .accounts-page-footer-icon-btn:hover {
-  background: rgba(20, 117, 198, 0.08);
+  background: rgba(127, 139, 157, 0.22);
   color: var(--text-main);
   transform: translateY(-1px);
 }
@@ -55,14 +61,24 @@
   color: #d96874;
 }
 
+.accounts-page-footer-github-btn:hover {
+  color: #0f1115;
+}
+
 .accounts-page-footer-heart-btn:hover {
-  color: #cf3a53;
+  color: #e11d48;
 }
 
 .accounts-page-footer-version {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  padding: 0;
   font-size: 0.72rem;
+  line-height: 1;
   color: var(--text-muted);
-  font-family: "IBM Plex Mono", "Fira Mono", monospace;
+  font-family: inherit;
 }
 
 .account-item {
@@ -133,12 +149,27 @@
   display: grid;
   justify-items: end;
   align-content: start;
-  gap: 6px;
+  gap: 0;
 }
 
 .account-kind-pill {
-  margin-left: auto;
+  margin-left: 0;
   flex-shrink: 0;
+}
+
+.account-sync-control-box {
+  position: relative;
+  width: 108px;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 4px;
+}
+
+.account-sync-action-wrap {
+  position: relative;
+  width: 56px;
+  height: 56px;
 }
 
 .account-name-sep,
@@ -194,16 +225,43 @@
   height: 56px;
   border-radius: 999px;
   padding: 0;
+  margin: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  position: relative;
   background: #dcecff;
   color: var(--titlebar-solid);
 }
 
+.account-sync-nav-control {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  width: 108px;
+}
+
+.account-sync-state-label {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1;
+  color: var(--text-muted);
+  text-align: center;
+  white-space: nowrap;
+}
+
 .account-sync-nav-btn:hover {
   background: #cfe4ff;
+}
+
+.account-sync-nav-btn-stopped {
+  background: #ffe7e9;
+  color: #b42335;
+}
+
+.account-sync-nav-btn-stopped:hover {
+  background: #ffd8dd;
 }
 
 .account-sync-nav-btn-syncing {
@@ -234,6 +292,10 @@
   font-size: 0.64rem;
   font-weight: 700;
   line-height: 1;
+}
+
+.sync-stopped-icon {
+  color: #cf3748;
 }
 
 .account-sync-preview-popover {

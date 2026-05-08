@@ -1,18 +1,24 @@
 import {
-  IconAlertCircle,
+  IconAlertTriangleFilled,
   IconBuildingBank,
   IconFolder,
   IconPlayerPauseFilled,
   IconPlayerPlayFilled,
-  IconRefresh,
   IconUser,
 } from "@tabler/icons-preact";
-import { useState } from "preact/hooks";
 import { AccountHomeCardButton } from "./AccountHomeCardButton";
 import type { AccountProfile, SyncRuntimeAccountStatus } from "../../types/somedrive";
 import { syncModeMessage } from "./syncModeMessaging";
 
 const ISSUE_BADGE_WINDOW_MS = 10 * 60 * 1000;
+const BLOCKING_ISSUE_CODES = new Set([
+  "auth_required",
+  "permission_denied",
+  "disk_full",
+  "sync_root_unavailable",
+  "large_delete_guard",
+  "unknown_error",
+]);
 
 function recentIssueCount(runtimeStatus: SyncRuntimeAccountStatus | null): number {
   if (!runtimeStatus) {
@@ -44,33 +50,33 @@ interface AccountCardProps {
 }
 
 export function AccountCard({ account, runtimeStatus, onOpenDetails, onSetAgentState, onOpenSyncRootFolder }: AccountCardProps) {
-  const [syncButtonHovered, setSyncButtonHovered] = useState(false);
   const modeMessage = syncModeMessage(runtimeStatus, account.lastSyncAt !== null);
   const accountKindLabel = account.kind.charAt(0).toUpperCase() + account.kind.slice(1);
   const accountIcon = account.kind === "business" ? <IconBuildingBank size={16} /> : <IconUser size={16} />;
-  const runtimeIssueCode = runtimeStatus?.issueCode ?? null;
+  const runtimeIssueCode = runtimeStatus?.issueCode;
+  const recentIssueTotal = recentIssueCount(runtimeStatus);
+  const runtimeIssueIsBlocking = runtimeIssueCode ? BLOCKING_ISSUE_CODES.has(runtimeIssueCode) : false;
   const hasBlockingIssue =
-    !account.authConfigured || runtimeIssueCode !== null || account.agentState === "error" || runtimeStatus?.phase === "error";
+    !account.authConfigured || runtimeIssueIsBlocking || account.agentState === "error" || runtimeStatus?.phase === "error";
+  const hasNonBlockingIssue = !hasBlockingIssue && (recentIssueTotal > 0 || Boolean(runtimeIssueCode));
+  const nonBlockingIssueCount = recentIssueTotal + (runtimeIssueCode && !hasBlockingIssue ? 1 : 0);
   const syncActive =
     account.agentState === "syncing" ||
     (runtimeStatus?.inProgress.length ?? 0) > 0 ||
     isSyncPhaseActive(runtimeStatus?.phase);
-  const issueCount = recentIssueCount(runtimeStatus) + (hasBlockingIssue ? 1 : 0);
-  const showIssueBadge = issueCount > 0;
-  const showBlockingIssueWarning = hasBlockingIssue && !syncActive;
-  const syncButtonClass = showBlockingIssueWarning
-    ? "account-sync-nav-btn account-sync-nav-btn-warning"
+  const syncState = hasBlockingIssue ? "stopped" : syncActive ? "syncing" : "paused";
+  const showIssueBadge = syncState === "syncing" && hasNonBlockingIssue && nonBlockingIssueCount > 0;
+  const showBlockingMarker = syncState === "stopped";
+  const syncButtonClass = showBlockingMarker
+    ? "account-sync-nav-btn account-sync-nav-btn-stopped"
     : "account-sync-nav-btn";
   const nextSyncState: "syncing" | "paused" = syncActive ? "paused" : "syncing";
-  const syncButtonTitle = showBlockingIssueWarning
+  const syncButtonTitle = showBlockingMarker
     ? "Open synchronization details"
-    : syncActive
-      ? syncButtonHovered
-        ? "Pause synchronization"
-        : "Synchronizing"
-      : syncButtonHovered
-        ? "Resume synchronization"
-        : "Synchronization paused";
+    : syncState === "syncing"
+      ? "Pause synchronization"
+      : "Resume synchronization";
+  const syncStateLabel = syncState === "stopped" ? "Stopped" : syncState === "syncing" ? "Syncing" : "Paused";
 
   return (
     <AccountHomeCardButton
@@ -101,42 +107,42 @@ export function AccountCard({ account, runtimeStatus, onOpenDetails, onSetAgentS
           </p>
         </div>
         <div class="account-card-right">
-          <span class="pill icon-pill account-kind-pill">{accountIcon} {accountKindLabel}</span>
-          <button
-            class={syncButtonClass}
-            type="button"
-            aria-label={syncButtonTitle}
-            title={syncButtonTitle}
-            onClick={(event) => {
-              event.stopPropagation();
-              if (showBlockingIssueWarning) {
-                onOpenDetails(account.id);
-                return;
-              }
-              void onSetAgentState(account.id, nextSyncState);
-            }}
-            onMouseEnter={() => setSyncButtonHovered(true)}
-            onMouseLeave={() => setSyncButtonHovered(false)}
-          >
-            {showBlockingIssueWarning ? (
-              <IconAlertCircle class="sync-icon-warning-pulse" size={24} />
-            ) : syncActive ? (
-              syncButtonHovered ? (
-                <IconPlayerPauseFilled size={24} />
-              ) : (
-                <IconRefresh class="sync-icon-spinning" size={24} />
-              )
-            ) : syncButtonHovered ? (
-              <IconPlayerPlayFilled size={24} />
-            ) : (
-              <IconPlayerPauseFilled size={24} />
-            )}
-            {showIssueBadge && (
-              <span class="account-sync-issue-badge" aria-label={`${issueCount} sync issue${issueCount === 1 ? "" : "s"}`}>
-                {issueCount > 9 ? "9+" : issueCount}
-              </span>
-            )}
-          </button>
+          <div class="account-sync-control-box">
+            <span class="pill icon-pill account-kind-pill">{accountIcon} {accountKindLabel}</span>
+            <div class="account-sync-action-wrap">
+              <button
+                class={syncButtonClass}
+                type="button"
+                aria-label={syncButtonTitle}
+                title={syncButtonTitle}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (showBlockingMarker) {
+                    onOpenDetails(account.id);
+                    return;
+                  }
+                  void onSetAgentState(account.id, nextSyncState);
+                }}
+              >
+                {showBlockingMarker ? (
+                  <IconAlertTriangleFilled size={24} class="sync-stopped-icon" />
+                ) : syncState === "syncing" ? (
+                  <IconPlayerPauseFilled size={24} />
+                ) : (
+                  <IconPlayerPlayFilled size={24} />
+                )}
+              </button>
+              {showIssueBadge && (
+                <span
+                  class="account-sync-issue-badge"
+                  aria-label={`${nonBlockingIssueCount} sync issue${nonBlockingIssueCount === 1 ? "" : "s"}`}
+                >
+                  {nonBlockingIssueCount > 9 ? "9+" : nonBlockingIssueCount}
+                </span>
+              )}
+            </div>
+            <span class="account-sync-state-label">{syncStateLabel}</span>
+          </div>
         </div>
       </div>
     </AccountHomeCardButton>

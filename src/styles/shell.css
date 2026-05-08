@@ -118,3 +118,7 @@
   overflow-x: hidden;
   padding: 14px;
 }
+
+body.app-modal-open .workspace {
+  overflow: hidden;
+}

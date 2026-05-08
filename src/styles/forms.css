@@ -306,7 +306,7 @@ input::placeholder {
 }
 
 .modal-overlay {
-  position: fixed;
+  position: absolute;
   inset: 0;
   background: rgba(15, 18, 24, 0.28);
   display: flex;
@@ -314,6 +314,7 @@ input::placeholder {
   justify-content: center;
   z-index: 60;
   padding: 16px;
+  overflow-y: auto;
 }
 
 .modal-shell {

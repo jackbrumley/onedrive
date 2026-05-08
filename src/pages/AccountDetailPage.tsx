@@ -1,16 +1,24 @@
 import {
   IconAdjustments,
+  IconAlertTriangleFilled,
   IconBuildingBank,
   IconChevronLeft,
   IconPlayerPauseFilled,
   IconPlayerPlayFilled,
-  IconRefresh,
   IconUser,
 } from "@tabler/icons-preact";
-import { useState } from "preact/hooks";
 import { memo } from "preact/compat";
 import { AccountDetailUnifiedPanel } from "../components/accounts/AccountDetailUnifiedPanel";
 import type { AccountProfile, SyncRuntimeAccountStatus } from "../types/somedrive";
+
+const BLOCKING_ISSUE_CODES = new Set([
+  "auth_required",
+  "permission_denied",
+  "disk_full",
+  "sync_root_unavailable",
+  "large_delete_guard",
+  "unknown_error",
+]);
 
 interface AccountDetailPageProps {
   account: AccountProfile | null;
@@ -37,6 +45,7 @@ interface AccountDetailPageProps {
 
 interface AccountDetailHeaderProps {
   account: AccountProfile;
+  runtimeStatus: SyncRuntimeAccountStatus | null;
   view: "sync" | "settings";
   onBack: () => void;
   onOpenSettings: (accountId: string) => void;
@@ -46,15 +55,26 @@ interface AccountDetailHeaderProps {
 
 const AccountDetailHeader = memo(function AccountDetailHeader({
   account,
+  runtimeStatus,
   view,
   onBack,
   onOpenSettings,
   onOpenSync,
   onSetAgentState,
 }: AccountDetailHeaderProps) {
-  const [syncButtonHovered, setSyncButtonHovered] = useState(false);
+  const runtimeIssueCode = runtimeStatus?.issueCode;
+  const runtimeIssueIsBlocking = runtimeIssueCode ? BLOCKING_ISSUE_CODES.has(runtimeIssueCode) : false;
+  const hasBlockingIssue =
+    !account.authConfigured || runtimeIssueIsBlocking || account.agentState === "error" || runtimeStatus?.phase === "error";
   const syncActive = account.agentState === "syncing";
-  const nextSyncState: "syncing" | "paused" = syncActive ? "paused" : "syncing";
+  const syncState = hasBlockingIssue ? "stopped" : syncActive ? "syncing" : "paused";
+  const nextSyncState: "syncing" | "paused" = syncState === "syncing" ? "paused" : "syncing";
+  const syncStateLabel = syncState === "stopped" ? "Stopped" : syncState === "syncing" ? "Syncing" : "Paused";
+  const syncButtonTitle = syncState === "stopped"
+    ? "Open synchronization details"
+    : syncState === "syncing"
+      ? "Pause synchronization"
+      : "Resume synchronization";
   const accountKindLabel = account.kind.charAt(0).toUpperCase() + account.kind.slice(1);
   const accountKindIcon = account.kind === "business" ? <IconBuildingBank size={15} /> : <IconUser size={15} />;
   const isSyncView = view === "sync";
@@ -97,25 +117,29 @@ const AccountDetailHeader = memo(function AccountDetailHeader({
             >
               <IconAdjustments size={16} stroke={2.2} />
             </button>
-            <button
-              class="account-sync-nav-btn"
-              type="button"
-              aria-label={syncActive ? (syncButtonHovered ? "Pause synchronization" : "Synchronizing") : (syncButtonHovered ? "Resume synchronization" : "Synchronization paused")}
-              title={syncActive ? (syncButtonHovered ? "Pause synchronization" : "Synchronizing") : (syncButtonHovered ? "Resume synchronization" : "Synchronization paused")}
-              onClick={() => {
-                void onSetAgentState(account.id, nextSyncState);
-              }}
-              onMouseEnter={() => setSyncButtonHovered(true)}
-              onMouseLeave={() => setSyncButtonHovered(false)}
-            >
-              {syncActive ? (
-                syncButtonHovered ? <IconPlayerPauseFilled size={24} /> : <IconRefresh class="sync-icon-spinning" size={24} />
-              ) : syncButtonHovered ? (
-                <IconPlayerPlayFilled size={24} />
-              ) : (
-                <IconPlayerPauseFilled size={24} />
-              )}
-            </button>
+            <div class="account-sync-nav-control">
+              <button
+                class={syncState === "stopped" ? "account-sync-nav-btn account-sync-nav-btn-stopped" : "account-sync-nav-btn"}
+                type="button"
+                aria-label={syncButtonTitle}
+                title={syncButtonTitle}
+                onClick={() => {
+                  if (syncState === "stopped") {
+                    return;
+                  }
+                  void onSetAgentState(account.id, nextSyncState);
+                }}
+              >
+                {syncState === "stopped" ? (
+                  <IconAlertTriangleFilled size={24} class="sync-stopped-icon" />
+                ) : syncState === "syncing" ? (
+                  <IconPlayerPauseFilled size={24} />
+                ) : (
+                  <IconPlayerPlayFilled size={24} />
+                )}
+              </button>
+              <span class="account-sync-state-label">{syncStateLabel}</span>
+            </div>
           </div>
         )}
       </div>
@@ -165,6 +189,7 @@ export function AccountDetailPage({
     <section class="page account-detail-page">
       <AccountDetailHeader
         account={account}
+        runtimeStatus={runtimeStatus}
         view={view}
         onBack={onBack}
         onOpenSettings={onOpenSettings}

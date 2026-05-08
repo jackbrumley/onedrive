@@ -57,14 +57,14 @@ export function AccountsHomePage({
         <div class="accounts-page-footer-links">
           <button
             type="button"
-            class="accounts-page-footer-icon-btn"
+            class="accounts-page-footer-icon-btn accounts-page-footer-github-btn"
             title="Open SomeDrive GitHub"
             aria-label="Open SomeDrive GitHub"
             onClick={() => {
               void openUrl("https://github.com/jackbrumley/somedrive");
             }}
           >
-            <IconBrandGithub size={18} />
+            <IconBrandGithub size={36} />
           </button>
           <button
             type="button"
@@ -75,7 +75,7 @@ export function AccountsHomePage({
               void openUrl("https://github.com/jackbrumley/somedrive");
             }}
           >
-            <IconHeart size={18} />
+            <IconHeart size={36} />
           </button>
         </div>
         <div class="accounts-page-footer-version">v{appVersion}</div>

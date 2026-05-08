@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { ToastMessage, ToastType } from "../types/somedrive";
 
@@ -29,6 +30,15 @@ export function useToastManager() {
     }, durationMs);
   };
 
+  const logToastShown = (message: string, type: ToastType, durationMs: number) => {
+    const normalizedMessage = message.replace(/\s+/g, " ").replace(/"/g, "\\\"").trim();
+    void invoke("log_ui_event", {
+      message: `toast type=${type} duration_ms=${durationMs} message="${normalizedMessage}"`,
+    }).catch(() => {
+      // no-op
+    });
+  };
+
   const showToast = (message: string, type: ToastType = "info", durationMs = 2800) => {
     setToast({
       id: Date.now(),
@@ -36,6 +46,7 @@ export function useToastManager() {
       type,
       durationMs,
     });
+    logToastShown(message, type, durationMs);
     scheduleDismiss(durationMs);
   };
 
