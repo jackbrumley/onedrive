@@ -333,7 +333,7 @@ export function AccountSyncActivityPanel({
           <section class="account-sync-preview-stats-group">
             <p class="account-sync-preview-stats-section">Downloads</p>
             <div class="account-sync-preview-metrics-grid">
-              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Download files remaining (count)</span><span class="account-sync-preview-metric-value">{remoteDownloadRemainingCount}{!remoteScanComplete ? "+" : ""}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Downloads remaining (count)</span><span class="account-sync-preview-metric-value">{remoteDownloadRemainingCount}{!remoteScanComplete ? "+" : ""}</span></div>
               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Downloads remaining (size)</span><span class="account-sync-preview-metric-value">{formatBytes(remoteDownloadRemainingBytesTotal)}{!remoteScanComplete ? "+" : ""}</span></div>
               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Download speed</span><span class="account-sync-preview-metric-value">{formatTransferRate(downloadBytesPerSecond)}</span></div>
               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Downloaded files (count)</span><span class="account-sync-preview-metric-value">{remoteDownloadedCount}</span></div>
@@ -348,7 +348,7 @@ export function AccountSyncActivityPanel({
           <section class="account-sync-preview-stats-group">
             <p class="account-sync-preview-stats-section">Uploads</p>
             <div class="account-sync-preview-metrics-grid">
-              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Upload files remaining (count)</span><span class="account-sync-preview-metric-value">{uploadRemainingCount}</span></div>
+              <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Uploads remaining (count)</span><span class="account-sync-preview-metric-value">{uploadRemainingCount}</span></div>
               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Uploads remaining (size)</span><span class="account-sync-preview-metric-value">{formatBytes(uploadRemainingBytesTotal)}</span></div>
               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Upload speed</span><span class="account-sync-preview-metric-value">{formatTransferRate(uploadBytesPerSecond)}</span></div>
               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Uploaded files (count)</span><span class="account-sync-preview-metric-value">{uploadedCount}</span></div>
