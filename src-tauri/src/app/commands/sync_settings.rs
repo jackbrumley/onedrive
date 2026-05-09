@@ -1,4 +1,4 @@
-use crate::app::sync_settings::{load_sync_download_concurrency, save_sync_download_concurrency};
+use crate::app::app_settings::{load_sync_download_concurrency, save_sync_download_concurrency};
 
 #[tauri::command]
 pub fn get_sync_download_concurrency() -> Result<usize, String> {

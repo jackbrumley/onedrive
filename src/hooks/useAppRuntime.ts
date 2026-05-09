@@ -56,7 +56,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
   const [isDocumentVisible, setIsDocumentVisible] = useState(document.visibilityState === "visible");
   const [autostartEnabled, setAutostartEnabled] = useState(false);
   const [rawLoggerMode, setRawLoggerMode] = useState(false);
-  const [syncDownloadConcurrency, setSyncDownloadConcurrency] = useState(8);
+  const [syncDownloadConcurrency, setSyncDownloadConcurrency] = useState(12);
 
   const navigation = useMemo(() => createNavigationActions({ setRouteState }), [setRouteState]);
   const refreshActions = useMemo(

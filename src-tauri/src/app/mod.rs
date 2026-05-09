@@ -1,5 +1,6 @@
 pub mod account_profiles;
 pub mod activity_log;
+pub mod app_settings;
 pub mod auth;
 pub mod bootstrap;
 pub mod commands;
@@ -8,4 +9,3 @@ pub mod session_log;
 pub mod state;
 pub mod sync_engine;
 pub mod sync_runtime;
-pub mod sync_settings;

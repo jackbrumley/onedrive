@@ -16,7 +16,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 const GRAPH_ROOT: &str = "https://graph.microsoft.com/v1.0";
-const DEFAULT_DOWNLOAD_CONCURRENCY: usize = 8;
+const DEFAULT_DOWNLOAD_CONCURRENCY: usize = 12;
 const MAX_DOWNLOAD_RETRIES: u32 = 5;
 const MAX_RETRY_DELAY_SECONDS: u64 = 30;
 const DEFAULT_REQUEST_TIMEOUT_SECONDS: u64 = 60;

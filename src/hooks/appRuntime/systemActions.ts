@@ -117,7 +117,7 @@ export function createSystemActions({ showToast }: SystemActionsFactoryParams) {
       return await invoke<number>("get_sync_download_concurrency");
     } catch (error) {
       showToast(`Failed to read download concurrency setting: ${error}`, "error", 4200);
-      return 8;
+      return 12;
     }
   };
 

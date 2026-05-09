@@ -1,7 +1,7 @@
+use crate::app::app_settings;
 use crate::app::log_context;
 use chrono::Local;
 use log::{Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
-use serde::{Deserialize, Serialize};
 use std::env::consts::{ARCH, OS};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -18,19 +18,12 @@ const RAW_LOG_RETENTION_COUNT: usize = 10;
 
 static APP_LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
 static PROFILE_LOG_DIR: OnceLock<PathBuf> = OnceLock::new();
-static LOGGER_SETTINGS_PATH: OnceLock<PathBuf> = OnceLock::new();
 static RAW_LOG_MODE: AtomicBool = AtomicBool::new(false);
 static RAW_LOG_SESSION_PATH: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
 
 struct SessionLogger;
 
 static LOGGER: SessionLogger = SessionLogger;
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LoggerSettings {
-    raw_logger_mode: bool,
-}
 
 impl Log for SessionLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
@@ -61,17 +54,13 @@ pub fn initialize_session_logging() -> Result<(), String> {
     let debug_dir = get_debug_dir()?;
     let app_log_path = debug_dir.join("app.log");
     let profile_log_dir = debug_dir.join("profiles");
-    let settings_path = debug_dir.join("logger_settings.json");
     fs::create_dir_all(&profile_log_dir).map_err(|error| error.to_string())?;
 
     let _ = APP_LOG_PATH.set(app_log_path);
     let _ = PROFILE_LOG_DIR.set(profile_log_dir);
-    let _ = LOGGER_SETTINGS_PATH.set(settings_path.clone());
     let _ = RAW_LOG_SESSION_PATH.set(Mutex::new(None));
 
-    let raw_mode_enabled = load_logger_settings_from(&settings_path)
-        .map(|settings| settings.raw_logger_mode)
-        .unwrap_or(false);
+    let raw_mode_enabled = app_settings::load_raw_logger_mode().unwrap_or(false);
     RAW_LOG_MODE.store(raw_mode_enabled, Ordering::Relaxed);
     if raw_mode_enabled {
         let _ = ensure_raw_session_path();
@@ -110,7 +99,7 @@ pub fn get_raw_logger_mode() -> Result<bool, String> {
 #[tauri::command]
 pub fn set_raw_logger_mode(enabled: bool) -> Result<(), String> {
     RAW_LOG_MODE.store(enabled, Ordering::Relaxed);
-    save_logger_settings(enabled)?;
+    app_settings::save_raw_logger_mode(enabled)?;
 
     if enabled {
         let _ = ensure_raw_session_path()?;
@@ -384,31 +373,6 @@ fn get_debug_dir() -> Result<PathBuf, String> {
         .join("debug");
     fs::create_dir_all(&debug_dir).map_err(|error| error.to_string())?;
     Ok(debug_dir)
-}
-
-fn save_logger_settings(raw_logger_mode: bool) -> Result<(), String> {
-    let settings_path = LOGGER_SETTINGS_PATH
-        .get()
-        .cloned()
-        .or_else(|| {
-            get_debug_dir()
-                .ok()
-                .map(|path| path.join("logger_settings.json"))
-        })
-        .ok_or_else(|| "Logger settings path unavailable".to_string())?;
-    let settings = LoggerSettings { raw_logger_mode };
-    let text = serde_json::to_string_pretty(&settings).map_err(|error| error.to_string())?;
-    fs::write(settings_path, text).map_err(|error| error.to_string())
-}
-
-fn load_logger_settings_from(path: &PathBuf) -> Result<LoggerSettings, String> {
-    if !path.exists() {
-        return Ok(LoggerSettings {
-            raw_logger_mode: false,
-        });
-    }
-    let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    serde_json::from_str::<LoggerSettings>(&text).map_err(|error| error.to_string())
 }
 
 fn set_logger(logger: &'static dyn Log) -> Result<(), SetLoggerError> {

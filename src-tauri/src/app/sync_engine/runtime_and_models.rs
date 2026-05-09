@@ -84,8 +84,8 @@ fn resolve_download_concurrency() -> usize {
     std::env::var("SOMEDRIVE_SYNC_DOWNLOAD_CONCURRENCY")
         .ok()
         .and_then(|value| value.trim().parse::<usize>().ok())
-        .map(|value| crate::app::sync_settings::clamp_download_concurrency(value))
-        .or_else(|| crate::app::sync_settings::load_sync_download_concurrency().ok())
+        .map(|value| crate::app::app_settings::clamp_download_concurrency(value))
+        .or_else(|| crate::app::app_settings::load_sync_download_concurrency().ok())
         .unwrap_or(DEFAULT_DOWNLOAD_CONCURRENCY)
 }
 
