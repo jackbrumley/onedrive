@@ -221,13 +221,8 @@ export function AccountSyncActivityPanel({
     uploadCooldownHint !== null ||
     recentRetryWaiting.length > 0;
   const hasErrorItems = hasIssueSummary || issueKind !== null || recentFailed.length > 0;
-  const hasBlockingIssue = hasIssueSummary || issueKind !== null;
-  const hasIssueSection = hasRetryWarnings || hasErrorItems || issueActions.length > 0;
-  const issuesClassName = hasBlockingIssue
-    ? "account-sync-preview-issues"
-    : hasRetryWarnings
-      ? "account-sync-preview-issues account-sync-preview-issues-warning"
-      : "account-sync-preview-issues";
+  const hasWarningSection = hasRetryWarnings;
+  const hasErrorSection = hasErrorItems || issueActions.length > 0;
 
   const items = [
     ...visibleInProgress.map((transfer) => ({
@@ -361,18 +356,12 @@ export function AccountSyncActivityPanel({
           </section>
         </div>
       )}
-      {hasIssueSection && (
-        <section class={issuesClassName}>
-          {hasRetryWarnings && (
-            <>
-              <p class="account-sync-preview-section-label">Warnings</p>
-              <p class="account-sync-preview-issue-warning-note">
-                Retrying transfers are queued and will resume automatically.
-              </p>
-            </>
-          )}
-          {hasErrorItems && <p class="account-sync-preview-section-label">Errors</p>}
-          {hasIssueSummary && <p class="account-sync-preview-issue-summary">{issueMessage}</p>}
+      {hasWarningSection && (
+        <section class="account-sync-preview-issues account-sync-preview-issues-warning">
+          <p class="account-sync-preview-section-label">Warnings</p>
+          <p class="account-sync-preview-issue-warning-note">
+            Retrying transfers are queued and will resume automatically.
+          </p>
           {uploadCooldownHint && (
             <p class="account-sync-preview-issue-cooldown">
               Retry queued in {uploadCooldownHint.retryIn}:{" "}
@@ -388,8 +377,48 @@ export function AccountSyncActivityPanel({
               </button>
             </p>
           )}
-          <div class="account-sync-preview-actions">
-            {issueActions.includes("reauthenticate") && issueKind === "auth_required" && (
+          {recentRetryWaiting.length > 0 && (
+            <div class="account-sync-preview-list">
+              {recentRetryWaiting.map((item) => (
+                <article key={item.id} class="account-sync-preview-item">
+                  <button
+                    type="button"
+                    class="account-sync-preview-item-button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void onOpenItemFolder(item.path);
+                    }}
+                  >
+                    <div class="account-sync-preview-row">
+                      <span class="account-sync-preview-file-icon">{iconForFilePath(item.path)}</span>
+                      <div class="account-sync-preview-content">
+                        <p class="account-sync-preview-path">{item.path}</p>
+                        <p class="account-sync-preview-meta">
+                          <span>{item.error ?? "Retry queued"}</span>
+                          <span>retry after {new Date(item.finishedAt).toLocaleTimeString()}</span>
+                        </p>
+                      </div>
+                      <span class="account-sync-preview-right-icons">
+                        <span class="account-sync-preview-direction-icon">{iconForDirection(item.direction)}</span>
+                        <span class="account-sync-preview-status-icon">
+                          <IconRefresh size={ACTIVITY_ICON_SIZE} class="sync-preview-icon-active" />
+                        </span>
+                      </span>
+                    </div>
+                  </button>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+      {hasErrorSection && (
+        <section class="account-sync-preview-issues">
+          {hasErrorItems && <p class="account-sync-preview-section-label">Errors</p>}
+          {hasIssueSummary && <p class="account-sync-preview-issue-summary">{issueMessage}</p>}
+          {issueActions.length > 0 && (
+            <div class="account-sync-preview-actions">
+              {issueActions.includes("reauthenticate") && issueKind === "auth_required" && (
               <button
                 type="button"
                 class="account-sync-preview-action-btn"
@@ -400,8 +429,8 @@ export function AccountSyncActivityPanel({
               >
                 Re-authenticate
               </button>
-            )}
-            {issueActions.includes("open_sync_root") && (
+              )}
+              {issueActions.includes("open_sync_root") && (
               <button
                 type="button"
                 class="account-sync-preview-action-btn"
@@ -412,8 +441,8 @@ export function AccountSyncActivityPanel({
               >
                 Open Sync Folder
               </button>
-            )}
-            {hasConflictAction && (
+              )}
+              {hasConflictAction && (
               <button
                 type="button"
                 class="account-sync-preview-action-btn account-sync-preview-action-btn-conflict"
@@ -424,8 +453,8 @@ export function AccountSyncActivityPanel({
               >
                 Open Conflict
               </button>
-            )}
-            {issueActions.includes("retry_sync") && (
+              )}
+              {issueActions.includes("retry_sync") && (
               <button
                 type="button"
                 class="account-sync-preview-action-btn"
@@ -436,8 +465,8 @@ export function AccountSyncActivityPanel({
               >
                 Retry Sync
               </button>
-            )}
-            {issueActions.includes("confirm_large_delete") && (
+              )}
+              {issueActions.includes("confirm_large_delete") && (
               <button
                 type="button"
                 class="account-sync-preview-action-btn account-sync-preview-action-btn-warning"
@@ -448,8 +477,8 @@ export function AccountSyncActivityPanel({
               >
                 Delete from Cloud
               </button>
-            )}
-            {issueActions.includes("keep_cloud_files") && (
+              )}
+              {issueActions.includes("keep_cloud_files") && (
               <button
                 type="button"
                 class="account-sync-preview-action-btn"
@@ -460,8 +489,9 @@ export function AccountSyncActivityPanel({
               >
                 Keep Cloud Files
               </button>
-            )}
-          </div>
+              )}
+            </div>
+          )}
           {largeDeletePreviewPaths.length > 0 && (
             <div class="account-sync-preview-delete-review">
               <p class="account-sync-preview-delete-review-title">
@@ -508,39 +538,6 @@ export function AccountSyncActivityPanel({
                   Showing first 40 paths.
                 </p>
               )}
-            </div>
-          )}
-          {recentRetryWaiting.length > 0 && (
-            <div class="account-sync-preview-list">
-              {recentRetryWaiting.map((item) => (
-                <article key={item.id} class="account-sync-preview-item">
-                  <button
-                    type="button"
-                    class="account-sync-preview-item-button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void onOpenItemFolder(item.path);
-                    }}
-                  >
-                    <div class="account-sync-preview-row">
-                      <span class="account-sync-preview-file-icon">{iconForFilePath(item.path)}</span>
-                      <div class="account-sync-preview-content">
-                        <p class="account-sync-preview-path">{item.path}</p>
-                        <p class="account-sync-preview-meta">
-                          <span>{item.error ?? "Retry queued"}</span>
-                          <span>retry after {new Date(item.finishedAt).toLocaleTimeString()}</span>
-                        </p>
-                      </div>
-                      <span class="account-sync-preview-right-icons">
-                        <span class="account-sync-preview-direction-icon">{iconForDirection(item.direction)}</span>
-                        <span class="account-sync-preview-status-icon">
-                          <IconRefresh size={ACTIVITY_ICON_SIZE} class="sync-preview-icon-active" />
-                        </span>
-                      </span>
-                    </div>
-                  </button>
-                </article>
-              ))}
             </div>
           )}
           {recentFailed.length > 0 && (
