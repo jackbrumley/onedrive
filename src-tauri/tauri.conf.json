@@ -34,6 +34,7 @@
             "core:window:allow-unmaximize",
             "core:window:allow-is-maximized",
             "core:window:allow-close",
+            "core:window:allow-start-resize-dragging",
             "opener:default",
             "autostart:allow-enable",
             "autostart:allow-disable",

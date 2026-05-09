@@ -33,6 +33,7 @@ export function AppShell({
     close,
     handleTitleBarMouseDown,
     handleTitleBarDoubleClick,
+    handleResizeMouseDown,
   } = useWindowControls();
 
   const isSettingsArea = page === "settings" || page === "debug" || page === "uiLab";
@@ -40,6 +41,13 @@ export function AppShell({
 
   return (
     <div class="app-shell">
+      <div class="resize-overlay" data-no-drag="true">
+        <div class="resize-corner resize-corner-nw" data-no-drag="true" onMouseDown={(event) => void handleResizeMouseDown("NorthWest")(event)} />
+        <div class="resize-corner resize-corner-ne" data-no-drag="true" onMouseDown={(event) => void handleResizeMouseDown("NorthEast")(event)} />
+        <div class="resize-corner resize-corner-sw" data-no-drag="true" onMouseDown={(event) => void handleResizeMouseDown("SouthWest")(event)} />
+        <div class="resize-corner resize-corner-se" data-no-drag="true" onMouseDown={(event) => void handleResizeMouseDown("SouthEast")(event)} />
+      </div>
+
       <header class="title-bar" onMouseDown={handleTitleBarMouseDown} onDblClick={handleTitleBarDoubleClick}>
         <div class="title-block">
           <h1>SomeDrive</h1>

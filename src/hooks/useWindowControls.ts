@@ -1,6 +1,8 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "preact/hooks";
 
+type ResizeDirection = "East" | "North" | "NorthEast" | "NorthWest" | "South" | "SouthEast" | "SouthWest" | "West";
+
 export function useWindowControls() {
   const [isMaximized, setIsMaximized] = useState(false);
 
@@ -63,7 +65,7 @@ export function useWindowControls() {
       return;
     }
 
-    if (event.button === 0 && !(event.target as HTMLElement).closest("button, input, select, a")) {
+    if (event.button === 0 && !(event.target as HTMLElement).closest("button, input, select, a, [data-no-drag='true']")) {
       try {
         await getCurrentWindow().startDragging();
       } catch (error) {
@@ -73,9 +75,28 @@ export function useWindowControls() {
   };
 
   const handleTitleBarDoubleClick = async (event: MouseEvent) => {
-    if (!(event.target as HTMLElement).closest("button, input, select, a")) {
+    if (!(event.target as HTMLElement).closest("button, input, select, a, [data-no-drag='true']")) {
       event.preventDefault();
       await toggleMaximize();
+    }
+  };
+
+  const handleResizeMouseDown = (direction: ResizeDirection) => async (event: MouseEvent) => {
+    if (event.buttons !== 1) {
+      return;
+    }
+
+    if (isMaximized) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    try {
+      await getCurrentWindow().startResizeDragging(direction);
+    } catch {
+      // no-op when resize dragging is unavailable
     }
   };
 
@@ -86,5 +107,6 @@ export function useWindowControls() {
     close,
     handleTitleBarMouseDown,
     handleTitleBarDoubleClick,
+    handleResizeMouseDown,
   };
 }
