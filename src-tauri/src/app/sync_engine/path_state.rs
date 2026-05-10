@@ -206,20 +206,6 @@ fn save_sync_state(profile_id: &str, state: &PersistedSyncState) -> Result<(), S
         .map_err(|error| format!("Failed encoding sync state JSON: {error}"))?;
     write_sync_state_store(profile_id, &text)?;
 
-    let path = sync_state_path(profile_id)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| {
-            format!(
-                "Failed creating sync state directory '{}': {}",
-                parent.display(),
-                error
-            )
-        })?;
-    }
-
-    std::fs::write(&path, text)
-        .map_err(|error| format!("Failed writing sync state '{}': {}", path.display(), error))?;
-
     persist_sync_lifecycle_from_state(profile_id, state)?;
     Ok(())
 }
