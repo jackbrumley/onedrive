@@ -73,10 +73,7 @@ pub fn on_agent_state_changed(
                 );
             }
         }
-        if let Ok(mut runtime_map) = state.sync_runtime.lock() {
-            sync_runtime::clear_in_progress(&mut runtime_map, profile_id);
-            sync_runtime::set_remote_transfer_progress(&mut runtime_map, profile_id, 0, 0, 0);
-        }
+        runtime_reset_transfer_activity(&state.sync_runtime, profile_id);
         let (phase, message) = if agent_state == "paused" {
             ("paused", "Synchronization paused")
         } else {

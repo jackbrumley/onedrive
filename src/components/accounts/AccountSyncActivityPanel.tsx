@@ -77,20 +77,6 @@ function shouldShowTransferBytes(bytesDone: number, bytesTotal: number | null): 
   return bytesTotal !== null || bytesDone > 0;
 }
 
-function extractUploadCooldownHint(phaseMessage: string | null): { path: string; retryIn: string } | null {
-  if (!phaseMessage) {
-    return null;
-  }
-  const match = phaseMessage.match(/^Upload retry delayed for '(.+)' \(retry in (.+)\)$/);
-  if (!match) {
-    return null;
-  }
-  return {
-    path: match[1],
-    retryIn: match[2],
-  };
-}
-
 interface CurrentActivityState {
   title: string;
   detail: string;
@@ -367,12 +353,10 @@ export function AccountSyncActivityPanel({
   const isLocalScanActive = runtimeStatus?.phase === "scanning_local";
   const localScanScannedCount = runtimeStatus?.localScanScannedCount ?? 0;
   const localScanCurrentPath = runtimeStatus?.localScanCurrentPath ?? null;
-  const uploadCooldownHint = extractUploadCooldownHint(runtimeStatus?.phaseMessage ?? null);
   const hasIssueSummary = Boolean(issueMessage);
   const hasRetryWarnings =
     remoteDownloadRetryWaiting > 0 ||
     uploadRetryWaitingCount > 0 ||
-    uploadCooldownHint !== null ||
     recentRetryWaiting.length > 0;
   const hasErrorItems = hasIssueSummary || issueKind !== null || recentFailed.length > 0;
   const hasWarningSection = hasRetryWarnings;
@@ -563,21 +547,6 @@ export function AccountSyncActivityPanel({
           <p class="account-sync-preview-issue-warning-note">
             Retrying transfers are queued and will resume automatically.
           </p>
-          {uploadCooldownHint && (
-            <p class="account-sync-preview-issue-cooldown">
-              Retry queued in {uploadCooldownHint.retryIn}:{" "}
-              <button
-                type="button"
-                class="account-sync-preview-issue-cooldown-path"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void onOpenItemFolder(uploadCooldownHint.path);
-                }}
-              >
-                {uploadCooldownHint.path}
-              </button>
-            </p>
-          )}
           {recentRetryWaiting.length > 0 && (
             <div class="account-sync-preview-list">
               {recentRetryWaiting.map((item) => (

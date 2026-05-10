@@ -22,9 +22,7 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
         let profile_id_owned = profile_id.to_string();
         let profiles_lock = Arc::clone(&state.profiles_lock);
         let sync_runtime = Arc::clone(&state.sync_runtime);
-        if let Ok(mut runtime_map) = sync_runtime.lock() {
-            sync_runtime::set_remote_transfer_progress(&mut runtime_map, &profile_id_owned, 0, 0, 0);
-        }
+        runtime_reset_transfer_activity(&sync_runtime, &profile_id_owned);
         runtime_set_phase(
             &sync_runtime,
             &profile_id_owned,
@@ -41,10 +39,7 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                     delay.as_millis()
                 );
                 if sleep_with_cancellation(&cancel_flag, delay).await.is_err() {
-                    if let Ok(mut runtime_map) = sync_runtime.lock() {
-                        sync_runtime::clear_in_progress(&mut runtime_map, &profile_id_owned);
-                        sync_runtime::set_remote_transfer_progress(&mut runtime_map, &profile_id_owned, 0, 0, 0);
-                    }
+                    runtime_reset_transfer_activity(&sync_runtime, &profile_id_owned);
                     runtime_set_phase(
                         &sync_runtime,
                         &profile_id_owned,
@@ -65,10 +60,7 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                                 error
                             );
                         }
-                        if let Ok(mut runtime_map) = sync_runtime.lock() {
-                            sync_runtime::clear_in_progress(&mut runtime_map, &profile_id_owned);
-                            sync_runtime::set_remote_transfer_progress(&mut runtime_map, &profile_id_owned, 0, 0, 0);
-                        }
+                        runtime_reset_transfer_activity(&sync_runtime, &profile_id_owned);
                         runtime_set_phase(
                             &sync_runtime,
                             &profile_id_owned,
@@ -137,10 +129,7 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                                             error
                                         );
                                     }
-                                    if let Ok(mut runtime_map) = sync_runtime.lock() {
-                                        sync_runtime::clear_in_progress(&mut runtime_map, &profile_id_owned);
-                                        sync_runtime::set_remote_transfer_progress(&mut runtime_map, &profile_id_owned, 0, 0, 0);
-                                    }
+                                    runtime_reset_transfer_activity(&sync_runtime, &profile_id_owned);
                                     continue;
                                 }
                                 let (issue_code, issue_actions) = classify_sync_issue(&error);
@@ -149,10 +138,7 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                                     log_context::account_prefix(&profile_id_owned),
                                     error
                                 );
-                                if let Ok(mut runtime_map) = sync_runtime.lock() {
-                                    sync_runtime::clear_in_progress(&mut runtime_map, &profile_id_owned);
-                                    sync_runtime::set_remote_transfer_progress(&mut runtime_map, &profile_id_owned, 0, 0, 0);
-                                }
+                                runtime_reset_transfer_activity(&sync_runtime, &profile_id_owned);
                                 runtime_set_phase(
                                     &sync_runtime,
                                     &profile_id_owned,
