@@ -174,25 +174,38 @@ fn sync_state_path(profile_id: &str) -> Result<PathBuf, String> {
 }
 
 fn load_sync_state(profile_id: &str) -> Result<PersistedSyncState, String> {
+    if let Some(state_json) = read_sync_state_store(profile_id)? {
+        let mut state = serde_json::from_str::<PersistedSyncState>(&state_json)
+            .map_err(|error| format!("Failed decoding persisted sync state: {error}"))?;
+        let _ = hydrate_sync_state_from_lifecycle(profile_id, &mut state)?;
+        return Ok(state);
+    }
+
     let path = sync_state_path(profile_id)?;
-    let mut state = if !path.exists() {
-        PersistedSyncState::default()
-    } else {
+    let mut state = if path.exists() {
         let text = std::fs::read_to_string(&path)
             .map_err(|error| format!("Failed reading sync state '{}': {}", path.display(), error))?;
         serde_json::from_str::<PersistedSyncState>(&text)
             .map_err(|error| format!("Failed decoding sync state JSON: {error}"))?
+    } else {
+        PersistedSyncState::default()
     };
 
-    let lifecycle_loaded = hydrate_sync_state_from_lifecycle(profile_id, &mut state)?;
-    if !lifecycle_loaded {
-        persist_sync_lifecycle_from_state(profile_id, &state)?;
-    }
+    let _ = hydrate_sync_state_from_lifecycle(profile_id, &mut state)?;
+    persist_sync_lifecycle_from_state(profile_id, &state)?;
+
+    let state_json = serde_json::to_string_pretty(&state)
+        .map_err(|error| format!("Failed encoding sync state JSON: {error}"))?;
+    write_sync_state_store(profile_id, &state_json)?;
 
     Ok(state)
 }
 
 fn save_sync_state(profile_id: &str, state: &PersistedSyncState) -> Result<(), String> {
+    let text = serde_json::to_string_pretty(state)
+        .map_err(|error| format!("Failed encoding sync state JSON: {error}"))?;
+    write_sync_state_store(profile_id, &text)?;
+
     let path = sync_state_path(profile_id)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| {
@@ -203,8 +216,7 @@ fn save_sync_state(profile_id: &str, state: &PersistedSyncState) -> Result<(), S
             )
         })?;
     }
-    let text = serde_json::to_string_pretty(state)
-        .map_err(|error| format!("Failed encoding sync state JSON: {error}"))?;
+
     std::fs::write(&path, text)
         .map_err(|error| format!("Failed writing sync state '{}': {}", path.display(), error))?;
 
