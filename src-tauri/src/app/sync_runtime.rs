@@ -2,10 +2,27 @@ use chrono::Local;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
+use tauri::{AppHandle, Emitter};
 
 const RECENT_COMPLETED_LIMIT: usize = 120;
 const RECENT_FAILED_LIMIT: usize = 120;
 static SYNC_RUNTIME_REVISION: AtomicU64 = AtomicU64::new(0);
+static SYNC_STATUS_EVENT_SEQUENCE: LazyLock<Mutex<HashMap<String, u64>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static SYNC_STATUS_APP_HANDLE: LazyLock<Mutex<Option<AppHandle>>> =
+    LazyLock::new(|| Mutex::new(None));
+const SYNC_STATUS_EVENT_NAME: &str = "sync-status";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncStatusEvent {
+    pub profile_id: String,
+    pub status_seq: u64,
+    pub generated_at: String,
+    pub kind: String,
+    pub status: Option<SyncRuntimeAccountStatus>,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -175,6 +192,20 @@ pub struct SyncRuntimeSnapshot {
 
 pub type SyncRuntimeMap = HashMap<String, SyncRuntimeAccountStatus>;
 
+pub fn initialize_status_event_stream(app_handle: AppHandle) {
+    if let Ok(mut handle) = SYNC_STATUS_APP_HANDLE.lock() {
+        *handle = Some(app_handle);
+    }
+}
+
+pub fn emit_full_sync_status_snapshot(runtime_map: &SyncRuntimeMap) {
+    let mut accounts: Vec<SyncRuntimeAccountStatus> = runtime_map.values().cloned().collect();
+    accounts.sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
+    for account in accounts {
+        emit_upsert_status_event(&account.profile_id, &account);
+    }
+}
+
 pub fn snapshot(runtime_map: &SyncRuntimeMap) -> SyncRuntimeSnapshot {
     let mut accounts: Vec<SyncRuntimeAccountStatus> = runtime_map.values().cloned().collect();
     accounts.sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
@@ -210,6 +241,7 @@ pub fn set_phase(
     }
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
+    emit_status_event_for_account(runtime_map, profile_id);
 }
 
 pub fn set_local_scan_progress(
@@ -235,6 +267,7 @@ pub fn set_local_scan_progress(
     status.current_activity.detail = status.local_scan_current_path.clone();
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
+    emit_status_event_for_account(runtime_map, profile_id);
 }
 
 pub fn set_issue(
@@ -257,6 +290,7 @@ pub fn set_issue(
     status.issue_secondary_path = issue_secondary_path.map(|value| value.to_string());
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
+    emit_status_event_for_account(runtime_map, profile_id);
 }
 
 pub fn clear_issue(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
@@ -268,6 +302,7 @@ pub fn clear_issue(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
     status.issue_secondary_path = None;
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
+    emit_status_event_for_account(runtime_map, profile_id);
 }
 
 pub fn set_remote_transfer_progress(
@@ -287,6 +322,7 @@ pub fn set_remote_transfer_progress(
     status.remote_downloaded_count = downloaded_count;
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
+    emit_status_event_for_account(runtime_map, profile_id);
 }
 
 pub fn set_remote_scan_complete(
@@ -298,6 +334,7 @@ pub fn set_remote_scan_complete(
     status.remote_scan_complete = complete;
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
+    emit_status_event_for_account(runtime_map, profile_id);
 }
 
 pub fn record_remote_discovered(runtime_map: &mut SyncRuntimeMap, profile_id: &str, item_id: &str) {
@@ -310,6 +347,7 @@ pub fn record_remote_discovered(runtime_map: &mut SyncRuntimeMap, profile_id: &s
         sync_legacy_remote_progress_fields(status);
         status.updated_at = now_rfc3339();
         bump_runtime_revision();
+        emit_status_event_for_account(runtime_map, profile_id);
     }
 }
 
@@ -327,6 +365,7 @@ pub fn record_remote_download_planned(
         sync_legacy_remote_progress_fields(status);
         status.updated_at = now_rfc3339();
         bump_runtime_revision();
+        emit_status_event_for_account(runtime_map, profile_id);
     }
 }
 
@@ -348,6 +387,7 @@ pub fn record_remote_download_completed(
     sync_legacy_remote_progress_fields(status);
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
+    emit_status_event_for_account(runtime_map, profile_id);
 }
 
 pub fn record_remote_download_failed(
@@ -361,6 +401,7 @@ pub fn record_remote_download_failed(
         sync_legacy_remote_progress_fields(status);
         status.updated_at = now_rfc3339();
         bump_runtime_revision();
+        emit_status_event_for_account(runtime_map, profile_id);
     }
 }
 
@@ -382,6 +423,7 @@ pub fn set_remote_download_counters(
     sync_legacy_remote_progress_fields(status);
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
+    emit_status_event_for_account(runtime_map, profile_id);
 }
 
 pub fn set_upload_counters(
@@ -399,6 +441,7 @@ pub fn set_upload_counters(
     status.upload_in_flight = in_flight;
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
+    emit_status_event_for_account(runtime_map, profile_id);
 }
 
 pub fn set_upload_planned_total(
@@ -410,6 +453,7 @@ pub fn set_upload_planned_total(
     status.upload_planned_total = planned_total;
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
+    emit_status_event_for_account(runtime_map, profile_id);
 }
 
 pub fn start_transfer(
@@ -438,6 +482,7 @@ pub fn start_transfer(
     }
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
+    emit_status_event_for_account(runtime_map, profile_id);
     transfer_id
 }
 
@@ -462,6 +507,7 @@ pub fn update_transfer_progress(
     }
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
+    emit_status_event_for_account(runtime_map, profile_id);
 }
 
 pub fn finish_transfer_success(
@@ -492,6 +538,7 @@ pub fn finish_transfer_success(
         sync_upload_in_flight(status);
         status.updated_at = now_rfc3339();
         bump_runtime_revision();
+        emit_status_event_for_account(runtime_map, profile_id);
     }
 }
 
@@ -524,6 +571,7 @@ pub fn finish_transfer_error(
         sync_upload_in_flight(status);
         status.updated_at = now_rfc3339();
         bump_runtime_revision();
+        emit_status_event_for_account(runtime_map, profile_id);
     }
 }
 
@@ -533,11 +581,64 @@ pub fn clear_in_progress(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
     sync_upload_in_flight(status);
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
+    emit_status_event_for_account(runtime_map, profile_id);
 }
 
 pub fn remove_account(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
     runtime_map.remove(profile_id);
     bump_runtime_revision();
+    emit_removed_status_event(profile_id);
+}
+
+fn emit_status_event_for_account(runtime_map: &SyncRuntimeMap, profile_id: &str) {
+    if let Some(status) = runtime_map.get(profile_id) {
+        emit_upsert_status_event(profile_id, status);
+    }
+}
+
+fn next_status_seq(profile_id: &str) -> u64 {
+    if let Ok(mut sequence_map) = SYNC_STATUS_EVENT_SEQUENCE.lock() {
+        let entry = sequence_map.entry(profile_id.to_string()).or_insert(0);
+        *entry = entry.saturating_add(1);
+        return *entry;
+    }
+    0
+}
+
+fn emit_upsert_status_event(profile_id: &str, status: &SyncRuntimeAccountStatus) {
+    let status_seq = next_status_seq(profile_id);
+    let payload = SyncStatusEvent {
+        profile_id: profile_id.to_string(),
+        status_seq,
+        generated_at: now_rfc3339(),
+        kind: "upsert".to_string(),
+        status: Some(status.clone()),
+    };
+    emit_sync_status_payload(payload);
+}
+
+fn emit_removed_status_event(profile_id: &str) {
+    let status_seq = next_status_seq(profile_id);
+    let payload = SyncStatusEvent {
+        profile_id: profile_id.to_string(),
+        status_seq,
+        generated_at: now_rfc3339(),
+        kind: "removed".to_string(),
+        status: None,
+    };
+    emit_sync_status_payload(payload);
+}
+
+fn emit_sync_status_payload(payload: SyncStatusEvent) {
+    let app_handle = SYNC_STATUS_APP_HANDLE
+        .lock()
+        .ok()
+        .and_then(|handle| (*handle).clone());
+    if let Some(app_handle) = app_handle {
+        if let Err(error) = app_handle.emit(SYNC_STATUS_EVENT_NAME, payload) {
+            log::warn!("SYNC_STATUS_EVENT_EMIT_FAILED error={}", error);
+        }
+    }
 }
 
 fn remove_transfer(

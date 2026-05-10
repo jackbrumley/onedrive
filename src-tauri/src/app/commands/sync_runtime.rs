@@ -1,6 +1,6 @@
 use crate::app::state::AppState;
 use crate::app::sync_engine::hydrate_runtime_status_from_db;
-use crate::app::sync_runtime::{snapshot, SyncRuntimeSnapshot};
+use crate::app::sync_runtime::{emit_full_sync_status_snapshot, snapshot, SyncRuntimeSnapshot};
 
 fn runtime_revision_from_updated_at(snapshot: &SyncRuntimeSnapshot) -> u64 {
     snapshot
@@ -38,4 +38,14 @@ pub fn get_sync_runtime_snapshot(
         .max(runtime_revision_from_updated_at(&runtime_snapshot));
 
     Ok(runtime_snapshot)
+}
+
+#[tauri::command]
+pub fn request_sync_status_snapshot(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let runtime = state
+        .sync_runtime
+        .lock()
+        .map_err(|_| "Sync runtime lock is poisoned".to_string())?;
+    emit_full_sync_status_snapshot(&runtime);
+    Ok(())
 }

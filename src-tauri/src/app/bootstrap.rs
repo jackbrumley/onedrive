@@ -2,6 +2,7 @@ use crate::app::account_profiles::load_profiles;
 use crate::app::log_context;
 use crate::app::state::AppState;
 use crate::app::sync_engine;
+use crate::app::sync_runtime;
 use tauri::Manager;
 
 fn read_linux_distribution_name() -> Option<String> {
@@ -15,6 +16,8 @@ fn read_linux_distribution_name() -> Option<String> {
 }
 
 pub fn configure_shell(app: &mut tauri::App<tauri::Wry>) -> Result<(), Box<dyn std::error::Error>> {
+    sync_runtime::initialize_status_event_stream(app.handle().clone());
+
     let wayland_display = std::env::var("WAYLAND_DISPLAY").ok();
     let x11_display = std::env::var("DISPLAY").ok();
     let session_type = std::env::var("XDG_SESSION_TYPE").ok();
