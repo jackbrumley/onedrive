@@ -53,6 +53,40 @@ This project is currently in active development and testing. We optimize for spe
 - **Fresh-State Testing Expected:** During testing, it is valid and expected to remove local app data/accounts and re-run setup from a clean install.
 - **Pre-Release Reassessment:** Compatibility policy can be revisited when moving toward beta/public release readiness.
 
+### 8. State Authority & Activity Pipeline (Required)
+All user-visible runtime state (sync phase, current activity, progress, blockers, counters) must have one authority and one write path.
+- **Single Source of Truth:** SQLite-backed lifecycle/runtime state is authoritative by default.
+- **One Writer API:** All activity/phase/progress updates must flow through one centralized backend writer that updates runtime + persistence together.
+- **No Direct Side Writes:** Any code path that mutates the same state outside the central writer is a defect.
+- **No Dual Authority:** UI-local inferred state must not compete with persisted lifecycle/runtime state.
+- **Structured Activity Contract:** Represent activity as structured fields (`stage`, `progress_mode`, `current`, `total`, `unit`, `detail`, `updated_at`, `cycle_id`) instead of scattered free-form strings.
+- **UI as Renderer:** Frontend renders authoritative activity state; it must not fabricate status from heuristics.
+- **Pause/Resume Invariant:** Pause/resume/cancel transitions must be immediately reflected in authoritative state and stay consistent across hydration/reload.
+
+### 9. Consistency, Single Responsibility, and Duplication Guardrails
+- **One Owner Per Concern:** Lifecycle transitions, queue state, planner state, and UI mapping must each have a clear owner.
+- **No Duplicate Decision Paths:** If the same business rule appears in multiple places, centralize it.
+- **No Band-Aids:** Do not patch UI symptoms to hide backend state drift. Fix the source logic.
+- **Naming Must Match Responsibility:** Module/class/function names must reflect actual responsibility. Rename stale legacy names.
+- **No Silent Divergence:** If two paths can produce conflicting truth for the same data, treat it as a blocker, not a follow-up.
+
+### 10. Proactive Integrity Review Duty (Mandatory)
+Agents are expected to proactively detect and escalate architectural drift, even outside the immediate task.
+- **Detect While Working:** Look for nearby violations (duplicate logic, split authority, stale/dead paths, inconsistent ownership, UI inference over source data).
+- **Report Immediately:** If found, explicitly state what is inconsistent, why it is risky, and what root-cause fix is recommended.
+- **Ask to Fold In:** If outside scope, ask whether to include cleanup in the same change.
+- **Do Not Normalize Debt:** Never silently work around an inconsistency and move on.
+- **Track Deferred Cleanup:** If deferred, include a concrete follow-up item in the response.
+
+### 11. Definition of Done for State/Status Changes
+A state/status task is incomplete unless all checks pass:
+1. One authoritative state path is used end-to-end.
+2. No direct writes bypass the central writer for the same state.
+3. Pause, resume, retry, startup restore, and error transitions are consistent in DB and UI.
+4. `cargo check` and `npm run typecheck` pass.
+5. Logs clearly show stage transitions and reasons.
+6. UI never shows active progress animation when there is no active work.
+
 ---
 
 ## 🛠️ Essential Commands
