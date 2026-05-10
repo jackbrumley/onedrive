@@ -175,13 +175,21 @@ fn sync_state_path(profile_id: &str) -> Result<PathBuf, String> {
 
 fn load_sync_state(profile_id: &str) -> Result<PersistedSyncState, String> {
     let path = sync_state_path(profile_id)?;
-    if !path.exists() {
-        return Ok(PersistedSyncState::default());
+    let mut state = if !path.exists() {
+        PersistedSyncState::default()
+    } else {
+        let text = std::fs::read_to_string(&path)
+            .map_err(|error| format!("Failed reading sync state '{}': {}", path.display(), error))?;
+        serde_json::from_str::<PersistedSyncState>(&text)
+            .map_err(|error| format!("Failed decoding sync state JSON: {error}"))?
+    };
+
+    let lifecycle_loaded = hydrate_sync_state_from_lifecycle(profile_id, &mut state)?;
+    if !lifecycle_loaded {
+        persist_sync_lifecycle_from_state(profile_id, &state)?;
     }
-    let text = std::fs::read_to_string(&path)
-        .map_err(|error| format!("Failed reading sync state '{}': {}", path.display(), error))?;
-    serde_json::from_str::<PersistedSyncState>(&text)
-        .map_err(|error| format!("Failed decoding sync state JSON: {error}"))
+
+    Ok(state)
 }
 
 fn save_sync_state(profile_id: &str, state: &PersistedSyncState) -> Result<(), String> {
@@ -198,5 +206,8 @@ fn save_sync_state(profile_id: &str, state: &PersistedSyncState) -> Result<(), S
     let text = serde_json::to_string_pretty(state)
         .map_err(|error| format!("Failed encoding sync state JSON: {error}"))?;
     std::fs::write(&path, text)
-        .map_err(|error| format!("Failed writing sync state '{}': {}", path.display(), error))
+        .map_err(|error| format!("Failed writing sync state '{}': {}", path.display(), error))?;
+
+    persist_sync_lifecycle_from_state(profile_id, state)?;
+    Ok(())
 }

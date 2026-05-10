@@ -87,6 +87,39 @@ struct ThrottleCounters {
     upload_last_minute: usize,
 }
 
+#[derive(Debug, Clone)]
+struct SyncLifecycleStateRow {
+    two_way_ready: bool,
+    bootstrap_scan_initialized: bool,
+    bootstrap_full_scan_completed: bool,
+    delta_link: Option<String>,
+    active_delta_next_link: Option<String>,
+    last_cycle_at: Option<String>,
+    phase: String,
+    phase_message: String,
+    remote_scan_complete: bool,
+    agent_state: String,
+    last_sync_at: Option<String>,
+}
+
+impl Default for SyncLifecycleStateRow {
+    fn default() -> Self {
+        Self {
+            two_way_ready: false,
+            bootstrap_scan_initialized: false,
+            bootstrap_full_scan_completed: false,
+            delta_link: None,
+            active_delta_next_link: None,
+            last_cycle_at: None,
+            phase: "idle".to_string(),
+            phase_message: "Idle".to_string(),
+            remote_scan_complete: false,
+            agent_state: "idle".to_string(),
+            last_sync_at: None,
+        }
+    }
+}
+
 fn sync_jobs_db_path(profile_id: &str) -> Result<PathBuf, String> {
     let config_dir =
         dirs::config_dir().ok_or_else(|| "Could not resolve config directory".to_string())?;
@@ -188,6 +221,21 @@ fn open_sync_jobs_connection(profile_id: &str) -> Result<Connection, String> {
                  direction TEXT NOT NULL,
                  occurred_at INTEGER NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS sync_lifecycle_state (
+                 profile_id TEXT PRIMARY KEY,
+                 two_way_ready INTEGER NOT NULL DEFAULT 0,
+                 bootstrap_scan_initialized INTEGER NOT NULL DEFAULT 0,
+                 bootstrap_full_scan_completed INTEGER NOT NULL DEFAULT 0,
+                 delta_link TEXT,
+                 active_delta_next_link TEXT,
+                 last_cycle_at TEXT,
+                 phase TEXT NOT NULL DEFAULT 'idle',
+                 phase_message TEXT NOT NULL DEFAULT 'Idle',
+                 remote_scan_complete INTEGER NOT NULL DEFAULT 0,
+                 agent_state TEXT NOT NULL DEFAULT 'idle',
+                 last_sync_at TEXT,
+                 updated_at INTEGER NOT NULL
+             );
              CREATE INDEX IF NOT EXISTS idx_sync_throttle_events_lookup
                   ON sync_throttle_events(profile_id, direction, occurred_at)
              ;",
@@ -211,11 +259,6 @@ pub struct RetryAllFailedDownloadJobsReport {
     pub retried: usize,
     pub skipped_permission_denied: usize,
     pub already_retrying: usize,
-}
-
-fn is_permission_denied_error_text(error_text: &str) -> bool {
-    let normalized = error_text.to_lowercase();
-    normalized.contains("status 403") || normalized.contains("accessdenied")
 }
 
 fn run_sync_jobs_migrations(connection: &Connection) -> Result<(), String> {
@@ -275,6 +318,178 @@ fn run_sync_jobs_migrations(connection: &Connection) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn is_permission_denied_error_text(error_text: &str) -> bool {
+    let normalized = error_text.to_lowercase();
+    normalized.contains("status 403") || normalized.contains("accessdenied")
+}
+
+fn bool_to_sql(value: bool) -> i64 {
+    if value { 1 } else { 0 }
+}
+
+fn sql_to_bool(value: i64) -> bool {
+    value != 0
+}
+
+fn upsert_sync_lifecycle_row(
+    profile_id: &str,
+    row: &SyncLifecycleStateRow,
+) -> Result<(), String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let now = current_unix_seconds();
+    connection
+        .execute(
+            "INSERT INTO sync_lifecycle_state (
+                 profile_id,
+                 two_way_ready,
+                 bootstrap_scan_initialized,
+                 bootstrap_full_scan_completed,
+                 delta_link,
+                 active_delta_next_link,
+                 last_cycle_at,
+                 phase,
+                 phase_message,
+                 remote_scan_complete,
+                 agent_state,
+                 last_sync_at,
+                 updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             ON CONFLICT(profile_id)
+             DO UPDATE SET
+                 two_way_ready = excluded.two_way_ready,
+                 bootstrap_scan_initialized = excluded.bootstrap_scan_initialized,
+                 bootstrap_full_scan_completed = excluded.bootstrap_full_scan_completed,
+                 delta_link = excluded.delta_link,
+                 active_delta_next_link = excluded.active_delta_next_link,
+                 last_cycle_at = excluded.last_cycle_at,
+                 phase = excluded.phase,
+                 phase_message = excluded.phase_message,
+                 remote_scan_complete = excluded.remote_scan_complete,
+                 agent_state = excluded.agent_state,
+                 last_sync_at = excluded.last_sync_at,
+                 updated_at = excluded.updated_at",
+            params![
+                profile_id,
+                bool_to_sql(row.two_way_ready),
+                bool_to_sql(row.bootstrap_scan_initialized),
+                bool_to_sql(row.bootstrap_full_scan_completed),
+                row.delta_link,
+                row.active_delta_next_link,
+                row.last_cycle_at,
+                row.phase,
+                row.phase_message,
+                bool_to_sql(row.remote_scan_complete),
+                row.agent_state,
+                row.last_sync_at,
+                now,
+            ],
+        )
+        .map_err(|error| format!("Failed upserting sync lifecycle row: {error}"))?;
+    Ok(())
+}
+
+fn read_sync_lifecycle_row(profile_id: &str) -> Result<Option<SyncLifecycleStateRow>, String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    connection
+        .query_row(
+            "SELECT two_way_ready,
+                    bootstrap_scan_initialized,
+                    bootstrap_full_scan_completed,
+                    delta_link,
+                    active_delta_next_link,
+                    last_cycle_at,
+                    phase,
+                    phase_message,
+                    remote_scan_complete,
+                    agent_state,
+                    last_sync_at
+             FROM sync_lifecycle_state
+             WHERE profile_id = ?1",
+            params![profile_id],
+            |row| {
+                Ok(SyncLifecycleStateRow {
+                    two_way_ready: sql_to_bool(row.get::<_, i64>(0)?),
+                    bootstrap_scan_initialized: sql_to_bool(row.get::<_, i64>(1)?),
+                    bootstrap_full_scan_completed: sql_to_bool(row.get::<_, i64>(2)?),
+                    delta_link: row.get(3)?,
+                    active_delta_next_link: row.get(4)?,
+                    last_cycle_at: row.get(5)?,
+                    phase: row.get(6)?,
+                    phase_message: row.get(7)?,
+                    remote_scan_complete: sql_to_bool(row.get::<_, i64>(8)?),
+                    agent_state: row.get(9)?,
+                    last_sync_at: row.get(10)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| format!("Failed reading sync lifecycle row: {error}"))
+}
+
+fn persist_sync_lifecycle_from_state(
+    profile_id: &str,
+    sync_state: &PersistedSyncState,
+) -> Result<(), String> {
+    let mut row = read_sync_lifecycle_row(profile_id)?.unwrap_or_default();
+    row.two_way_ready = sync_state.two_way_ready;
+    row.bootstrap_scan_initialized = sync_state.bootstrap_scan_initialized;
+    row.bootstrap_full_scan_completed = sync_state.bootstrap_full_scan_completed;
+    row.delta_link = sync_state.delta_link.clone();
+    row.active_delta_next_link = sync_state.active_delta_next_link.clone();
+    row.last_cycle_at = sync_state.last_cycle_at.clone();
+    upsert_sync_lifecycle_row(profile_id, &row)
+}
+
+fn hydrate_sync_state_from_lifecycle(
+    profile_id: &str,
+    sync_state: &mut PersistedSyncState,
+) -> Result<bool, String> {
+    let Some(row) = read_sync_lifecycle_row(profile_id)? else {
+        return Ok(false);
+    };
+    sync_state.two_way_ready = row.two_way_ready;
+    sync_state.bootstrap_scan_initialized = row.bootstrap_scan_initialized;
+    sync_state.bootstrap_full_scan_completed = row.bootstrap_full_scan_completed;
+    sync_state.delta_link = row.delta_link;
+    sync_state.active_delta_next_link = row.active_delta_next_link;
+    sync_state.last_cycle_at = row.last_cycle_at;
+    Ok(true)
+}
+
+fn persist_sync_lifecycle_phase(profile_id: &str, phase: &str, phase_message: &str) -> Result<(), String> {
+    let mut row = read_sync_lifecycle_row(profile_id)?.unwrap_or_default();
+    row.phase = phase.to_string();
+    row.phase_message = phase_message.to_string();
+    upsert_sync_lifecycle_row(profile_id, &row)
+}
+
+fn persist_sync_lifecycle_remote_scan_complete(profile_id: &str, complete: bool) -> Result<(), String> {
+    let mut row = read_sync_lifecycle_row(profile_id)?.unwrap_or_default();
+    row.remote_scan_complete = complete;
+    upsert_sync_lifecycle_row(profile_id, &row)
+}
+
+pub(crate) fn persist_sync_lifecycle_agent_state(profile_id: &str, agent_state: &str) -> Result<(), String> {
+    let mut row = read_sync_lifecycle_row(profile_id)?.unwrap_or_default();
+    row.agent_state = agent_state.to_string();
+    upsert_sync_lifecycle_row(profile_id, &row)
+}
+
+pub(crate) fn persist_sync_lifecycle_last_sync_at(
+    profile_id: &str,
+    last_sync_at: Option<&str>,
+) -> Result<(), String> {
+    let mut row = read_sync_lifecycle_row(profile_id)?.unwrap_or_default();
+    row.last_sync_at = last_sync_at.map(ToString::to_string);
+    upsert_sync_lifecycle_row(profile_id, &row)
+}
+
+pub(crate) fn read_sync_lifecycle_profile_metadata(
+    profile_id: &str,
+) -> Result<Option<(String, Option<String>)>, String> {
+    Ok(read_sync_lifecycle_row(profile_id)?.map(|row| (row.agent_state, row.last_sync_at)))
 }
 
 fn add_sync_jobs_column_if_missing(
@@ -1427,6 +1642,13 @@ pub fn hydrate_runtime_status_from_db(
         status.issue_actions.clear();
         status.issue_path = None;
         status.issue_secondary_path = None;
+    }
+
+    if let Some(lifecycle) = read_sync_lifecycle_row(&profile_id)? {
+        status.phase = lifecycle.phase;
+        status.phase_message = lifecycle.phase_message;
+        status.remote_scan_complete = lifecycle.remote_scan_complete;
+        status.two_way_ready = lifecycle.two_way_ready;
     }
 
     Ok(())

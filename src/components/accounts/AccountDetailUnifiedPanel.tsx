@@ -117,7 +117,7 @@ export function AccountDetailUnifiedPanel({
       <article class="card account-detail-unified-card account-detail-sync-preview">
         <AccountSyncActivityPanel
           runtimeStatus={runtimeStatus}
-          hasCompletedInitialSync={account.lastSyncAt !== null}
+          hasCompletedInitialSync={runtimeStatus?.twoWayReady ?? account.lastSyncAt !== null}
           issueMessage={hasBlockingIssue ? syncIssueMessage : null}
           issueKind={issueKind}
           issueActions={issueActions}

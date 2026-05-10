@@ -405,6 +405,14 @@ fn runtime_set_phase(
     if let Ok(mut runtime_map) = runtime.lock() {
         sync_runtime::set_phase(&mut runtime_map, profile_id, phase, phase_message);
     }
+    if let Err(error) = persist_sync_lifecycle_phase(profile_id, phase, phase_message) {
+        log::warn!(
+            "{} SYNC_LIFECYCLE_PHASE_PERSIST_FAILED phase={} error={}",
+            log_context::account_prefix(profile_id),
+            phase,
+            error
+        );
+    }
 }
 
 fn runtime_clear_issue(runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>, profile_id: &str) {
@@ -464,6 +472,14 @@ fn runtime_set_remote_scan_complete(
 ) {
     if let Ok(mut runtime_map) = runtime.lock() {
         sync_runtime::set_remote_scan_complete(&mut runtime_map, profile_id, complete);
+    }
+    if let Err(error) = persist_sync_lifecycle_remote_scan_complete(profile_id, complete) {
+        log::warn!(
+            "{} SYNC_LIFECYCLE_SCAN_COMPLETE_PERSIST_FAILED complete={} error={}",
+            log_context::account_prefix(profile_id),
+            complete,
+            error
+        );
     }
 }
 

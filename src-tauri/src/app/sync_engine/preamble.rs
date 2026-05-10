@@ -40,6 +40,14 @@ pub fn on_agent_state_changed(
         log_context::account_prefix(profile_id),
         agent_state
     );
+    if let Err(error) = persist_sync_lifecycle_agent_state(profile_id, agent_state) {
+        log::warn!(
+            "{} SYNC_LIFECYCLE_AGENT_STATE_PERSIST_FAILED state={} error={}",
+            log_context::account_prefix(profile_id),
+            agent_state,
+            error
+        );
+    }
     if agent_state == "syncing" {
         let _ = set_cancel_flag(state, profile_id, false)?;
         runtime_clear_issue(&state.sync_runtime, profile_id);

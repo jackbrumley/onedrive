@@ -50,7 +50,7 @@ interface AccountCardProps {
 }
 
 export function AccountCard({ account, runtimeStatus, onOpenDetails, onSetAgentState, onOpenSyncRootFolder }: AccountCardProps) {
-  const modeMessage = syncModeMessage(runtimeStatus, account.lastSyncAt !== null);
+  const modeMessage = syncModeMessage(runtimeStatus, runtimeStatus?.twoWayReady ?? account.lastSyncAt !== null);
   const accountKindLabel = account.kind.charAt(0).toUpperCase() + account.kind.slice(1);
   const accountIcon = account.kind === "business" ? <IconBuildingBank size={16} /> : <IconUser size={16} />;
   const runtimeIssueCode = runtimeStatus?.issueCode;

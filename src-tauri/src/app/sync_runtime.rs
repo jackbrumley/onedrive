@@ -73,6 +73,7 @@ pub struct SyncRuntimeAccountStatus {
     pub upload_throttle_total: usize,
     pub upload_throttle_last_minute: usize,
     pub remote_scan_complete: bool,
+    pub two_way_ready: bool,
     pub updated_at: String,
     #[serde(skip_serializing)]
     remote_session_discovered_ids: HashSet<String>,
@@ -127,6 +128,7 @@ impl SyncRuntimeAccountStatus {
             upload_throttle_total: 0,
             upload_throttle_last_minute: 0,
             remote_scan_complete: false,
+            two_way_ready: false,
             updated_at: now,
             remote_session_discovered_ids: HashSet::new(),
             remote_session_planned_ids: HashSet::new(),
