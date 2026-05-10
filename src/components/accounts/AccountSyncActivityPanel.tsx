@@ -225,6 +225,17 @@ function buildCurrentActivityState(runtimeStatus: SyncRuntimeAccountStatus | nul
   };
 }
 
+function isRuntimeTelemetryStale(runtimeStatus: SyncRuntimeAccountStatus | null): boolean {
+  if (!runtimeStatus) {
+    return true;
+  }
+  const updatedAtMs = Date.parse(runtimeStatus.updatedAt);
+  if (!Number.isFinite(updatedAtMs)) {
+    return true;
+  }
+  return Date.now() - updatedAtMs > 8000;
+}
+
 function extensionFromPath(path: string): string {
   const filename = path.split("/").pop() ?? "";
   const dotIndex = filename.lastIndexOf(".");
@@ -366,6 +377,7 @@ export function AccountSyncActivityPanel({
   const hasErrorItems = hasIssueSummary || issueKind !== null || recentFailed.length > 0;
   const hasWarningSection = hasRetryWarnings;
   const hasErrorSection = hasErrorItems || issueActions.length > 0;
+  const runtimeTelemetryStale = isRuntimeTelemetryStale(runtimeStatus);
   const currentActivity = buildCurrentActivityState(runtimeStatus);
 
   const items = [
@@ -456,11 +468,13 @@ export function AccountSyncActivityPanel({
       <section class="account-sync-current-activity" aria-live="polite">
         <p class="account-sync-current-activity-label">Current activity</p>
         <p class="account-sync-current-activity-title">{currentActivity.title}</p>
-        <p class="account-sync-current-activity-detail">{currentActivity.detail}</p>
+        <p class="account-sync-current-activity-detail">
+          {runtimeTelemetryStale ? "Waiting for fresh runtime telemetry" : currentActivity.detail}
+        </p>
         {currentActivity.progressLabel && (
           <p class="account-sync-current-activity-progress">{currentActivity.progressLabel}</p>
         )}
-        {currentActivity.progressMode !== "hidden" && (
+        {!runtimeTelemetryStale && currentActivity.progressMode !== "hidden" && (
           <div class="account-sync-current-activity-track" role="progressbar" aria-valuenow={currentActivity.progressPercent ?? undefined} aria-valuemin={0} aria-valuemax={100}>
             <div
               class={
@@ -819,6 +833,7 @@ export function AccountSyncActivityPanel({
             {items.map((item) => {
               const isActive = item.kind === "active";
               const isQueued = isActive && item.transferState === "queued";
+              const showActiveAnimation = isActive && !runtimeTelemetryStale;
               const progressPercent =
                 isActive && !isQueued ? transferProgressPercent(item.bytesDone ?? 0, item.bytesTotal) : null;
               return (
@@ -854,7 +869,7 @@ export function AccountSyncActivityPanel({
                           )}
                           <span>{new Date(item.when).toLocaleTimeString()}</span>
                         </p>
-                        {isActive && (
+                        {showActiveAnimation && (
                           <div class="sync-runtime-progress-track-compact">
                             <div
                               class={
@@ -873,7 +888,10 @@ export function AccountSyncActivityPanel({
                         </span>
                         <span class="account-sync-preview-status-icon">
                           {item.kind === "active" ? (
-                            <IconRefresh size={ACTIVITY_ICON_SIZE} class="sync-preview-icon-active" />
+                            <IconRefresh
+                              size={ACTIVITY_ICON_SIZE}
+                              class={showActiveAnimation ? "sync-preview-icon-active" : ""}
+                            />
                           ) : (
                             <IconCircleCheckFilled size={ACTIVITY_ICON_SIZE} class="sync-preview-icon-success" />
                           )}
