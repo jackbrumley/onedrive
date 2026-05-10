@@ -75,14 +75,14 @@ pub fn on_agent_state_changed(
         }
         if let Ok(mut runtime_map) = state.sync_runtime.lock() {
             sync_runtime::clear_in_progress(&mut runtime_map, profile_id);
-            let (phase, message) = if agent_state == "paused" {
-                ("paused", "Synchronization paused")
-            } else {
-                ("idle", "Idle")
-            };
-            sync_runtime::set_phase(&mut runtime_map, profile_id, phase, message);
             sync_runtime::set_remote_transfer_progress(&mut runtime_map, profile_id, 0, 0, 0);
         }
+        let (phase, message) = if agent_state == "paused" {
+            ("paused", "Synchronization paused")
+        } else {
+            ("idle", "Idle")
+        };
+        runtime_set_phase(&state.sync_runtime, profile_id, phase, message);
         runtime_clear_issue(&state.sync_runtime, profile_id);
     }
     Ok(())
@@ -112,14 +112,12 @@ pub fn confirm_large_delete_guard(
     save_sync_state(profile_id, &sync_state)?;
 
     runtime_clear_issue(&state.sync_runtime, profile_id);
-    if let Ok(mut runtime_map) = state.sync_runtime.lock() {
-        sync_runtime::set_phase(
-            &mut runtime_map,
-            profile_id,
-            "applying_local",
-            "Large deletion confirmed - applying changes",
-        );
-    }
+    runtime_set_phase(
+        &state.sync_runtime,
+        profile_id,
+        "applying_local",
+        "Large deletion confirmed - applying changes",
+    );
     Ok(())
 }
 
@@ -138,14 +136,12 @@ pub fn keep_cloud_files_after_large_delete(
     save_sync_state(profile_id, &sync_state)?;
 
     runtime_clear_issue(&state.sync_runtime, profile_id);
-    if let Ok(mut runtime_map) = state.sync_runtime.lock() {
-        sync_runtime::set_phase(
-            &mut runtime_map,
-            profile_id,
-            "syncing",
-            "Initial sync in progress - downloading cloud files only",
-        );
-    }
+    runtime_set_phase(
+        &state.sync_runtime,
+        profile_id,
+        "syncing",
+        "Initial sync in progress - downloading cloud files only",
+    );
     Ok(())
 }
 

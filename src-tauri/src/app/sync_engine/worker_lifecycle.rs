@@ -23,14 +23,14 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
         let profiles_lock = Arc::clone(&state.profiles_lock);
         let sync_runtime = Arc::clone(&state.sync_runtime);
         if let Ok(mut runtime_map) = sync_runtime.lock() {
-            sync_runtime::set_phase(
-                &mut runtime_map,
-                &profile_id_owned,
-                "syncing",
-                "Preparing next sync cycle",
-            );
             sync_runtime::set_remote_transfer_progress(&mut runtime_map, &profile_id_owned, 0, 0, 0);
         }
+        runtime_set_phase(
+            &sync_runtime,
+            &profile_id_owned,
+            "syncing",
+            "Preparing next sync cycle",
+        );
         runtime_clear_issue(&sync_runtime, &profile_id_owned);
         tauri::async_runtime::spawn(async move {
             let mut ticker = tokio::time::interval(std::time::Duration::from_secs(15));
@@ -44,13 +44,13 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                     if let Ok(mut runtime_map) = sync_runtime.lock() {
                         sync_runtime::clear_in_progress(&mut runtime_map, &profile_id_owned);
                         sync_runtime::set_remote_transfer_progress(&mut runtime_map, &profile_id_owned, 0, 0, 0);
-                        sync_runtime::set_phase(
-                            &mut runtime_map,
-                            &profile_id_owned,
-                            "paused",
-                            "Synchronization paused",
-                        );
                     }
+                    runtime_set_phase(
+                        &sync_runtime,
+                        &profile_id_owned,
+                        "paused",
+                        "Synchronization paused",
+                    );
                     return;
                 }
             }
@@ -68,8 +68,13 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                         if let Ok(mut runtime_map) = sync_runtime.lock() {
                             sync_runtime::clear_in_progress(&mut runtime_map, &profile_id_owned);
                             sync_runtime::set_remote_transfer_progress(&mut runtime_map, &profile_id_owned, 0, 0, 0);
-                            sync_runtime::set_phase(&mut runtime_map, &profile_id_owned, "paused", "Synchronization paused");
                         }
+                        runtime_set_phase(
+                            &sync_runtime,
+                            &profile_id_owned,
+                            "paused",
+                            "Synchronization paused",
+                        );
                         break;
                     }
                     _ = ticker.tick() => {
@@ -147,13 +152,13 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                                 if let Ok(mut runtime_map) = sync_runtime.lock() {
                                     sync_runtime::clear_in_progress(&mut runtime_map, &profile_id_owned);
                                     sync_runtime::set_remote_transfer_progress(&mut runtime_map, &profile_id_owned, 0, 0, 0);
-                                    sync_runtime::set_phase(
-                                        &mut runtime_map,
-                                        &profile_id_owned,
-                                        "error",
-                                        &format!("Sync error: {}", error),
-                                    );
                                 }
+                                runtime_set_phase(
+                                    &sync_runtime,
+                                    &profile_id_owned,
+                                    "error",
+                                    &format!("Sync error: {}", error),
+                                );
                                 runtime_set_issue(
                                     &sync_runtime,
                                     &profile_id_owned,
