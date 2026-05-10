@@ -9,16 +9,9 @@ import {
 import { AccountHomeCardButton } from "./AccountHomeCardButton";
 import type { AccountProfile, SyncRuntimeAccountStatus } from "../../types/somedrive";
 import { syncModeMessage } from "./syncModeMessaging";
+import { computeEffectiveSyncState, computeHasCompletedInitialSync } from "./syncStateSelectors";
 
 const ISSUE_BADGE_WINDOW_MS = 10 * 60 * 1000;
-const BLOCKING_ISSUE_CODES = new Set([
-  "auth_required",
-  "permission_denied",
-  "disk_full",
-  "sync_root_unavailable",
-  "large_delete_guard",
-  "unknown_error",
-]);
 
 function recentIssueCount(runtimeStatus: SyncRuntimeAccountStatus | null): number {
   if (!runtimeStatus) {
@@ -31,16 +24,6 @@ function recentIssueCount(runtimeStatus: SyncRuntimeAccountStatus | null): numbe
   }).length;
 }
 
-function isSyncPhaseActive(phase: string | undefined): boolean {
-  return (
-    phase === "syncing" ||
-    phase === "scanning_remote" ||
-    phase === "applying_remote" ||
-    phase === "scanning_local" ||
-    phase === "applying_local"
-  );
-}
-
 interface AccountCardProps {
   account: AccountProfile;
   runtimeStatus: SyncRuntimeAccountStatus | null;
@@ -50,20 +33,13 @@ interface AccountCardProps {
 }
 
 export function AccountCard({ account, runtimeStatus, onOpenDetails, onSetAgentState, onOpenSyncRootFolder }: AccountCardProps) {
-  const modeMessage = syncModeMessage(runtimeStatus, runtimeStatus?.twoWayReady ?? account.lastSyncAt !== null);
+  const modeMessage = syncModeMessage(runtimeStatus, computeHasCompletedInitialSync(runtimeStatus));
   const accountKindLabel = account.kind.charAt(0).toUpperCase() + account.kind.slice(1);
   const accountIcon = account.kind === "business" ? <IconBuildingBank size={16} /> : <IconUser size={16} />;
-  const runtimeIssueCode = runtimeStatus?.issueCode;
+  const { runtimeIssueCode, hasBlockingIssue, syncActive, syncState } = computeEffectiveSyncState(account, runtimeStatus);
   const recentIssueTotal = recentIssueCount(runtimeStatus);
-  const runtimeIssueIsBlocking = runtimeIssueCode ? BLOCKING_ISSUE_CODES.has(runtimeIssueCode) : false;
-  const hasBlockingIssue =
-    !account.authConfigured || runtimeIssueIsBlocking || account.agentState === "error" || runtimeStatus?.phase === "error";
   const hasNonBlockingIssue = !hasBlockingIssue && (recentIssueTotal > 0 || Boolean(runtimeIssueCode));
   const nonBlockingIssueCount = recentIssueTotal + (runtimeIssueCode && !hasBlockingIssue ? 1 : 0);
-  const syncActive =
-    account.agentState === "syncing" ||
-    isSyncPhaseActive(runtimeStatus?.phase);
-  const syncState = hasBlockingIssue ? "stopped" : syncActive ? "syncing" : "paused";
   const showIssueBadge = syncState === "syncing" && hasNonBlockingIssue && nonBlockingIssueCount > 0;
   const showBlockingMarker = syncState === "stopped";
   const syncButtonClass = showBlockingMarker

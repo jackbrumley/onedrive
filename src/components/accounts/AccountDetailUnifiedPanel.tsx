@@ -2,6 +2,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "preact/hooks";
 import { AccountSyncActivityPanel } from "./AccountSyncActivityPanel";
 import type { AccountProfile, SyncRuntimeAccountStatus } from "../../types/somedrive";
+import { computeEffectiveSyncState, computeHasCompletedInitialSync } from "./syncStateSelectors";
 
 interface AccountDetailUnifiedPanelProps {
   account: AccountProfile;
@@ -95,29 +96,20 @@ export function AccountDetailUnifiedPanel({
     await onSetSyncRoot(account.id, selected);
   };
 
-  const runtimeIssueCode = runtimeStatus?.issueCode ?? null;
-  const hasBlockingIssue =
-    !account.authConfigured || runtimeIssueCode !== null || account.agentState === "error" || runtimeStatus?.phase === "error";
+  const { runtimeIssueCode, hasBlockingIssue } = computeEffectiveSyncState(account, runtimeStatus);
   const syncIssueMessage =
     runtimeStatus?.issueMessage ??
     (!account.authConfigured ? "Authentication required" : runtimeStatus?.phaseMessage ?? "Synchronization blocked");
   const issueKind =
     !account.authConfigured || runtimeIssueCode === "auth_required" ? "auth_required" : hasBlockingIssue ? "sync_error" : null;
-  const issueActions =
-    runtimeStatus?.issueActions.length
-      ? runtimeStatus.issueActions
-      : issueKind === "auth_required"
-        ? ["reauthenticate", "retry_sync"]
-        : issueKind === "sync_error"
-          ? ["retry_sync"]
-          : [];
+  const issueActions = runtimeStatus?.issueActions ?? [];
 
   if (mode === "sync") {
     return (
       <article class="card account-detail-unified-card account-detail-sync-preview">
         <AccountSyncActivityPanel
           runtimeStatus={runtimeStatus}
-          hasCompletedInitialSync={runtimeStatus?.twoWayReady ?? account.lastSyncAt !== null}
+          hasCompletedInitialSync={computeHasCompletedInitialSync(runtimeStatus)}
           issueMessage={hasBlockingIssue ? syncIssueMessage : null}
           issueKind={issueKind}
           issueActions={issueActions}

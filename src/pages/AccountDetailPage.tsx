@@ -10,15 +10,7 @@ import {
 import { memo } from "preact/compat";
 import { AccountDetailUnifiedPanel } from "../components/accounts/AccountDetailUnifiedPanel";
 import type { AccountProfile, SyncRuntimeAccountStatus } from "../types/somedrive";
-
-const BLOCKING_ISSUE_CODES = new Set([
-  "auth_required",
-  "permission_denied",
-  "disk_full",
-  "sync_root_unavailable",
-  "large_delete_guard",
-  "unknown_error",
-]);
+import { computeEffectiveSyncState } from "../components/accounts/syncStateSelectors";
 
 interface AccountDetailPageProps {
   account: AccountProfile | null;
@@ -64,12 +56,7 @@ const AccountDetailHeader = memo(function AccountDetailHeader({
   onOpenSync,
   onSetAgentState,
 }: AccountDetailHeaderProps) {
-  const runtimeIssueCode = runtimeStatus?.issueCode;
-  const runtimeIssueIsBlocking = runtimeIssueCode ? BLOCKING_ISSUE_CODES.has(runtimeIssueCode) : false;
-  const hasBlockingIssue =
-    !account.authConfigured || runtimeIssueIsBlocking || account.agentState === "error" || runtimeStatus?.phase === "error";
-  const syncActive = account.agentState === "syncing";
-  const syncState = hasBlockingIssue ? "stopped" : syncActive ? "syncing" : "paused";
+  const { syncState } = computeEffectiveSyncState(account, runtimeStatus);
   const nextSyncState: "syncing" | "paused" = syncState === "syncing" ? "paused" : "syncing";
   const syncStateLabel = syncState === "stopped" ? "Stopped" : syncState === "syncing" ? "Syncing" : "Paused";
   const syncButtonTitle = syncState === "stopped"
