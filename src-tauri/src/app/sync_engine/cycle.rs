@@ -256,6 +256,9 @@ fn update_profile_last_sync(
     profiles_lock: &Arc<std::sync::Mutex<()>>,
     profile_id: &str,
 ) -> Result<(), String> {
+    let now = chrono::Local::now().to_rfc3339();
+    persist_sync_lifecycle_last_sync_at(profile_id, Some(&now))?;
+
     let _guard = profiles_lock
         .lock()
         .map_err(|_| "Account profile lock is poisoned".to_string())?;
@@ -264,6 +267,6 @@ fn update_profile_last_sync(
         .iter_mut()
         .find(|entry| entry.id == profile_id)
         .ok_or_else(|| "Account profile not found".to_string())?;
-    profile.last_sync_at = Some(chrono::Local::now().to_rfc3339());
+    profile.last_sync_at = Some(now);
     save_profiles(&profiles)
 }

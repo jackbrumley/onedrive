@@ -3,6 +3,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::app::sync_engine::{
+    persist_sync_lifecycle_agent_state, persist_sync_lifecycle_last_sync_at,
+    read_sync_lifecycle_profile_metadata,
+};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountProfile {
@@ -56,8 +61,24 @@ pub fn load_profiles() -> Result<Vec<AccountProfile>, String> {
     }
 
     let text = fs::read_to_string(storage_path).map_err(|error| error.to_string())?;
-    let store: AccountProfileStore =
+    let mut store: AccountProfileStore =
         serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    for profile in &mut store.profiles {
+        match read_sync_lifecycle_profile_metadata(&profile.id) {
+            Ok(Some((agent_state, last_sync_at))) => {
+                profile.agent_state = agent_state;
+                profile.last_sync_at = last_sync_at;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                log::warn!(
+                    "{} PROFILE_METADATA_DB_HYDRATE_FAILED error={}",
+                    crate::app::log_context::account_prefix(&profile.id),
+                    error
+                );
+            }
+        }
+    }
     Ok(store.profiles)
 }
 
@@ -106,6 +127,8 @@ pub fn create_profile(input: CreateAccountProfileInput) -> Result<AccountProfile
 
     profiles.push(profile.clone());
     save_profiles(&profiles)?;
+    persist_sync_lifecycle_agent_state(&profile.id, &profile.agent_state)?;
+    persist_sync_lifecycle_last_sync_at(&profile.id, None)?;
     Ok(profile)
 }
 
@@ -148,6 +171,7 @@ pub fn set_agent_state(input: SetAccountAgentStateInput) -> Result<AccountProfil
     profiles[index].agent_state = next_state;
     let updated = profiles[index].clone();
     save_profiles(&profiles)?;
+    persist_sync_lifecycle_agent_state(&updated.id, &updated.agent_state)?;
     Ok(updated)
 }
 
