@@ -115,6 +115,9 @@ export interface SyncRuntimeAccountStatus {
   issueActions: string[];
   issuePath: string | null;
   issueSecondaryPath: string | null;
+  issueSeverity?: "none" | "warning" | "blocking" | string;
+  authReady?: boolean;
+  canSync?: boolean;
   inProgress: SyncRuntimeTransfer[];
   recentCompleted: SyncRuntimeRecentItem[];
   recentRetryWaiting: SyncRuntimeRecentItem[];

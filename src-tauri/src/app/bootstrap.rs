@@ -61,6 +61,12 @@ pub fn configure_shell(app: &mut tauri::App<tauri::Wry>) -> Result<(), Box<dyn s
                     account.sync_root,
                 );
 
+                sync_engine::runtime_set_profile_auth_ready(
+                    &app_state.sync_runtime,
+                    &account.id,
+                    account.auth_configured,
+                );
+
                 if account.agent_state == "syncing" {
                     if account.auth_configured {
                         match sync_engine::prepare_startup_sync_resume(&account.id) {

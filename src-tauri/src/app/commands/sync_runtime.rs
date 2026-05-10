@@ -1,6 +1,9 @@
+use crate::app::account_profiles::load_profiles;
 use crate::app::state::AppState;
 use crate::app::sync_engine::hydrate_runtime_status_from_db;
-use crate::app::sync_runtime::{emit_full_sync_status_snapshot, snapshot, SyncRuntimeSnapshot};
+use crate::app::sync_runtime::{
+    emit_full_sync_status_snapshot, recompute_authority_fields, snapshot, SyncRuntimeSnapshot,
+};
 
 fn runtime_revision_from_updated_at(snapshot: &SyncRuntimeSnapshot) -> u64 {
     snapshot
@@ -23,6 +26,11 @@ pub fn get_sync_runtime_snapshot(
     let mut runtime_snapshot = snapshot(&runtime);
     drop(runtime);
 
+    let profile_auth_by_id: std::collections::HashMap<String, bool> = load_profiles()?
+        .into_iter()
+        .map(|profile| (profile.id, profile.auth_configured))
+        .collect();
+
     for account in &mut runtime_snapshot.accounts {
         if let Err(error) = hydrate_runtime_status_from_db(account) {
             log::warn!(
@@ -31,6 +39,10 @@ pub fn get_sync_runtime_snapshot(
                 error
             );
         }
+        if let Some(auth_ready) = profile_auth_by_id.get(&account.profile_id) {
+            account.auth_ready = *auth_ready;
+        }
+        recompute_authority_fields(account);
     }
 
     runtime_snapshot.revision = runtime_snapshot

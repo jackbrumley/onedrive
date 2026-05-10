@@ -71,6 +71,9 @@ pub struct SyncRuntimeAccountStatus {
     pub issue_actions: Vec<String>,
     pub issue_path: Option<String>,
     pub issue_secondary_path: Option<String>,
+    pub issue_severity: String,
+    pub auth_ready: bool,
+    pub can_sync: bool,
     pub in_progress: Vec<SyncRuntimeTransfer>,
     pub recent_completed: Vec<SyncRuntimeRecentItem>,
     pub recent_retry_waiting: Vec<SyncRuntimeRecentItem>,
@@ -130,6 +133,9 @@ impl SyncRuntimeAccountStatus {
             issue_actions: Vec::new(),
             issue_path: None,
             issue_secondary_path: None,
+            issue_severity: "none".to_string(),
+            auth_ready: false,
+            can_sync: false,
             in_progress: Vec::new(),
             recent_completed: Vec::new(),
             recent_retry_waiting: Vec::new(),
@@ -201,19 +207,31 @@ pub fn initialize_status_event_stream(app_handle: AppHandle) {
 pub fn emit_full_sync_status_snapshot(runtime_map: &SyncRuntimeMap) {
     let mut accounts: Vec<SyncRuntimeAccountStatus> = runtime_map.values().cloned().collect();
     accounts.sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
-    for account in accounts {
+    for mut account in accounts {
+        recompute_authority_fields(&mut account);
         emit_upsert_status_event(&account.profile_id, &account);
     }
 }
 
 pub fn snapshot(runtime_map: &SyncRuntimeMap) -> SyncRuntimeSnapshot {
     let mut accounts: Vec<SyncRuntimeAccountStatus> = runtime_map.values().cloned().collect();
+    for status in &mut accounts {
+        recompute_authority_fields(status);
+    }
     accounts.sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
     SyncRuntimeSnapshot {
         generated_at: now_rfc3339(),
         revision: current_runtime_revision(),
         accounts,
     }
+}
+
+pub fn set_auth_ready(runtime_map: &mut SyncRuntimeMap, profile_id: &str, auth_ready: bool) {
+    let status = ensure_account_status(runtime_map, profile_id);
+    status.auth_ready = auth_ready;
+    status.updated_at = now_rfc3339();
+    bump_runtime_revision();
+    emit_status_event_for_account(runtime_map, profile_id);
 }
 
 pub fn set_phase(
@@ -288,6 +306,9 @@ pub fn set_issue(
         .collect();
     status.issue_path = issue_path.map(|value| value.to_string());
     status.issue_secondary_path = issue_secondary_path.map(|value| value.to_string());
+    if issue_code == "auth_required" {
+        status.auth_ready = false;
+    }
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
     emit_status_event_for_account(runtime_map, profile_id);
@@ -592,7 +613,9 @@ pub fn remove_account(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
 
 fn emit_status_event_for_account(runtime_map: &SyncRuntimeMap, profile_id: &str) {
     if let Some(status) = runtime_map.get(profile_id) {
-        emit_upsert_status_event(profile_id, status);
+        let mut normalized = status.clone();
+        recompute_authority_fields(&mut normalized);
+        emit_upsert_status_event(profile_id, &normalized);
     }
 }
 
@@ -638,6 +661,26 @@ fn emit_sync_status_payload(payload: SyncStatusEvent) {
         if let Err(error) = app_handle.emit(SYNC_STATUS_EVENT_NAME, payload) {
             log::warn!("SYNC_STATUS_EVENT_EMIT_FAILED error={}", error);
         }
+    }
+}
+
+pub fn recompute_authority_fields(status: &mut SyncRuntimeAccountStatus) {
+    status.issue_severity = issue_severity_from_code(status.issue_code.as_deref()).to_string();
+    status.can_sync = status.auth_ready && status.issue_severity != "blocking" && status.phase != "error";
+}
+
+fn issue_severity_from_code(issue_code: Option<&str>) -> &'static str {
+    let Some(code) = issue_code else {
+        return "none";
+    };
+    match code {
+        "auth_required"
+        | "permission_denied"
+        | "disk_full"
+        | "sync_root_unavailable"
+        | "large_delete_guard"
+        | "unknown_error" => "blocking",
+        _ => "warning",
     }
 }
 

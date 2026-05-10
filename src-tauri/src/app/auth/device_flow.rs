@@ -189,6 +189,8 @@ pub async fn poll_device_auth(
         lock.remove(&profile_id);
     }
 
+    sync_engine::runtime_set_profile_auth_ready(&state.sync_runtime, &profile_id, true);
+
     let _ = activity_log::append_event(
         &profile_id,
         &account_email,

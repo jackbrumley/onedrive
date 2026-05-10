@@ -433,6 +433,16 @@ fn runtime_set_phase(
     }
 }
 
+pub fn runtime_set_profile_auth_ready(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    auth_ready: bool,
+) {
+    if let Ok(mut runtime_map) = runtime.lock() {
+        sync_runtime::set_auth_ready(&mut runtime_map, profile_id, auth_ready);
+    }
+}
+
 fn runtime_reset_transfer_activity(runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>, profile_id: &str) {
     if let Ok(mut runtime_map) = runtime.lock() {
         sync_runtime::clear_in_progress(&mut runtime_map, profile_id);

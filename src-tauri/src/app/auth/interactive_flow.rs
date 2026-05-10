@@ -166,6 +166,8 @@ pub fn clear_account_auth(
         fs::remove_file(auth_path).map_err(|error| error.to_string())?;
     }
 
+    sync_engine::runtime_set_profile_auth_ready(&state.sync_runtime, &profile_id, false);
+
     Ok(())
 }
 
@@ -326,6 +328,7 @@ async fn complete_interactive_auth_from_callback(
         "{} AUTH_INTERACTIVE_AUTO_START_SYNC requested",
         log_context::account_prefix_from_parts(profile_id, &updated_profile.email)
     );
+    sync_engine::runtime_set_profile_auth_ready(&app_state.sync_runtime, profile_id, true);
     sync_engine::on_agent_state_changed(&app_state, profile_id, "syncing")?;
     log::info!(
         "{} AUTH_INTERACTIVE_AUTO_START_SYNC_RESULT success",

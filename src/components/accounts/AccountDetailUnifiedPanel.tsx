@@ -97,11 +97,12 @@ export function AccountDetailUnifiedPanel({
   };
 
   const { runtimeIssueCode, hasBlockingIssue } = computeEffectiveSyncState(account, runtimeStatus);
+  const runtimeAuthReady = runtimeStatus?.authReady ?? false;
   const syncIssueMessage =
     runtimeStatus?.issueMessage ??
-    (!account.authConfigured ? "Authentication required" : runtimeStatus?.phaseMessage ?? "Synchronization blocked");
+    (!runtimeAuthReady ? "Authentication required" : runtimeStatus?.phaseMessage ?? "Synchronization blocked");
   const issueKind =
-    !account.authConfigured || runtimeIssueCode === "auth_required" ? "auth_required" : hasBlockingIssue ? "sync_error" : null;
+    !runtimeAuthReady || runtimeIssueCode === "auth_required" ? "auth_required" : hasBlockingIssue ? "sync_error" : null;
   const issueActions = runtimeStatus?.issueActions ?? [];
 
   if (mode === "sync") {

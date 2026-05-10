@@ -19,6 +19,7 @@ pub fn create_account_profile(
         .lock()
         .map_err(|_| "Account profile lock is poisoned".to_string())?;
     let profile = create_profile(input)?;
+    sync_engine::runtime_set_profile_auth_ready(&state.sync_runtime, &profile.id, false);
     let _ = activity_log::append_event(
         &profile.id,
         &profile.email,
