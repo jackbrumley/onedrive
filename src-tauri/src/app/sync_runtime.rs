@@ -64,6 +64,7 @@ pub struct SyncRuntimeCurrentActivity {
 #[serde(rename_all = "camelCase")]
 pub struct SyncRuntimeAccountStatus {
     pub profile_id: String,
+    pub engine_state: String,
     pub phase: String,
     pub phase_message: String,
     pub issue_code: Option<String>,
@@ -126,6 +127,7 @@ impl SyncRuntimeAccountStatus {
         let now = now_rfc3339();
         Self {
             profile_id: profile_id.to_string(),
+            engine_state: "paused".to_string(),
             phase: "idle".to_string(),
             phase_message: "Idle".to_string(),
             issue_code: None,
@@ -255,6 +257,14 @@ pub fn set_auth_ready(runtime_map: &mut SyncRuntimeMap, profile_id: &str, auth_r
     emit_status_event_for_account(runtime_map, profile_id);
 }
 
+pub fn set_engine_state(runtime_map: &mut SyncRuntimeMap, profile_id: &str, engine_state: &str) {
+    let status = ensure_account_status(runtime_map, profile_id);
+    status.engine_state = engine_state.to_string();
+    status.updated_at = now_rfc3339();
+    bump_runtime_revision();
+    emit_status_event_for_account(runtime_map, profile_id);
+}
+
 pub fn set_phase(
     runtime_map: &mut SyncRuntimeMap,
     profile_id: &str,
@@ -304,6 +314,28 @@ pub fn set_local_scan_progress(
     status.current_activity.total = estimated_total;
     status.current_activity.unit = Some("files".to_string());
     status.current_activity.detail = status.local_scan_current_path.clone();
+    status.updated_at = now_rfc3339();
+    bump_runtime_revision();
+    emit_status_event_for_account(runtime_map, profile_id);
+}
+
+pub fn set_current_activity(
+    runtime_map: &mut SyncRuntimeMap,
+    profile_id: &str,
+    stage: &str,
+    progress_mode: &str,
+    current: Option<usize>,
+    total: Option<usize>,
+    unit: Option<&str>,
+    detail: Option<&str>,
+) {
+    let status = ensure_account_status(runtime_map, profile_id);
+    status.current_activity.stage = stage.to_string();
+    status.current_activity.progress_mode = progress_mode.to_string();
+    status.current_activity.current = current;
+    status.current_activity.total = total;
+    status.current_activity.unit = unit.map(ToString::to_string);
+    status.current_activity.detail = detail.map(ToString::to_string);
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
     emit_status_event_for_account(runtime_map, profile_id);

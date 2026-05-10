@@ -67,6 +67,10 @@ fn remote_known_item_from_drive_item(
         is_dir: item.folder.is_some(),
         size: item.size.unwrap_or(0),
         modified_ts: parse_rfc3339_seconds(item.last_modified_date_time.as_deref()),
+        is_shared_reference: false,
+        shared_drive_id: None,
+        shared_item_id: None,
+        shared_kind: None,
     })
 }
 

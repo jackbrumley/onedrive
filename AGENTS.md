@@ -214,6 +214,7 @@ Any agent working on this repo should prioritize the following cleanups:
 - **No Split Authority Debt:** If a UI decision reads from two competing sources, treat that as a defect and resolve it immediately.
 - **Canonical Actions Required:** If UI shows a blocker (for example auth required), backend payload must include the concrete action set needed to recover.
 - **Recovery Path Is Not Authority:** Snapshot/recovery fetches are transport safety only; ongoing truth must come from the authoritative pipeline.
+- **Determinism Required:** For identical authoritative state and event sequence, backend payload and UI output must be identical; heuristic fallbacks that can produce alternate states are not allowed.
 
 ---
 

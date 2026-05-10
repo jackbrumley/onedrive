@@ -48,6 +48,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const [syncRuntime, setSyncRuntime] = useState<SyncRuntimeSnapshot>(initialSyncRuntime);
   const syncStatusSeqByAccountRef = useRef<Record<string, number>>({});
+  const hasReceivedSyncStatusRef = useRef(false);
   const [autostartEnabled, setAutostartEnabled] = useState(false);
   const [rawLoggerMode, setRawLoggerMode] = useState(false);
   const [syncDownloadConcurrency, setSyncDownloadConcurrency] = useState(12);
@@ -82,6 +83,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
   useEffect(() => {
     const syncRoute = () => setRouteState(routeStateFromHash(window.location.hash));
     let isDisposed = false;
+    let bootstrapTimerId: number | null = null;
     const unlistenAuthUpdatePromise = listen("account-auth-updated", () => {
       if (!isDisposed) {
         void Promise.all([refreshActions.refreshStatus(), refreshActions.refreshActivity()]);
@@ -92,6 +94,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
       if (!payload?.profileId) {
         return;
       }
+      hasReceivedSyncStatusRef.current = true;
       const profileId = payload.profileId;
       const incomingSeq = payload.statusSeq ?? 0;
       if (incomingSeq <= 0) {
@@ -127,9 +130,29 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     window.addEventListener("hashchange", syncRoute);
     void refreshActions.refreshStatus();
     void refreshActions.refreshActivity();
-    void invoke("request_sync_status_snapshot").catch(() => {
-      // best effort initial event hydration
-    });
+    void unlistenSyncStatusPromise
+      .then(() => {
+        if (isDisposed) {
+          return;
+        }
+        return invoke("request_sync_status_snapshot");
+      })
+      .then(() => {
+        if (isDisposed) {
+          return;
+        }
+        bootstrapTimerId = window.setTimeout(() => {
+          if (isDisposed || hasReceivedSyncStatusRef.current) {
+            return;
+          }
+          void refreshActions.refreshSyncRuntime();
+        }, 1200);
+      })
+      .catch(() => {
+        if (!isDisposed) {
+          void refreshActions.refreshSyncRuntime();
+        }
+      });
     void systemActions.getAutostartEnabled().then(setAutostartEnabled);
     void systemActions.fetchRawLoggerMode().then(setRawLoggerMode);
     void systemActions.fetchSyncDownloadConcurrency().then(setSyncDownloadConcurrency);
@@ -146,6 +169,9 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
         .catch(() => {
           // no-op
         });
+      if (bootstrapTimerId !== null) {
+        window.clearTimeout(bootstrapTimerId);
+      }
     };
   }, []);
 

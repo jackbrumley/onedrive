@@ -443,6 +443,16 @@ pub fn runtime_set_profile_auth_ready(
     }
 }
 
+pub fn runtime_set_engine_state(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    engine_state: &str,
+) {
+    if let Ok(mut runtime_map) = runtime.lock() {
+        sync_runtime::set_engine_state(&mut runtime_map, profile_id, engine_state);
+    }
+}
+
 fn runtime_reset_transfer_activity(runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>, profile_id: &str) {
     if let Ok(mut runtime_map) = runtime.lock() {
         sync_runtime::clear_in_progress(&mut runtime_map, profile_id);
@@ -464,6 +474,30 @@ fn runtime_set_local_scan_progress(
             scanned_count,
             estimated_total,
             current_path,
+        );
+    }
+}
+
+fn runtime_set_current_activity(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    stage: &str,
+    progress_mode: &str,
+    current: Option<usize>,
+    total: Option<usize>,
+    unit: Option<&str>,
+    detail: Option<&str>,
+) {
+    if let Ok(mut runtime_map) = runtime.lock() {
+        sync_runtime::set_current_activity(
+            &mut runtime_map,
+            profile_id,
+            stage,
+            progress_mode,
+            current,
+            total,
+            unit,
+            detail,
         );
     }
 }
@@ -783,6 +817,10 @@ struct RemoteKnownItem {
     is_dir: bool,
     size: u64,
     modified_ts: i64,
+    is_shared_reference: bool,
+    shared_drive_id: Option<String>,
+    shared_item_id: Option<String>,
+    shared_kind: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -819,6 +857,7 @@ struct DeltaItem {
     name: Option<String>,
     size: Option<u64>,
     folder: Option<serde_json::Value>,
+    remote_item: Option<serde_json::Value>,
     deleted: Option<serde_json::Value>,
     parent_reference: Option<ParentReference>,
     last_modified_date_time: Option<String>,

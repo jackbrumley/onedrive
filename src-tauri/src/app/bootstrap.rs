@@ -66,6 +66,16 @@ pub fn configure_shell(app: &mut tauri::App<tauri::Wry>) -> Result<(), Box<dyn s
                     &account.id,
                     account.auth_configured,
                 );
+                let engine_state = if account.agent_state == "syncing" {
+                    "running"
+                } else {
+                    "paused"
+                };
+                sync_engine::runtime_set_engine_state(
+                    &app_state.sync_runtime,
+                    &account.id,
+                    engine_state,
+                );
 
                 if account.agent_state == "syncing" {
                     if account.auth_configured {

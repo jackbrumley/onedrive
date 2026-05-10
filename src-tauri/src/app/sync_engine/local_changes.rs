@@ -8,6 +8,7 @@ async fn apply_local_changes(
     cancel_flag: &Arc<AtomicBool>,
 ) -> Result<(), String> {
     const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
+    const ACTIVITY_EMIT_INTERVAL: Duration = Duration::from_millis(500);
 
     runtime_set_phase(
         &graph.sync_runtime,
@@ -17,11 +18,37 @@ async fn apply_local_changes(
     );
     let mut local_paths: Vec<String> = current_local_snapshot.keys().cloned().collect();
     local_paths.sort_by_key(|path| path.matches('/').count());
+    let total_local_paths = local_paths.len();
     let mut local_paths_seen: usize = 0;
     let mut last_heartbeat_at = std::time::Instant::now();
+    let mut last_activity_emit_at = std::time::Instant::now();
+    runtime_set_current_activity(
+        &graph.sync_runtime,
+        &graph.profile_id,
+        "applying_local",
+        "determinate",
+        Some(0),
+        Some(total_local_paths),
+        Some("paths"),
+        Some("Evaluating local changes"),
+    );
     for path in local_paths {
         ensure_not_cancelled(cancel_flag)?;
         local_paths_seen += 1;
+
+        if last_activity_emit_at.elapsed() >= ACTIVITY_EMIT_INTERVAL || local_paths_seen % 200 == 0 {
+            runtime_set_current_activity(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                "applying_local",
+                "determinate",
+                Some(local_paths_seen),
+                Some(total_local_paths),
+                Some("paths"),
+                Some("Evaluating local changes"),
+            );
+            last_activity_emit_at = std::time::Instant::now();
+        }
 
         if last_heartbeat_at.elapsed() >= HEARTBEAT_INTERVAL {
             log::info!(
@@ -312,11 +339,37 @@ async fn apply_local_changes(
     }
 
     deleted_paths.sort_by_key(|path| std::cmp::Reverse(path.matches('/').count()));
+    let total_deleted_paths = deleted_paths.len();
     let mut deleted_paths_seen: usize = 0;
+
+    runtime_set_current_activity(
+        &graph.sync_runtime,
+        &graph.profile_id,
+        "applying_local",
+        "determinate",
+        Some(0),
+        Some(total_deleted_paths),
+        Some("paths"),
+        Some("Reconciling remote deletions"),
+    );
 
     for deleted_path in deleted_paths {
         ensure_not_cancelled(cancel_flag)?;
         deleted_paths_seen += 1;
+
+        if last_activity_emit_at.elapsed() >= ACTIVITY_EMIT_INTERVAL || deleted_paths_seen % 100 == 0 {
+            runtime_set_current_activity(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                "applying_local",
+                "determinate",
+                Some(deleted_paths_seen),
+                Some(total_deleted_paths),
+                Some("paths"),
+                Some("Reconciling remote deletions"),
+            );
+            last_activity_emit_at = std::time::Instant::now();
+        }
         if last_heartbeat_at.elapsed() >= HEARTBEAT_INTERVAL {
             log::info!(
                 "{} [cycle:{}] SYNC_HEARTBEAT phase=applying_local delete_paths_seen={} remote_deleted={} local_deleted={}",
@@ -363,9 +416,37 @@ async fn reconcile_bootstrap_local_snapshot(
 ) -> Result<(), String> {
     let mut remote_items: Vec<RemoteKnownItem> = sync_state.remote_by_id.values().cloned().collect();
     remote_items.sort_by_key(|item| item.path.matches('/').count());
+    let total_remote_items = remote_items.len();
+    let mut remote_items_seen: usize = 0;
+    let mut last_activity_emit_at = std::time::Instant::now();
+
+    runtime_set_current_activity(
+        &graph.sync_runtime,
+        &graph.profile_id,
+        "applying_local",
+        "determinate",
+        Some(0),
+        Some(total_remote_items),
+        Some("items"),
+        Some("Preparing two-way sync baseline"),
+    );
 
     for remote_item in remote_items {
         ensure_not_cancelled(cancel_flag)?;
+        remote_items_seen = remote_items_seen.saturating_add(1);
+        if last_activity_emit_at.elapsed() >= Duration::from_millis(500) || remote_items_seen % 100 == 0 {
+            runtime_set_current_activity(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                "applying_local",
+                "determinate",
+                Some(remote_items_seen),
+                Some(total_remote_items),
+                Some("items"),
+                Some("Preparing two-way sync baseline"),
+            );
+            last_activity_emit_at = std::time::Instant::now();
+        }
         if current_local_snapshot.contains_key(&remote_item.path) {
             continue;
         }
@@ -596,4 +677,39 @@ fn parse_rfc3339_seconds(value: Option<&str>) -> i64 {
         .and_then(|input| chrono::DateTime::parse_from_rfc3339(input).ok())
         .map(|timestamp| timestamp.timestamp())
         .unwrap_or(0)
+}
+
+fn shared_drive_id_from_delta_item(item: &DeltaItem) -> Option<String> {
+    item.remote_item
+        .as_ref()
+        .and_then(|remote_item| remote_item.get("parentReference"))
+        .and_then(|parent_reference| parent_reference.get("driveId"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn shared_item_id_from_delta_item(item: &DeltaItem) -> Option<String> {
+    item.remote_item
+        .as_ref()
+        .and_then(|remote_item| remote_item.get("id"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn shared_kind_from_delta_item(item: &DeltaItem) -> Option<String> {
+    let remote_item = item.remote_item.as_ref()?;
+    if remote_item.get("folder").is_some() {
+        return Some("folder".to_string());
+    }
+    if remote_item.get("file").is_some() {
+        return Some("file".to_string());
+    }
+    if remote_item.get("package").is_some() {
+        return Some("package".to_string());
+    }
+    Some("unknown".to_string())
 }

@@ -108,6 +108,7 @@ export interface SyncRuntimeCurrentActivity {
 
 export interface SyncRuntimeAccountStatus {
   profileId: string;
+  engineState?: "running" | "paused" | "blocked" | string;
   phase: string;
   phaseMessage: string;
   issueCode: string | null;

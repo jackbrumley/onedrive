@@ -68,6 +68,7 @@ struct SyncFilePlannerCounters {
     need_download_total: usize,
     need_upload_total: usize,
     conflict_total: usize,
+    shared_reference_total: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -190,6 +191,10 @@ fn open_sync_jobs_connection(profile_id: &str) -> Result<Connection, String> {
                  profile_id TEXT NOT NULL,
                  path TEXT NOT NULL,
                  is_dir INTEGER NOT NULL DEFAULT 0,
+                 is_shared_reference INTEGER NOT NULL DEFAULT 0,
+                 shared_drive_id TEXT,
+                 shared_item_id TEXT,
+                 shared_kind TEXT,
                  remote_item_id TEXT,
                  remote_present INTEGER NOT NULL DEFAULT 0,
                  local_present INTEGER NOT NULL DEFAULT 0,
@@ -319,6 +324,35 @@ fn run_sync_jobs_migrations(connection: &Connection) -> Result<(), String> {
                  PRAGMA user_version = 2;",
             )
             .map_err(|error| format!("Failed applying sync_jobs schema migration v2: {error}"))?;
+    }
+
+    let current_version = connection
+        .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+        .map_err(|error| format!("Failed re-reading sync_jobs schema version: {error}"))?;
+    if current_version < 3 {
+        add_sync_files_column_if_missing(
+            connection,
+            "is_shared_reference",
+            "ALTER TABLE sync_files ADD COLUMN is_shared_reference INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_sync_files_column_if_missing(
+            connection,
+            "shared_drive_id",
+            "ALTER TABLE sync_files ADD COLUMN shared_drive_id TEXT",
+        )?;
+        add_sync_files_column_if_missing(
+            connection,
+            "shared_item_id",
+            "ALTER TABLE sync_files ADD COLUMN shared_item_id TEXT",
+        )?;
+        add_sync_files_column_if_missing(
+            connection,
+            "shared_kind",
+            "ALTER TABLE sync_files ADD COLUMN shared_kind TEXT",
+        )?;
+        connection
+            .execute_batch("PRAGMA user_version = 3;")
+            .map_err(|error| format!("Failed applying sync_jobs schema migration v3: {error}"))?;
     }
 
     Ok(())
@@ -575,6 +609,30 @@ fn add_sync_jobs_column_if_missing(
     connection
         .execute(alter_sql, [])
         .map_err(|error| format!("Failed adding sync_jobs column '{column_name}': {error}"))?;
+    Ok(())
+}
+
+fn add_sync_files_column_if_missing(
+    connection: &Connection,
+    column_name: &str,
+    alter_sql: &str,
+) -> Result<(), String> {
+    let mut statement = connection
+        .prepare("PRAGMA table_info(sync_files)")
+        .map_err(|error| format!("Failed preparing sync_files schema query: {error}"))?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| format!("Failed querying sync_files schema info: {error}"))?;
+    for row in rows {
+        let existing =
+            row.map_err(|error| format!("Failed reading sync_files schema row: {error}"))?;
+        if existing == column_name {
+            return Ok(());
+        }
+    }
+    connection
+        .execute(alter_sql, [])
+        .map_err(|error| format!("Failed adding sync_files column '{column_name}': {error}"))?;
     Ok(())
 }
 
@@ -1711,6 +1769,11 @@ pub fn hydrate_runtime_status_from_db(
         status.phase_message = lifecycle.phase_message;
         status.remote_scan_complete = lifecycle.remote_scan_complete;
         status.two_way_ready = lifecycle.two_way_ready;
+        status.engine_state = if lifecycle.agent_state == "syncing" {
+            "running".to_string()
+        } else {
+            "paused".to_string()
+        };
     }
 
     Ok(())
@@ -1857,99 +1920,6 @@ fn unix_seconds_to_rfc3339(value: i64) -> String {
         .unwrap_or_else(|| Local::now().to_rfc3339())
 }
 
-fn reset_sync_file_index(profile_id: &str) -> Result<(), String> {
-    let connection = open_sync_jobs_connection(profile_id)?;
-    connection
-        .execute(
-            "DELETE FROM sync_files WHERE profile_id = ?1",
-            params![profile_id],
-        )
-        .map_err(|error| format!("Failed resetting sync file index: {error}"))?;
-    Ok(())
-}
-
-fn upsert_remote_sync_file(profile_id: &str, remote_item: &RemoteKnownItem) -> Result<(), String> {
-    let connection = open_sync_jobs_connection(profile_id)?;
-    let now = current_unix_seconds();
-    connection
-        .execute(
-            "INSERT INTO sync_files (
-                profile_id, path, is_dir, remote_item_id,
-                remote_present, local_present,
-                remote_size, local_size,
-                remote_modified_ts, local_modified_ts,
-                desired_action, conflict_state, updated_at
-             ) VALUES (
-                ?1, ?2, ?3, ?4,
-                1, 0,
-                ?5, 0,
-                ?6, 0,
-                'none', NULL, ?7
-             )
-             ON CONFLICT(profile_id, path)
-             DO UPDATE SET
-                is_dir = excluded.is_dir,
-                remote_item_id = excluded.remote_item_id,
-                remote_present = 1,
-                remote_size = excluded.remote_size,
-                remote_modified_ts = excluded.remote_modified_ts,
-                updated_at = excluded.updated_at",
-            params![
-                profile_id,
-                remote_item.path,
-                if remote_item.is_dir { 1 } else { 0 },
-                remote_item.id,
-                remote_item.size as i64,
-                remote_item.modified_ts,
-                now,
-            ],
-        )
-        .map_err(|error| format!("Failed upserting remote sync file row: {error}"))?;
-    Ok(())
-}
-
-fn upsert_local_sync_file(
-    profile_id: &str,
-    relative_path: &str,
-    local_entry: &LocalSnapshotEntry,
-) -> Result<(), String> {
-    let connection = open_sync_jobs_connection(profile_id)?;
-    let now = current_unix_seconds();
-    connection
-        .execute(
-            "INSERT INTO sync_files (
-                profile_id, path, is_dir, remote_item_id,
-                remote_present, local_present,
-                remote_size, local_size,
-                remote_modified_ts, local_modified_ts,
-                desired_action, conflict_state, updated_at
-             ) VALUES (
-                ?1, ?2, ?3, NULL,
-                0, 1,
-                0, ?4,
-                0, ?5,
-                'none', NULL, ?6
-             )
-             ON CONFLICT(profile_id, path)
-             DO UPDATE SET
-                is_dir = excluded.is_dir,
-                local_present = 1,
-                local_size = excluded.local_size,
-                local_modified_ts = excluded.local_modified_ts,
-                updated_at = excluded.updated_at",
-            params![
-                profile_id,
-                relative_path,
-                if local_entry.is_dir { 1 } else { 0 },
-                local_entry.size as i64,
-                local_entry.modified_ts,
-                now,
-            ],
-        )
-        .map_err(|error| format!("Failed upserting local sync file row: {error}"))?;
-    Ok(())
-}
-
 fn recompute_sync_file_actions(
     profile_id: &str,
     two_way_ready: bool,
@@ -1972,8 +1942,17 @@ fn recompute_sync_file_actions(
              SET desired_action = 'download'
              WHERE profile_id = ?1
                AND is_dir = 0
+               AND is_shared_reference = 0
                AND remote_present = 1
-               AND local_present = 0",
+               AND local_present = 0
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM sync_jobs
+                   WHERE sync_jobs.profile_id = sync_files.profile_id
+                     AND sync_jobs.direction = 'download'
+                     AND sync_jobs.item_id = sync_files.remote_item_id
+                     AND sync_jobs.state = 'skipped'
+               )",
             params![profile_id],
         )
         .map_err(|error| format!("Failed deriving download actions: {error}"))?;
@@ -1984,9 +1963,10 @@ fn recompute_sync_file_actions(
                 "UPDATE sync_files
                  SET desired_action = 'upload'
                  WHERE profile_id = ?1
-                   AND is_dir = 0
-                   AND local_present = 1
-                   AND remote_present = 0",
+                    AND is_dir = 0
+                    AND is_shared_reference = 0
+                    AND local_present = 1
+                    AND remote_present = 0",
                 params![profile_id],
             )
             .map_err(|error| format!("Failed deriving upload actions for local-only files: {error}"))?;
@@ -2007,10 +1987,11 @@ fn recompute_sync_file_actions(
                      THEN 'metadata_mismatch'
                  ELSE NULL
              END
-             WHERE profile_id = ?1
-               AND is_dir = 0
-               AND remote_present = 1
-               AND local_present = 1",
+              WHERE profile_id = ?1
+                AND is_dir = 0
+                AND is_shared_reference = 0
+                AND remote_present = 1
+                AND local_present = 1",
             params![profile_id, local_dominates_action],
         )
         .map_err(|error| format!("Failed deriving overlap actions: {error}"))?;
@@ -2038,6 +2019,15 @@ fn read_sync_file_planner_counters(profile_id: &str) -> Result<SyncFilePlannerCo
             |row| row.get::<_, i64>(0),
         )
         .map_err(|error| format!("Failed reading local discovered counter: {error}"))?
+        .max(0) as usize;
+
+    counters.shared_reference_total = connection
+        .query_row(
+            "SELECT COUNT(1) FROM sync_files WHERE profile_id = ?1 AND is_shared_reference = 1",
+            params![profile_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| format!("Failed reading shared reference counter: {error}"))?
         .max(0) as usize;
 
     let mut statement = connection

@@ -97,13 +97,22 @@ export function AccountDetailUnifiedPanel({
   };
 
   const { runtimeIssueCode, hasBlockingIssue } = computeEffectiveSyncState(account, runtimeStatus);
+  const runtimeUnavailable = runtimeStatus === null;
   const runtimeAuthReady = runtimeStatus?.authReady ?? false;
   const syncIssueMessage =
-    runtimeStatus?.issueMessage ??
-    (!runtimeAuthReady ? "Authentication required" : runtimeStatus?.phaseMessage ?? "Synchronization blocked");
+    runtimeUnavailable
+      ? "null"
+      : runtimeStatus?.issueMessage ??
+        (!runtimeAuthReady ? "Authentication required" : runtimeStatus?.phaseMessage ?? "Synchronization blocked");
   const issueKind =
-    !runtimeAuthReady || runtimeIssueCode === "auth_required" ? "auth_required" : hasBlockingIssue ? "sync_error" : null;
-  const issueActions = runtimeStatus?.issueActions ?? [];
+    runtimeUnavailable
+      ? null
+      : !runtimeAuthReady || runtimeIssueCode === "auth_required"
+        ? "auth_required"
+        : hasBlockingIssue
+          ? "sync_error"
+          : null;
+  const issueActions = runtimeUnavailable ? [] : runtimeStatus?.issueActions ?? [];
 
   if (mode === "sync") {
     return (
@@ -111,7 +120,7 @@ export function AccountDetailUnifiedPanel({
         <AccountSyncActivityPanel
           runtimeStatus={runtimeStatus}
           hasCompletedInitialSync={computeHasCompletedInitialSync(runtimeStatus)}
-          issueMessage={hasBlockingIssue ? syncIssueMessage : null}
+          issueMessage={runtimeUnavailable ? "null" : hasBlockingIssue ? syncIssueMessage : null}
           issueKind={issueKind}
           issueActions={issueActions}
           issuePath={runtimeStatus?.issuePath ?? null}

@@ -28,6 +28,14 @@ export function syncModeMessage(
   runtimeStatus: SyncRuntimeAccountStatus | null,
   hasCompletedInitialSync: boolean
 ): SyncModeMessage {
+  if (!runtimeStatus) {
+    return {
+      title: "Runtime status",
+      detail: "null",
+      tone: "info",
+    };
+  }
+
   if (isDeletionGuardIssue(runtimeStatus)) {
     return {
       title: "Large deletion detected",

@@ -49,10 +49,12 @@ pub fn on_agent_state_changed(
         );
     }
     if agent_state == "syncing" {
+        runtime_set_engine_state(&state.sync_runtime, profile_id, "running");
         let _ = set_cancel_flag(state, profile_id, false)?;
         runtime_clear_issue(&state.sync_runtime, profile_id);
         start_sync_worker(state, profile_id)?;
     } else {
+        runtime_set_engine_state(&state.sync_runtime, profile_id, "paused");
         let _ = set_cancel_flag(state, profile_id, true)?;
         stop_sync_worker(state, profile_id)?;
         match reset_running_sync_jobs_for_pause(profile_id) {

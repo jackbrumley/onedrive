@@ -1,15 +1,7 @@
 import type { AccountProfile, SyncRuntimeAccountStatus } from "../../types/somedrive";
 
-function isSyncPhaseActive(phase: string | undefined): boolean {
-  return (
-    phase === "syncing" ||
-    phase === "scanning_remote" ||
-    phase === "applying_remote" ||
-    phase === "scanning_local" ||
-    phase === "building_index" ||
-    phase === "planning_actions" ||
-    phase === "applying_local"
-  );
+function isEngineRunning(engineState: string | undefined): boolean {
+  return engineState === "running";
 }
 
 export function computeEffectiveSyncState(
@@ -21,13 +13,23 @@ export function computeEffectiveSyncState(
   syncActive: boolean;
   syncState: "stopped" | "syncing" | "paused";
 } {
+  if (!runtimeStatus) {
+    return {
+      runtimeIssueCode: null,
+      hasBlockingIssue: false,
+      syncActive: false,
+      syncState: "paused",
+    };
+  }
+
   const runtimeIssueCode = runtimeStatus?.issueCode ?? null;
-  const phase = runtimeStatus?.phase;
+  const phase = runtimeStatus.phase;
+  const engineState = runtimeStatus.engineState ?? "paused";
   const authReady = runtimeStatus?.authReady ?? false;
   const issueSeverity = runtimeStatus?.issueSeverity ?? "none";
   const canSync = runtimeStatus?.canSync ?? false;
   const hasBlockingIssue = !authReady || issueSeverity === "blocking" || !canSync || phase === "error";
-  const syncActive = isSyncPhaseActive(phase);
+  const syncActive = isEngineRunning(engineState);
   const syncState: "stopped" | "syncing" | "paused" = hasBlockingIssue
     ? "stopped"
     : syncActive

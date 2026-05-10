@@ -693,6 +693,10 @@ async fn dispatch_claimed_download_jobs(
             is_dir: false,
             size: claimed_job.remote_size,
             modified_ts: claimed_job.remote_modified_ts,
+            is_shared_reference: false,
+            shared_drive_id: None,
+            shared_item_id: None,
+            shared_kind: None,
         };
         let local_abs = sync_root.join(path_to_local(&claimed_job.path));
         let job = RemoteDownloadJob {
@@ -836,12 +840,21 @@ async fn process_remote_page_items(
             continue;
         };
 
+        let shared_drive_id = shared_drive_id_from_delta_item(&item);
+        let shared_item_id = shared_item_id_from_delta_item(&item);
+        let shared_kind = shared_kind_from_delta_item(&item);
+        let is_shared_reference = item.remote_item.is_some();
+
         let remote_entry = RemoteKnownItem {
             id: item.id.clone(),
             path: path.clone(),
             is_dir: item.folder.is_some(),
             size: item.size.unwrap_or(0),
             modified_ts: parse_rfc3339_seconds(item.last_modified_date_time.as_deref()),
+            is_shared_reference,
+            shared_drive_id,
+            shared_item_id,
+            shared_kind,
         };
 
         let local_abs = sync_root.join(path_to_local(&path));
