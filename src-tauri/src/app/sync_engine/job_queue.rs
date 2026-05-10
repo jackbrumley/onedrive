@@ -256,7 +256,6 @@ fn open_sync_jobs_connection(profile_id: &str) -> Result<Connection, String> {
 pub enum RetryFailedDownloadJobStatus {
     Retried,
     AlreadyRetrying,
-    PermissionDenied,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -323,11 +322,6 @@ fn run_sync_jobs_migrations(connection: &Connection) -> Result<(), String> {
     }
 
     Ok(())
-}
-
-fn is_permission_denied_error_text(error_text: &str) -> bool {
-    let normalized = error_text.to_lowercase();
-    normalized.contains("status 403") || normalized.contains("accessdenied")
 }
 
 fn bool_to_sql(value: bool) -> i64 {
@@ -495,6 +489,41 @@ pub(crate) fn read_sync_lifecycle_profile_metadata(
     profile_id: &str,
 ) -> Result<Option<(String, Option<String>)>, String> {
     Ok(read_sync_lifecycle_row(profile_id)?.map(|row| (row.agent_state, row.last_sync_at)))
+}
+
+pub(crate) fn list_terminal_failed_download_paths(
+    profile_id: &str,
+    limit: usize,
+) -> Result<Vec<String>, String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let mut statement = connection
+        .prepare(
+            "SELECT path
+             FROM sync_jobs
+             WHERE profile_id = ?1
+               AND direction = ?2
+               AND state = ?3
+             ORDER BY finished_at DESC, updated_at DESC
+             LIMIT ?4",
+        )
+        .map_err(|error| format!("Failed preparing terminal failed path query: {error}"))?;
+    let rows = statement
+        .query_map(
+            params![
+                profile_id,
+                DOWNLOAD_JOB_DIRECTION,
+                DOWNLOAD_JOB_STATE_FAILED_TERMINAL,
+                limit as i64,
+            ],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|error| format!("Failed querying terminal failed download paths: {error}"))?;
+
+    let mut paths: Vec<String> = Vec::new();
+    for row in rows {
+        paths.push(row.map_err(|error| format!("Failed reading terminal failed path row: {error}"))?);
+    }
+    Ok(paths)
 }
 
 pub(crate) fn read_sync_state_store(profile_id: &str) -> Result<Option<String>, String> {
@@ -895,30 +924,23 @@ pub fn retry_failed_download_job(
     }
 
     let connection = open_sync_jobs_connection(profile_id)?;
-    let current_row: Option<(String, Option<String>)> = connection
+    let current_state: Option<String> = connection
         .query_row(
-            "SELECT state, last_error
+            "SELECT state
              FROM sync_jobs
              WHERE profile_id = ?1 AND direction = ?2 AND id = ?3",
             params![profile_id, DOWNLOAD_JOB_DIRECTION, job_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .optional()
         .map_err(|error| format!("Failed loading failed download job: {error}"))?;
 
-    let Some((state, last_error)) = current_row else {
+    let Some(state) = current_state else {
         return Ok(RetryFailedDownloadJobStatus::AlreadyRetrying);
     };
 
     if state != DOWNLOAD_JOB_STATE_FAILED_TERMINAL {
         return Ok(RetryFailedDownloadJobStatus::AlreadyRetrying);
-    }
-
-    if last_error
-        .as_deref()
-        .is_some_and(is_permission_denied_error_text)
-    {
-        return Ok(RetryFailedDownloadJobStatus::PermissionDenied);
     }
 
     let now = current_unix_seconds();
@@ -962,14 +984,10 @@ pub fn retry_all_failed_download_jobs(
     profile_id: &str,
 ) -> Result<RetryAllFailedDownloadJobsReport, String> {
     let connection = open_sync_jobs_connection(profile_id)?;
-    let (failed_total, permission_denied_total): (usize, usize) = connection
+    let failed_total: usize = connection
         .query_row(
             "SELECT
-                SUM(CASE WHEN state = ?1 THEN 1 ELSE 0 END),
-                SUM(CASE WHEN state = ?1 AND (
-                    lower(COALESCE(last_error, '')) LIKE '%status 403%'
-                    OR lower(COALESCE(last_error, '')) LIKE '%accessdenied%'
-                ) THEN 1 ELSE 0 END)
+                SUM(CASE WHEN state = ?1 THEN 1 ELSE 0 END)
              FROM sync_jobs
              WHERE profile_id = ?2
                AND direction = ?3",
@@ -978,12 +996,7 @@ pub fn retry_all_failed_download_jobs(
                 profile_id,
                 DOWNLOAD_JOB_DIRECTION,
             ],
-            |row| {
-                Ok((
-                    row.get::<_, Option<i64>>(0)?.unwrap_or(0).max(0) as usize,
-                    row.get::<_, Option<i64>>(1)?.unwrap_or(0).max(0) as usize,
-                ))
-            },
+            |row| Ok(row.get::<_, Option<i64>>(0)?.unwrap_or(0).max(0) as usize),
         )
         .map_err(|error| format!("Failed counting failed download jobs: {error}"))?;
     let now = current_unix_seconds();
@@ -1002,11 +1015,7 @@ pub fn retry_all_failed_download_jobs(
                  progress_updated_at = ?3
              WHERE profile_id = ?4
                AND direction = ?5
-               AND state = ?6
-               AND (last_error IS NULL OR (
-                    lower(last_error) NOT LIKE '%status 403%'
-                    AND lower(last_error) NOT LIKE '%accessdenied%'
-               ))",
+                AND state = ?6",
             params![
                 DOWNLOAD_JOB_STATE_QUEUED,
                 JOB_RUN_STATE_IDLE,
@@ -1019,12 +1028,11 @@ pub fn retry_all_failed_download_jobs(
         .map_err(|error| format!("Failed retrying failed download jobs: {error}"))?
         as usize;
 
-    let retryable_total = failed_total.saturating_sub(permission_denied_total);
-    let already_retrying = retryable_total.saturating_sub(retried);
+    let already_retrying = failed_total.saturating_sub(retried);
 
     Ok(RetryAllFailedDownloadJobsReport {
         retried,
-        skipped_permission_denied: permission_denied_total,
+        skipped_permission_denied: 0,
         already_retrying,
     })
 }
@@ -1413,6 +1421,8 @@ fn read_sync_job_activity_projection(
     let mut active_statement = connection
         .prepare(
             "SELECT id,
+                    state,
+                    run_state,
                     direction,
                     path,
                     bytes_done,
@@ -1421,10 +1431,12 @@ fn read_sync_job_activity_projection(
                     COALESCE(progress_updated_at, updated_at)
              FROM sync_jobs
              WHERE profile_id = ?1
-               AND state = ?2
-               AND run_state = ?3
-             ORDER BY COALESCE(progress_updated_at, updated_at) DESC
-             LIMIT ?4",
+                AND (
+                    (state = ?2 AND run_state IN (?3, ?4))
+                    OR state = ?5
+                )
+              ORDER BY COALESCE(progress_updated_at, updated_at) DESC
+              LIMIT ?6",
         )
         .map_err(|error| format!("Failed preparing active sync job query: {error}"))?;
     let active_rows = active_statement
@@ -1433,21 +1445,33 @@ fn read_sync_job_activity_projection(
                 profile_id,
                 DOWNLOAD_JOB_STATE_IN_PROGRESS,
                 JOB_RUN_STATE_RUNNING,
+                JOB_RUN_STATE_CLAIMED,
+                DOWNLOAD_JOB_STATE_QUEUED,
                 active_limit as i64,
             ],
             |row| {
                 let job_id: i64 = row.get(0)?;
-                let direction: String = row.get(1)?;
-                let path: String = row.get(2)?;
-                let bytes_done = row.get::<_, i64>(3)?.max(0) as u64;
-                let bytes_total = row.get::<_, Option<i64>>(4)?.map(|value| value.max(0) as u64);
-                let started_at_unix: i64 = row.get(5)?;
-                let updated_at_unix: i64 = row.get(6)?;
+                let state: String = row.get(1)?;
+                let run_state: String = row.get(2)?;
+                let direction: String = row.get(3)?;
+                let path: String = row.get(4)?;
+                let bytes_done = row.get::<_, i64>(5)?.max(0) as u64;
+                let bytes_total = row.get::<_, Option<i64>>(6)?.map(|value| value.max(0) as u64);
+                let started_at_unix: i64 = row.get(7)?;
+                let updated_at_unix: i64 = row.get(8)?;
+                let transfer_state = if state == DOWNLOAD_JOB_STATE_IN_PROGRESS
+                    && run_state == JOB_RUN_STATE_RUNNING
+                {
+                    "in_progress"
+                } else {
+                    "queued"
+                };
                 Ok((
                     SyncRuntimeTransfer {
                         id: format!("job-{job_id}"),
                         direction,
                         path,
+                        state: transfer_state.to_string(),
                         bytes_done,
                         bytes_total,
                         started_at: unix_seconds_to_rfc3339(started_at_unix),
@@ -1461,9 +1485,13 @@ fn read_sync_job_activity_projection(
     for row in active_rows {
         let (transfer, _) =
             row.map_err(|error| format!("Failed reading active sync job row: {error}"))?;
-        if transfer.direction.eq_ignore_ascii_case(DOWNLOAD_JOB_DIRECTION) {
+        if transfer.direction.eq_ignore_ascii_case(DOWNLOAD_JOB_DIRECTION)
+            && transfer.state == "in_progress"
+        {
             projection.active_download_count += 1;
-        } else if transfer.direction.eq_ignore_ascii_case(UPLOAD_JOB_DIRECTION) {
+        } else if transfer.direction.eq_ignore_ascii_case(UPLOAD_JOB_DIRECTION)
+            && transfer.state == "in_progress"
+        {
             projection.active_upload_count += 1;
         }
         projection.active.push(transfer);

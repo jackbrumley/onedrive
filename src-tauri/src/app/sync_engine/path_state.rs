@@ -71,6 +71,16 @@ fn remote_known_item_from_drive_item(
 }
 
 fn collect_local_snapshot(sync_root: &Path) -> Result<HashMap<String, LocalSnapshotEntry>, String> {
+    collect_local_snapshot_with_progress(sync_root, |_| {})
+}
+
+fn collect_local_snapshot_with_progress<F>(
+    sync_root: &Path,
+    mut on_progress: F,
+) -> Result<HashMap<String, LocalSnapshotEntry>, String>
+where
+    F: FnMut(&str),
+{
     let mut snapshot = HashMap::new();
     if !sync_root.exists() {
         return Ok(snapshot);
@@ -118,6 +128,8 @@ fn collect_local_snapshot(sync_root: &Path) -> Result<HashMap<String, LocalSnaps
                 .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|value| value.as_secs() as i64)
                 .unwrap_or(0);
+
+            on_progress(&normalized);
 
             snapshot.insert(
                 normalized,

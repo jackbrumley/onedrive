@@ -13,6 +13,7 @@ pub struct SyncRuntimeTransfer {
     pub id: String,
     pub direction: String,
     pub path: String,
+    pub state: String,
     pub bytes_done: u64,
     pub bytes_total: Option<u64>,
     pub started_at: String,
@@ -74,6 +75,9 @@ pub struct SyncRuntimeAccountStatus {
     pub upload_throttle_last_minute: usize,
     pub remote_scan_complete: bool,
     pub two_way_ready: bool,
+    pub local_scan_scanned_count: usize,
+    pub local_scan_estimated_total: Option<usize>,
+    pub local_scan_current_path: Option<String>,
     pub updated_at: String,
     #[serde(skip_serializing)]
     remote_session_discovered_ids: HashSet<String>,
@@ -129,6 +133,9 @@ impl SyncRuntimeAccountStatus {
             upload_throttle_last_minute: 0,
             remote_scan_complete: false,
             two_way_ready: false,
+            local_scan_scanned_count: 0,
+            local_scan_estimated_total: None,
+            local_scan_current_path: None,
             updated_at: now,
             remote_session_discovered_ids: HashSet::new(),
             remote_session_planned_ids: HashSet::new(),
@@ -167,6 +174,26 @@ pub fn set_phase(
     let status = ensure_account_status(runtime_map, profile_id);
     status.phase = phase.to_string();
     status.phase_message = phase_message.to_string();
+    if phase != "scanning_local" {
+        status.local_scan_scanned_count = 0;
+        status.local_scan_estimated_total = None;
+        status.local_scan_current_path = None;
+    }
+    status.updated_at = now_rfc3339();
+    bump_runtime_revision();
+}
+
+pub fn set_local_scan_progress(
+    runtime_map: &mut SyncRuntimeMap,
+    profile_id: &str,
+    scanned_count: usize,
+    estimated_total: Option<usize>,
+    current_path: Option<&str>,
+) {
+    let status = ensure_account_status(runtime_map, profile_id);
+    status.local_scan_scanned_count = scanned_count;
+    status.local_scan_estimated_total = estimated_total;
+    status.local_scan_current_path = current_path.map(ToString::to_string);
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
 }
@@ -360,6 +387,7 @@ pub fn start_transfer(
         id: transfer_id.clone(),
         direction: direction.to_string(),
         path: path.to_string(),
+        state: "in_progress".to_string(),
         bytes_done: 0,
         bytes_total,
         started_at: now.clone(),

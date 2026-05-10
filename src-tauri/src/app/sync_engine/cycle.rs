@@ -72,9 +72,77 @@ async fn tick_sync_cycle(
         "scanning_local",
         "Scanning local files",
     );
-    let local_snapshot = collect_local_snapshot(&sync_root)?;
+    log::info!(
+        "{} [cycle:{}] STAGE_START stage=scanning_local sync_root={}",
+        account_prefix,
+        cycle_id,
+        sync_root.display()
+    );
+    let local_scan_estimated_total = if sync_state.local_snapshot.is_empty() {
+        None
+    } else {
+        Some(sync_state.local_snapshot.len())
+    };
+    let local_snapshot = run_local_scan_with_runtime_updates(
+        &graph.account_prefix,
+        &graph.cycle_id,
+        &graph.sync_runtime,
+        profile_id,
+        &sync_root,
+        local_scan_estimated_total,
+        cancel_flag,
+    )
+    .await?;
+    log::info!(
+        "{} [cycle:{}] STAGE_COMPLETE stage=scanning_local local_items={}",
+        account_prefix,
+        cycle_id,
+        local_snapshot.len()
+    );
+    let index_started_at = std::time::Instant::now();
+    runtime_set_phase(
+        &graph.sync_runtime,
+        profile_id,
+        "building_index",
+        "Building sync index",
+    );
+    log::info!(
+        "{} [cycle:{}] STAGE_START stage=index_rebuild remote_items={} local_items={}",
+        account_prefix,
+        cycle_id,
+        sync_state.remote_by_id.len(),
+        local_snapshot.len()
+    );
     rebuild_sync_file_index(profile_id, &sync_state, &local_snapshot)?;
+    log::info!(
+        "{} [cycle:{}] STAGE_COMPLETE stage=index_rebuild duration_ms={}",
+        account_prefix,
+        cycle_id,
+        index_started_at.elapsed().as_millis()
+    );
+    let planner_started_at = std::time::Instant::now();
+    runtime_set_phase(
+        &graph.sync_runtime,
+        profile_id,
+        "planning_actions",
+        "Planning sync actions",
+    );
+    log::info!(
+        "{} [cycle:{}] STAGE_START stage=planner two_way_ready={}",
+        account_prefix,
+        cycle_id,
+        sync_state.two_way_ready
+    );
     let planner_counters = recompute_sync_file_actions(profile_id, sync_state.two_way_ready)?;
+    log::info!(
+        "{} [cycle:{}] STAGE_COMPLETE stage=planner duration_ms={} need_download={} need_upload={} conflicts={}",
+        account_prefix,
+        cycle_id,
+        planner_started_at.elapsed().as_millis(),
+        planner_counters.need_download_total,
+        planner_counters.need_upload_total,
+        planner_counters.conflict_total
+    );
     runtime_set_upload_planned_total(
         &graph.sync_runtime,
         profile_id,
@@ -142,12 +210,46 @@ async fn tick_sync_cycle(
             .await?;
             sync_state.two_way_ready = true;
         } else {
+            let blocked_message = if download_counters.failed_terminal > 0 {
+                format!(
+                    "Initial sync blocked: {} failed download{} need retry before two-way sync",
+                    download_counters.failed_terminal,
+                    if download_counters.failed_terminal == 1 { "" } else { "s" }
+                )
+            } else {
+                "Initial sync in progress - downloading cloud files only".to_string()
+            };
             runtime_set_phase(
                 &graph.sync_runtime,
                 profile_id,
                 "syncing",
-                "Initial sync in progress - downloading cloud files only",
+                &blocked_message,
             );
+            if download_counters.failed_terminal > 0 {
+                let failed_samples = list_terminal_failed_download_paths(profile_id, 5)
+                    .unwrap_or_else(|_| Vec::new());
+                log::warn!(
+                    "{} [cycle:{}] TWO_WAY_BLOCK_REASON reason=failed_terminal_downloads count={} sample_paths={}",
+                    account_prefix,
+                    cycle_id,
+                    download_counters.failed_terminal,
+                    if failed_samples.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        failed_samples.join(" | ")
+                    }
+                );
+            }
+            if planner_counters.need_download_total > 0 {
+                log::warn!(
+                    "{} [cycle:{}] TWO_WAY_BLOCK_REASON reason=planner_requires_downloads need_download={} queue_remaining={} failed_terminal={}",
+                    account_prefix,
+                    cycle_id,
+                    planner_counters.need_download_total,
+                    download_counters.remaining,
+                    download_counters.failed_terminal
+                );
+            }
             log::warn!(
                 "{} [cycle:{}] BOOTSTRAP_TWO_WAY_BLOCKED cursor_active={} bootstrap_full_scan_completed={} planner_need_download={} queue_remaining={} failed_terminal={}",
                 account_prefix,
@@ -193,6 +295,131 @@ async fn tick_sync_cycle(
         "Idle - waiting for next sync cycle",
     );
     Ok(stats)
+}
+
+async fn run_local_scan_with_runtime_updates(
+    account_prefix: &str,
+    cycle_id: &str,
+    sync_runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    sync_root: &Path,
+    estimated_total: Option<usize>,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<HashMap<String, LocalSnapshotEntry>, String> {
+    use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering as AtomicOrdering};
+    use std::sync::Mutex;
+
+    let scanned_count = Arc::new(AtomicUsize::new(0));
+    let last_progress_unix = Arc::new(AtomicI64::new(chrono::Utc::now().timestamp()));
+    let current_path = Arc::new(Mutex::new(None::<String>));
+
+    let thread_scanned_count = Arc::clone(&scanned_count);
+    let thread_last_progress_unix = Arc::clone(&last_progress_unix);
+    let thread_current_path = Arc::clone(&current_path);
+    let sync_root_owned = sync_root.to_path_buf();
+
+    let mut scan_handle = tauri::async_runtime::spawn_blocking(move || {
+        collect_local_snapshot_with_progress(&sync_root_owned, |relative_path| {
+            thread_scanned_count.fetch_add(1, AtomicOrdering::Relaxed);
+            thread_last_progress_unix.store(chrono::Utc::now().timestamp(), AtomicOrdering::Relaxed);
+            if let Ok(mut value) = thread_current_path.lock() {
+                *value = Some(relative_path.to_string());
+            }
+        })
+    });
+
+    let mut last_emit_at = std::time::Instant::now();
+    let mut last_progress_log_at = std::time::Instant::now();
+    let scan_started_at = std::time::Instant::now();
+    let mut last_stall_warn_at: Option<std::time::Instant> = None;
+    log::info!(
+        "{} [cycle:{}] LOCAL_SCAN_START sync_root={}",
+        account_prefix,
+        cycle_id,
+        sync_root.display()
+    );
+    runtime_set_local_scan_progress(sync_runtime, profile_id, 0, estimated_total, None);
+
+    loop {
+        ensure_not_cancelled(cancel_flag)?;
+        tokio::select! {
+            scan_result = &mut scan_handle => {
+                let local_snapshot = scan_result
+                    .map_err(|error| format!("Local scan task failed: {error}"))??;
+                log::info!(
+                    "{} [cycle:{}] LOCAL_SCAN_COMPLETE scanned={} duration_ms={}",
+                    account_prefix,
+                    cycle_id,
+                    local_snapshot.len(),
+                    scan_started_at.elapsed().as_millis()
+                );
+                runtime_set_local_scan_progress(
+                    sync_runtime,
+                    profile_id,
+                    local_snapshot.len(),
+                    Some(local_snapshot.len()),
+                    None,
+                );
+                return Ok(local_snapshot);
+            }
+            _ = tokio::time::sleep(Duration::from_millis(200)) => {
+                let now_unix = chrono::Utc::now().timestamp();
+                let last_progress = last_progress_unix.load(AtomicOrdering::Relaxed);
+                let stalled_seconds = now_unix.saturating_sub(last_progress);
+                let scanned = scanned_count.load(AtomicOrdering::Relaxed);
+                let path = current_path.lock().ok().and_then(|value| value.clone());
+
+                if last_emit_at.elapsed() >= Duration::from_millis(350) {
+                    runtime_set_local_scan_progress(
+                        sync_runtime,
+                        profile_id,
+                        scanned,
+                        estimated_total,
+                        path.as_deref(),
+                    );
+                    last_emit_at = std::time::Instant::now();
+                }
+
+                if last_progress_log_at.elapsed() >= Duration::from_secs(10) {
+                    log::info!(
+                        "{} [cycle:{}] LOCAL_SCAN_PROGRESS scanned={} elapsed_s={} current_path={}",
+                        account_prefix,
+                        cycle_id,
+                        scanned,
+                        scan_started_at.elapsed().as_secs(),
+                        path.as_deref().unwrap_or("(none)")
+                    );
+                    last_progress_log_at = std::time::Instant::now();
+                }
+
+                if stalled_seconds >= 60 {
+                    let should_warn = last_stall_warn_at
+                        .as_ref()
+                        .is_none_or(|value| value.elapsed() >= Duration::from_secs(30));
+                    if should_warn {
+                        log::warn!(
+                            "{} [cycle:{}] LOCAL_SCAN_STALLED stalled_for={}s scanned={} current_path={}",
+                            account_prefix,
+                            cycle_id,
+                            stalled_seconds,
+                            scanned,
+                            path.as_deref().unwrap_or("(none)")
+                        );
+                        runtime_set_phase(
+                            sync_runtime,
+                            profile_id,
+                            "scanning_local",
+                            &format!(
+                                "Local scan is taking longer than expected (scanned {} items)",
+                                scanned
+                            ),
+                        );
+                        last_stall_warn_at = Some(std::time::Instant::now());
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn rebuild_sync_file_index(

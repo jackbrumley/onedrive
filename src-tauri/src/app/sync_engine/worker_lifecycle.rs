@@ -79,9 +79,22 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                         let _cycle_guard = match cycle_lock.try_lock() {
                             Ok(guard) => guard,
                             Err(_) => {
+                                let (active_phase, active_phase_message) = sync_runtime
+                                    .lock()
+                                    .ok()
+                                    .and_then(|runtime_map| {
+                                        runtime_map.get(&profile_id_owned).map(|status| {
+                                            (status.phase.clone(), status.phase_message.clone())
+                                        })
+                                    })
+                                    .unwrap_or_else(|| {
+                                        ("unknown".to_string(), "unknown".to_string())
+                                    });
                                 log::warn!(
-                                    "{} SYNC_TICK_SKIPPED cycle already running",
-                                    log_context::account_prefix(&profile_id_owned)
+                                    "{} SYNC_TICK_SKIPPED cycle already running phase={} phase_message={}",
+                                    log_context::account_prefix(&profile_id_owned),
+                                    active_phase,
+                                    active_phase_message
                                 );
                                 continue;
                             }

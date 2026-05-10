@@ -91,6 +91,146 @@ function extractUploadCooldownHint(phaseMessage: string | null): { path: string;
   };
 }
 
+interface CurrentActivityState {
+  title: string;
+  detail: string;
+  progressLabel: string;
+  progressPercent: number | null;
+  progressMode: "determinate" | "indeterminate" | "hidden";
+}
+
+function toProgressPercent(done: number, total: number): number {
+  if (total <= 0) {
+    return 0;
+  }
+  return Math.min(100, Math.max(0, (done / total) * 100));
+}
+
+function buildCurrentActivityState(
+  runtimeStatus: SyncRuntimeAccountStatus | null,
+  remoteDownloadRemainingCount: number,
+  remoteDownloadInFlight: number,
+  remoteDownloadRetryWaiting: number,
+  activeUploadCount: number,
+  uploadRetryWaitingCount: number
+): CurrentActivityState {
+  if (!runtimeStatus) {
+    return {
+      title: "Waiting for runtime",
+      detail: "No live sync state yet",
+      progressLabel: "",
+      progressPercent: null,
+      progressMode: "hidden",
+    };
+  }
+
+  const phase = runtimeStatus.phase;
+  const scanned = runtimeStatus.localScanScannedCount ?? 0;
+  const estimated = runtimeStatus.localScanEstimatedTotal ?? null;
+  const scanPath = runtimeStatus.localScanCurrentPath ?? null;
+
+  if (phase === "scanning_local") {
+    if (estimated && estimated > 0) {
+      const safeTotal = Math.max(estimated, scanned);
+      return {
+        title: "Scanning local files",
+        detail: scanPath ? `Current: ${scanPath}` : "Walking local filesystem",
+        progressLabel: `${scanned.toLocaleString()} / ~${safeTotal.toLocaleString()} files`,
+        progressPercent: toProgressPercent(scanned, safeTotal),
+        progressMode: "determinate",
+      };
+    }
+    return {
+      title: "Scanning local files",
+      detail: scanPath ? `Current: ${scanPath}` : "Walking local filesystem",
+      progressLabel: `${scanned.toLocaleString()} files scanned`,
+      progressPercent: null,
+      progressMode: "indeterminate",
+    };
+  }
+
+  if (phase === "building_index") {
+    const local = runtimeStatus.localScanScannedCount ?? 0;
+    const remote = runtimeStatus.remoteDiscoveredTotal ?? 0;
+    return {
+      title: "Building sync index",
+      detail: "Comparing local and cloud snapshots",
+      progressLabel: `${local.toLocaleString()} local + ${remote.toLocaleString()} cloud entries`,
+      progressPercent: null,
+      progressMode: "indeterminate",
+    };
+  }
+
+  if (phase === "planning_actions") {
+    return {
+      title: "Planning sync actions",
+      detail: "Computing download, upload, and conflict actions",
+      progressLabel: "Finalizing action plan",
+      progressPercent: null,
+      progressMode: "indeterminate",
+    };
+  }
+
+  if (phase === "scanning_remote") {
+    const discovered = runtimeStatus.remoteDiscoveredTotal ?? 0;
+    return {
+      title: "Scanning cloud files",
+      detail: "Reading OneDrive delta feed",
+      progressLabel: `${discovered.toLocaleString()} files discovered`,
+      progressPercent: null,
+      progressMode: "indeterminate",
+    };
+  }
+
+  if (phase === "paused") {
+    return {
+      title: "Synchronization paused",
+      detail: "Resume to continue sync",
+      progressLabel: "",
+      progressPercent: null,
+      progressMode: "hidden",
+    };
+  }
+
+  if (remoteDownloadInFlight > 0 || remoteDownloadRemainingCount > 0 || remoteDownloadRetryWaiting > 0) {
+    return {
+      title: "Applying cloud downloads",
+      detail: "Downloading and applying cloud files locally",
+      progressLabel: `${remoteDownloadInFlight} active, ${remoteDownloadRemainingCount} remaining, ${remoteDownloadRetryWaiting} waiting`,
+      progressPercent: null,
+      progressMode: "indeterminate",
+    };
+  }
+
+  if (activeUploadCount > 0 || uploadRetryWaitingCount > 0) {
+    return {
+      title: "Applying local uploads",
+      detail: "Uploading local changes to cloud",
+      progressLabel: `${activeUploadCount} active, ${uploadRetryWaitingCount} waiting`,
+      progressPercent: null,
+      progressMode: "indeterminate",
+    };
+  }
+
+  if (phase === "idle" || phase === "error") {
+    return {
+      title: runtimeStatus.phaseMessage || (phase === "error" ? "Sync error" : "Idle"),
+      detail: phase === "error" ? "No active transfers" : "Waiting for next sync work",
+      progressLabel: "",
+      progressPercent: null,
+      progressMode: "hidden",
+    };
+  }
+
+  return {
+    title: runtimeStatus.phaseMessage || "Idle",
+    detail: "Waiting for next sync work",
+    progressLabel: "",
+    progressPercent: null,
+    progressMode: "hidden",
+  };
+}
+
 function extensionFromPath(path: string): string {
   const filename = path.split("/").pop() ?? "";
   const dotIndex = filename.lastIndexOf(".");
@@ -98,14 +238,6 @@ function extensionFromPath(path: string): string {
     return "";
   }
   return filename.slice(dotIndex + 1).toLowerCase();
-}
-
-function isPermissionDeniedError(errorText: string | null): boolean {
-  if (!errorText) {
-    return false;
-  }
-  const normalized = errorText.toLowerCase();
-  return normalized.includes("status 403") || normalized.includes("accessdenied");
 }
 
 const FILE_TYPE_ICON_SIZE = 34;
@@ -227,6 +359,9 @@ export function AccountSyncActivityPanel({
     uploadedCount > 0 ||
     uploadFailedCount > 0;
   const isRemoteScanActive = runtimeStatus?.phase === "scanning_remote";
+  const isLocalScanActive = runtimeStatus?.phase === "scanning_local";
+  const localScanScannedCount = runtimeStatus?.localScanScannedCount ?? 0;
+  const localScanCurrentPath = runtimeStatus?.localScanCurrentPath ?? null;
   const uploadCooldownHint = extractUploadCooldownHint(runtimeStatus?.phaseMessage ?? null);
   const hasIssueSummary = Boolean(issueMessage);
   const hasRetryWarnings =
@@ -237,6 +372,14 @@ export function AccountSyncActivityPanel({
   const hasErrorItems = hasIssueSummary || issueKind !== null || recentFailed.length > 0;
   const hasWarningSection = hasRetryWarnings;
   const hasErrorSection = hasErrorItems || issueActions.length > 0;
+  const currentActivity = buildCurrentActivityState(
+    runtimeStatus,
+    remoteDownloadRemainingCount,
+    remoteDownloadInFlight,
+    remoteDownloadRetryWaiting,
+    activeUploadCount,
+    uploadRetryWaitingCount
+  );
 
   const items = [
     ...visibleInProgress.map((transfer) => ({
@@ -244,6 +387,7 @@ export function AccountSyncActivityPanel({
       kind: "active" as const,
       direction: transfer.direction,
       path: transfer.path,
+      transferState: transfer.state ?? "in_progress",
       when: transfer.updatedAt,
       bytesDone: transfer.bytesDone,
       bytesTotal: transfer.bytesTotal,
@@ -254,6 +398,7 @@ export function AccountSyncActivityPanel({
       kind: "completed" as const,
       direction: item.direction,
       path: item.path,
+      transferState: null,
       when: item.finishedAt,
       bytesDone: item.bytesTotal,
       bytesTotal: item.bytesTotal,
@@ -321,14 +466,55 @@ export function AccountSyncActivityPanel({
         <p class="account-sync-mode-banner-title">{modeMessage.title}</p>
         <p class="account-sync-mode-banner-detail">{modeMessage.detail}</p>
       </section>
+      <section class="account-sync-current-activity" aria-live="polite">
+        <p class="account-sync-current-activity-label">Current activity</p>
+        <p class="account-sync-current-activity-title">{currentActivity.title}</p>
+        <p class="account-sync-current-activity-detail">{currentActivity.detail}</p>
+        {currentActivity.progressLabel && (
+          <p class="account-sync-current-activity-progress">{currentActivity.progressLabel}</p>
+        )}
+        {currentActivity.progressMode !== "hidden" && (
+          <div class="account-sync-current-activity-track" role="progressbar" aria-valuenow={currentActivity.progressPercent ?? undefined} aria-valuemin={0} aria-valuemax={100}>
+            <div
+              class={
+                currentActivity.progressMode === "indeterminate"
+                  ? "account-sync-current-activity-fill account-sync-current-activity-fill-indeterminate"
+                  : "account-sync-current-activity-fill"
+              }
+              style={
+                currentActivity.progressMode === "indeterminate"
+                  ? { width: "34%" }
+                  : { width: `${(currentActivity.progressPercent ?? 0).toFixed(1)}%` }
+              }
+            />
+          </div>
+        )}
+      </section>
       <p class="account-sync-preview-subtitle">
         <span class="account-sync-preview-phase-line">
           {isRemoteScanActive && <IconRefresh size={13} class="sync-preview-icon-active" />}
           <span>{runtimeStatus?.phaseMessage ?? "Waiting for runtime updates"}</span>
         </span>
       </p>
-      {showTransferStats && (
+      {(showTransferStats || isLocalScanActive) && (
         <div class="account-sync-preview-stats-stack">
+          {isLocalScanActive && (
+            <section class="account-sync-preview-stats-group">
+              <p class="account-sync-preview-stats-section">Local Scan</p>
+              <div class="account-sync-preview-metrics-grid">
+                <div class="account-sync-preview-metric">
+                  <span class="account-sync-preview-metric-label">Items scanned</span>
+                  <span class="account-sync-preview-metric-value">{localScanScannedCount.toLocaleString()}</span>
+                </div>
+                {localScanCurrentPath && (
+                  <div class="account-sync-preview-metric">
+                    <span class="account-sync-preview-metric-label">Currently scanning</span>
+                    <span class="account-sync-preview-metric-value">{localScanCurrentPath}</span>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
           <section class="account-sync-preview-stats-group">
             <p class="account-sync-preview-stats-section">Discovery</p>
             <div class="account-sync-preview-metrics-grid">
@@ -554,7 +740,7 @@ export function AccountSyncActivityPanel({
               )}
             </div>
           )}
-          {recentFailed.some((item) => !isPermissionDeniedError(item.error)) && (
+          {recentFailed.length > 0 && (
             <div class="account-sync-preview-actions">
               <button
                 type="button"
@@ -609,29 +795,27 @@ export function AccountSyncActivityPanel({
                         </span>
                       </div>
                     </button>
-                    {!isPermissionDeniedError(item.error) && (
-                      <button
-                        type="button"
-                        class="account-sync-preview-item-retry-btn"
-                        disabled={retryAllInFlight || Boolean(retryingFailedIds[item.id])}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          if (retryAllInFlight || retryingFailedIds[item.id]) {
-                            return;
-                          }
-                          setRetryingFailedIds((current) => ({ ...current, [item.id]: true }));
-                          void onRetryFailedDownload(item.id, item.path).finally(() => {
-                            setRetryingFailedIds((current) => {
-                              const next = { ...current };
-                              delete next[item.id];
-                              return next;
-                            });
+                    <button
+                      type="button"
+                      class="account-sync-preview-item-retry-btn"
+                      disabled={retryAllInFlight || Boolean(retryingFailedIds[item.id])}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (retryAllInFlight || retryingFailedIds[item.id]) {
+                          return;
+                        }
+                        setRetryingFailedIds((current) => ({ ...current, [item.id]: true }));
+                        void onRetryFailedDownload(item.id, item.path).finally(() => {
+                          setRetryingFailedIds((current) => {
+                            const next = { ...current };
+                            delete next[item.id];
+                            return next;
                           });
-                        }}
-                      >
-                        {retryingFailedIds[item.id] ? "Retrying..." : "Retry"}
-                      </button>
-                    )}
+                        });
+                      }}
+                    >
+                      {retryingFailedIds[item.id] ? "Retrying..." : "Retry"}
+                    </button>
                   </div>
                 </article>
               ))}
@@ -647,7 +831,9 @@ export function AccountSyncActivityPanel({
           <div class="account-sync-preview-list">
             {items.map((item) => {
               const isActive = item.kind === "active";
-              const progressPercent = isActive ? transferProgressPercent(item.bytesDone ?? 0, item.bytesTotal) : null;
+              const isQueued = isActive && item.transferState === "queued";
+              const progressPercent =
+                isActive && !isQueued ? transferProgressPercent(item.bytesDone ?? 0, item.bytesTotal) : null;
               return (
                 <article key={item.id} class="account-sync-preview-item">
                   <button
@@ -666,7 +852,9 @@ export function AccountSyncActivityPanel({
                         <p class="account-sync-preview-path">{item.path}</p>
                         <p class="account-sync-preview-meta">
                           {item.kind === "active" ? (
-                            shouldShowTransferBytes(item.bytesDone ?? 0, item.bytesTotal) ? (
+                            isQueued ? (
+                              <span>Queued for retry</span>
+                            ) : shouldShowTransferBytes(item.bytesDone ?? 0, item.bytesTotal) ? (
                               <span>
                                 {formatBytes(item.bytesDone ?? 0)}
                                 {item.bytesTotal ? ` / ${formatBytes(item.bytesTotal)}` : ""}

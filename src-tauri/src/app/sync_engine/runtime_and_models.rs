@@ -402,8 +402,26 @@ fn runtime_set_phase(
     phase: &str,
     phase_message: &str,
 ) {
+    let mut previous_phase: Option<String> = None;
+    let mut previous_message: Option<String> = None;
     if let Ok(mut runtime_map) = runtime.lock() {
+        if let Some(existing) = runtime_map.get(profile_id) {
+            previous_phase = Some(existing.phase.clone());
+            previous_message = Some(existing.phase_message.clone());
+        }
         sync_runtime::set_phase(&mut runtime_map, profile_id, phase, phase_message);
+    }
+    let phase_changed = previous_phase.as_deref() != Some(phase)
+        || previous_message.as_deref() != Some(phase_message);
+    if phase_changed {
+        log::info!(
+            "{} PHASE_TRANSITION from_phase={} from_message={} to_phase={} to_message={}",
+            log_context::account_prefix(profile_id),
+            previous_phase.as_deref().unwrap_or("(none)"),
+            previous_message.as_deref().unwrap_or("(none)"),
+            phase,
+            phase_message
+        );
     }
     if let Err(error) = persist_sync_lifecycle_phase(profile_id, phase, phase_message) {
         log::warn!(
@@ -411,6 +429,24 @@ fn runtime_set_phase(
             log_context::account_prefix(profile_id),
             phase,
             error
+        );
+    }
+}
+
+fn runtime_set_local_scan_progress(
+    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
+    profile_id: &str,
+    scanned_count: usize,
+    estimated_total: Option<usize>,
+    current_path: Option<&str>,
+) {
+    if let Ok(mut runtime_map) = runtime.lock() {
+        sync_runtime::set_local_scan_progress(
+            &mut runtime_map,
+            profile_id,
+            scanned_count,
+            estimated_total,
+            current_path,
         );
     }
 }

@@ -38,6 +38,14 @@ export function syncModeMessage(
 
   const phase = runtimeStatus?.phase ?? "idle";
   if (!hasCompletedInitialSync) {
+    const failedDownloads = runtimeStatus?.remoteDownloadFailedTotal ?? 0;
+    if (failedDownloads > 0) {
+      return {
+        title: "Two-way sync blocked",
+        detail: `Cannot enable two-way sync until ${failedDownloads} failed cloud download${failedDownloads === 1 ? " is" : "s are"} resolved.`,
+        tone: "warning",
+      };
+    }
     if (phase === "scanning_local" || phase === "applying_local") {
       return {
         title: "Preparing two-way sync",

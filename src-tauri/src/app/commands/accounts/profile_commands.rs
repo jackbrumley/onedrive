@@ -150,7 +150,6 @@ pub fn retry_failed_download(
     let status_text = match status {
         sync_engine::RetryFailedDownloadJobStatus::Retried => "retried",
         sync_engine::RetryFailedDownloadJobStatus::AlreadyRetrying => "already_retrying",
-        sync_engine::RetryFailedDownloadJobStatus::PermissionDenied => "permission_denied",
     };
     let _ = activity_log::append_event(
         &profile_id,

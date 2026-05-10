@@ -80,6 +80,7 @@ export interface SyncRuntimeTransfer {
   id: string;
   direction: string;
   path: string;
+  state?: string;
   bytesDone: number;
   bytesTotal: number | null;
   startedAt: string;
@@ -137,6 +138,9 @@ export interface SyncRuntimeAccountStatus {
   uploadThrottleLastMinute?: number;
   remoteScanComplete?: boolean;
   twoWayReady?: boolean;
+  localScanScannedCount?: number;
+  localScanEstimatedTotal?: number | null;
+  localScanCurrentPath?: string | null;
   updatedAt: string;
 }
 

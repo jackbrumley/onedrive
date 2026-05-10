@@ -147,14 +147,12 @@ export function createAccountActions({
 
   const retryFailedDownload = async (profileId: string, recentItemId: string, path: string) => {
     try {
-      const response = await invoke<{ status: "retried" | "already_retrying" | "permission_denied" }>(
+      const response = await invoke<{ status: "retried" | "already_retrying" }>(
         "retry_failed_download",
         { profileId, recentItemId }
       );
       if (response.status === "retried") {
         showToast(`Retry queued for '${path}'.`, "info", 2600);
-      } else if (response.status === "permission_denied") {
-        showToast(`Skipped '${path}' because OneDrive returned permission denied.`, "info", 3200);
       } else {
         showToast(`'${path}' is already queued or no longer failed.`, "info", 2800);
       }
@@ -172,11 +170,8 @@ export function createAccountActions({
         alreadyRetrying: number;
       }>("retry_all_failed_downloads", { profileId });
       if (response.retried > 0) {
-        const skippedPart = response.skippedPermissionDenied > 0
-          ? ` (${response.skippedPermissionDenied} permission-denied skipped)`
-          : "";
         showToast(
-          `Retry queued for ${response.retried} failed download${response.retried === 1 ? "" : "s"}${skippedPart}.`,
+          `Retry queued for ${response.retried} failed download${response.retried === 1 ? "" : "s"}.`,
           "info",
           3200
         );
@@ -186,14 +181,8 @@ export function createAccountActions({
           "info",
           3000
         );
-      } else if (response.skippedPermissionDenied > 0) {
-        showToast(
-          `No retryable failed downloads. ${response.skippedPermissionDenied} permission-denied item${response.skippedPermissionDenied === 1 ? " was" : "s were"} skipped.`,
-          "info",
-          3400
-        );
       } else {
-        showToast("No retryable failed downloads found.", "info", 2600);
+        showToast("No failed downloads found.", "info", 2600);
       }
       await refreshAll();
     } catch (error) {
