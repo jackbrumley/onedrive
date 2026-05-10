@@ -34,6 +34,17 @@ pub struct SyncRuntimeRecentItem {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SyncRuntimeCurrentActivity {
+    pub stage: String,
+    pub progress_mode: String,
+    pub current: Option<usize>,
+    pub total: Option<usize>,
+    pub unit: Option<String>,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SyncRuntimeAccountStatus {
     pub profile_id: String,
     pub phase: String,
@@ -78,6 +89,7 @@ pub struct SyncRuntimeAccountStatus {
     pub local_scan_scanned_count: usize,
     pub local_scan_estimated_total: Option<usize>,
     pub local_scan_current_path: Option<String>,
+    pub current_activity: SyncRuntimeCurrentActivity,
     pub updated_at: String,
     #[serde(skip_serializing)]
     remote_session_discovered_ids: HashSet<String>,
@@ -136,6 +148,14 @@ impl SyncRuntimeAccountStatus {
             local_scan_scanned_count: 0,
             local_scan_estimated_total: None,
             local_scan_current_path: None,
+            current_activity: SyncRuntimeCurrentActivity {
+                stage: "idle".to_string(),
+                progress_mode: "hidden".to_string(),
+                current: None,
+                total: None,
+                unit: None,
+                detail: Some("Idle".to_string()),
+            },
             updated_at: now,
             remote_session_discovered_ids: HashSet::new(),
             remote_session_planned_ids: HashSet::new(),
@@ -174,6 +194,15 @@ pub fn set_phase(
     let status = ensure_account_status(runtime_map, profile_id);
     status.phase = phase.to_string();
     status.phase_message = phase_message.to_string();
+    status.current_activity.stage = phase.to_string();
+    status.current_activity.progress_mode = match phase {
+        "paused" | "idle" | "error" => "hidden".to_string(),
+        _ => "indeterminate".to_string(),
+    };
+    status.current_activity.current = None;
+    status.current_activity.total = None;
+    status.current_activity.unit = None;
+    status.current_activity.detail = Some(phase_message.to_string());
     if phase != "scanning_local" {
         status.local_scan_scanned_count = 0;
         status.local_scan_estimated_total = None;
@@ -194,6 +223,16 @@ pub fn set_local_scan_progress(
     status.local_scan_scanned_count = scanned_count;
     status.local_scan_estimated_total = estimated_total;
     status.local_scan_current_path = current_path.map(ToString::to_string);
+    status.current_activity.stage = "scanning_local".to_string();
+    status.current_activity.progress_mode = if estimated_total.is_some() {
+        "determinate".to_string()
+    } else {
+        "indeterminate".to_string()
+    };
+    status.current_activity.current = Some(scanned_count);
+    status.current_activity.total = estimated_total;
+    status.current_activity.unit = Some("files".to_string());
+    status.current_activity.detail = status.local_scan_current_path.clone();
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
 }

@@ -106,14 +106,7 @@ function toProgressPercent(done: number, total: number): number {
   return Math.min(100, Math.max(0, (done / total) * 100));
 }
 
-function buildCurrentActivityState(
-  runtimeStatus: SyncRuntimeAccountStatus | null,
-  remoteDownloadRemainingCount: number,
-  remoteDownloadInFlight: number,
-  remoteDownloadRetryWaiting: number,
-  activeUploadCount: number,
-  uploadRetryWaitingCount: number
-): CurrentActivityState {
+function buildCurrentActivityState(runtimeStatus: SyncRuntimeAccountStatus | null): CurrentActivityState {
   if (!runtimeStatus) {
     return {
       title: "Waiting for runtime",
@@ -121,6 +114,27 @@ function buildCurrentActivityState(
       progressLabel: "",
       progressPercent: null,
       progressMode: "hidden",
+    };
+  }
+
+  const activity = runtimeStatus.currentActivity;
+  if (activity) {
+    const current = activity.current ?? null;
+    const total = activity.total ?? null;
+    const unit = activity.unit ?? "items";
+    const progressLabel =
+      current !== null
+        ? total !== null
+          ? `${current.toLocaleString()} / ${total.toLocaleString()} ${unit}`
+          : `${current.toLocaleString()} ${unit}`
+        : "";
+
+    return {
+      title: runtimeStatus.phaseMessage || activity.stage,
+      detail: activity.detail ?? "",
+      progressLabel,
+      progressPercent: current !== null && total !== null ? toProgressPercent(current, total) : null,
+      progressMode: activity.progressMode as CurrentActivityState["progressMode"],
     };
   }
 
@@ -189,26 +203,6 @@ function buildCurrentActivityState(
       progressLabel: "",
       progressPercent: null,
       progressMode: "hidden",
-    };
-  }
-
-  if (remoteDownloadInFlight > 0 || remoteDownloadRemainingCount > 0 || remoteDownloadRetryWaiting > 0) {
-    return {
-      title: "Applying cloud downloads",
-      detail: "Downloading and applying cloud files locally",
-      progressLabel: `${remoteDownloadInFlight} active, ${remoteDownloadRemainingCount} remaining, ${remoteDownloadRetryWaiting} waiting`,
-      progressPercent: null,
-      progressMode: "indeterminate",
-    };
-  }
-
-  if (activeUploadCount > 0 || uploadRetryWaitingCount > 0) {
-    return {
-      title: "Applying local uploads",
-      detail: "Uploading local changes to cloud",
-      progressLabel: `${activeUploadCount} active, ${uploadRetryWaitingCount} waiting`,
-      progressPercent: null,
-      progressMode: "indeterminate",
     };
   }
 
@@ -372,14 +366,7 @@ export function AccountSyncActivityPanel({
   const hasErrorItems = hasIssueSummary || issueKind !== null || recentFailed.length > 0;
   const hasWarningSection = hasRetryWarnings;
   const hasErrorSection = hasErrorItems || issueActions.length > 0;
-  const currentActivity = buildCurrentActivityState(
-    runtimeStatus,
-    remoteDownloadRemainingCount,
-    remoteDownloadInFlight,
-    remoteDownloadRetryWaiting,
-    activeUploadCount,
-    uploadRetryWaitingCount
-  );
+  const currentActivity = buildCurrentActivityState(runtimeStatus);
 
   const items = [
     ...visibleInProgress.map((transfer) => ({

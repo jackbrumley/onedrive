@@ -97,6 +97,15 @@ export interface SyncRuntimeRecentItem {
   error: string | null;
 }
 
+export interface SyncRuntimeCurrentActivity {
+  stage: string;
+  progressMode: "determinate" | "indeterminate" | "hidden" | string;
+  current?: number | null;
+  total?: number | null;
+  unit?: string | null;
+  detail?: string | null;
+}
+
 export interface SyncRuntimeAccountStatus {
   profileId: string;
   phase: string;
@@ -141,6 +150,7 @@ export interface SyncRuntimeAccountStatus {
   localScanScannedCount?: number;
   localScanEstimatedTotal?: number | null;
   localScanCurrentPath?: string | null;
+  currentActivity?: SyncRuntimeCurrentActivity;
   updatedAt: string;
 }
 
