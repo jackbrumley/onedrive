@@ -1,3 +1,12 @@
+fn graph_http_client_no_redirect() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(resolve_connect_timeout())
+        .timeout(resolve_request_timeout())
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| format!("Failed creating no-redirect Graph HTTP client: {error}"))
+}
+
 async fn graph_get_text(
     graph: &GraphContext,
     url: &str,
@@ -178,7 +187,8 @@ async fn download_remote_item_content(
         local_path.display()
     );
     let url = format!("{GRAPH_ROOT}/me/drive/items/{}/content", item_id);
-    let client = graph_http_client()?;
+    let graph_client = graph_http_client_no_redirect()?;
+    let content_client = graph_http_client()?;
     let download_request_timeout = compute_download_request_timeout(known_size_bytes);
     log::info!(
         "{} [cycle:{}] DOWNLOAD_TIMEOUT_POLICY path={} known_size_bytes={} timeout_seconds={}",
@@ -212,7 +222,7 @@ async fn download_remote_item_content(
                 runtime_finish_transfer_cancelled(&graph.sync_runtime, &graph.profile_id, &transfer_id);
                 return Err(SYNC_CANCELLED_ERROR.to_string());
             }
-            value = client
+            value = graph_client
                 .get(&url)
                 .bearer_auth(&access_token)
                 .timeout(download_request_timeout)
@@ -241,7 +251,8 @@ async fn download_remote_item_content(
                 return Err(error);
             }
         };
-        let status = response.status();
+        let mut response = response;
+        let mut status = response.status();
         if status.as_u16() == 401 && !token_refreshed {
             log::warn!(
                 "{} [cycle:{}] GRAPH_DOWNLOAD_401_REFRESH",
@@ -251,6 +262,94 @@ async fn download_remote_item_content(
             let _ = graph.refresh_token_if_needed(&access_token).await?;
             token_refreshed = true;
             continue;
+        }
+        if status.is_redirection() {
+            let redirect_url = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .map(ToString::to_string);
+            let redirect_url = match redirect_url {
+                Some(value) if !value.trim().is_empty() => value,
+                _ => {
+                    let reason = format!(
+                        "Download redirect missing location header status={}",
+                        status
+                    );
+                    if handle_download_retry(
+                        graph,
+                        job_id,
+                        cancel_flag,
+                        &transfer_id,
+                        attempt,
+                        relative_path,
+                        &reason,
+                        None,
+                        &reason,
+                    )
+                    .await?
+                    {
+                        continue;
+                    }
+                    return Err(reason);
+                }
+            };
+            let redirect_host = reqwest::Url::parse(&redirect_url)
+                .ok()
+                .and_then(|value| value.host_str().map(ToString::to_string))
+                .unwrap_or_else(|| "(unknown)".to_string());
+            log::info!(
+                "{} [cycle:{}] DOWNLOAD_REDIRECT item_id={} path={} status={} host={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                item_id,
+                relative_path,
+                status,
+                redirect_host
+            );
+            let redirected_response = tokio::select! {
+                _ = wait_for_cancellation(Arc::clone(cancel_flag)) => {
+                    runtime_finish_transfer_cancelled(&graph.sync_runtime, &graph.profile_id, &transfer_id);
+                    return Err(SYNC_CANCELLED_ERROR.to_string());
+                }
+                value = content_client
+                    .get(&redirect_url)
+                    .timeout(download_request_timeout)
+                    .send() => {
+                    value.map_err(|error| format!("Download redirect request failed: {error}"))
+                }
+            };
+            response = match redirected_response {
+                Ok(value) => value,
+                Err(error) => {
+                    if handle_download_retry(
+                        graph,
+                        job_id,
+                        cancel_flag,
+                        &transfer_id,
+                        attempt,
+                        relative_path,
+                        &error,
+                        None,
+                        &error,
+                    )
+                    .await?
+                    {
+                        continue;
+                    }
+                    return Err(error);
+                }
+            };
+            status = response.status();
+            log::info!(
+                "{} [cycle:{}] DOWNLOAD_REDIRECT_RESULT item_id={} path={} status={} host={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                item_id,
+                relative_path,
+                status,
+                redirect_host
+            );
         }
         if status == StatusCode::TOO_MANY_REQUESTS {
             let _ = record_throttle_event(&graph.profile_id, DOWNLOAD_JOB_DIRECTION);
