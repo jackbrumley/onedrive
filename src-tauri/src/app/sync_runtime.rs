@@ -720,7 +720,8 @@ fn emit_sync_status_payload(payload: SyncStatusEvent) {
 pub fn recompute_authority_fields(status: &mut SyncRuntimeAccountStatus) {
     ensure_auth_required_issue_contract(status);
     status.issue_severity = issue_severity_from_code(status.issue_code.as_deref()).to_string();
-    status.can_sync = status.auth_ready && status.issue_severity != "blocking" && status.phase != "error";
+    status.can_sync =
+        status.auth_ready && status.issue_severity != "blocking" && status.phase != "error";
 }
 
 fn ensure_auth_required_issue_contract(status: &mut SyncRuntimeAccountStatus) {
@@ -736,16 +737,19 @@ fn ensure_auth_required_issue_contract(status: &mut SyncRuntimeAccountStatus) {
         .map(str::trim)
         .is_none_or(|value| value.is_empty())
     {
-        status.issue_message = Some(
-            "Authentication required. Re-authenticate to resume synchronization.".to_string(),
-        );
+        status.issue_message =
+            Some("Authentication required. Re-authenticate to resume synchronization.".to_string());
     }
     ensure_issue_action(status, "reauthenticate");
     ensure_issue_action(status, "retry_sync");
 }
 
 fn ensure_issue_action(status: &mut SyncRuntimeAccountStatus, action: &str) {
-    if !status.issue_actions.iter().any(|existing| existing == action) {
+    if !status
+        .issue_actions
+        .iter()
+        .any(|existing| existing == action)
+    {
         status.issue_actions.push(action.to_string());
     }
 }

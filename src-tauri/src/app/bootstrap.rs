@@ -81,7 +81,8 @@ pub fn configure_shell(app: &mut tauri::App<tauri::Wry>) -> Result<(), Box<dyn s
                     if account.auth_configured {
                         match sync_engine::prepare_startup_sync_resume(&account.id) {
                             Ok(cleared_jobs) => {
-                                drained_jobs_total = drained_jobs_total.saturating_add(cleared_jobs);
+                                drained_jobs_total =
+                                    drained_jobs_total.saturating_add(cleared_jobs);
                             }
                             Err(error) => {
                                 log::warn!("{} STARTUP_SYNC_PREP_FAILED {}", prefix, error);
