@@ -209,6 +209,12 @@ Any agent working on this repo should prioritize the following cleanups:
 - **No Silent Failure Paths:** Always surface actionable errors in logs and, when relevant, to UI status.
 - **Diagnostics Before Guesswork:** Add clear capability/version/runtime diagnostics before introducing conditional behavior.
 
+### CodePerfect Mindset (Solo Operator Standard)
+- **One Debug Lane Per Concern:** For each user-visible state (especially sync), there must be one authoritative source and one render path.
+- **No Split Authority Debt:** If a UI decision reads from two competing sources, treat that as a defect and resolve it immediately.
+- **Canonical Actions Required:** If UI shows a blocker (for example auth required), backend payload must include the concrete action set needed to recover.
+- **Recovery Path Is Not Authority:** Snapshot/recovery fetches are transport safety only; ongoing truth must come from the authoritative pipeline.
+
 ---
 
 ## ⚠️ Common Pitfalls to Avoid

@@ -228,9 +228,30 @@ pub fn snapshot(runtime_map: &SyncRuntimeMap) -> SyncRuntimeSnapshot {
 
 pub fn set_auth_ready(runtime_map: &mut SyncRuntimeMap, profile_id: &str, auth_ready: bool) {
     let status = ensure_account_status(runtime_map, profile_id);
+    let previous_auth_ready = status.auth_ready;
+    if previous_auth_ready == auth_ready {
+        return;
+    }
+    if auth_ready && status.issue_code.as_deref() == Some("auth_required") {
+        status.issue_code = None;
+        status.issue_message = None;
+        status.issue_actions.clear();
+        status.issue_path = None;
+        status.issue_secondary_path = None;
+        log::info!(
+            "{} SYNC_AUTH_REQUIRED_ISSUE_CLEARED reason=auth_ready",
+            profile_id
+        );
+    }
     status.auth_ready = auth_ready;
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
+    log::info!(
+        "{} SYNC_AUTH_AUTHORITY_TRANSITION from={} to={}",
+        profile_id,
+        previous_auth_ready,
+        auth_ready
+    );
     emit_status_event_for_account(runtime_map, profile_id);
 }
 
@@ -665,8 +686,36 @@ fn emit_sync_status_payload(payload: SyncStatusEvent) {
 }
 
 pub fn recompute_authority_fields(status: &mut SyncRuntimeAccountStatus) {
+    ensure_auth_required_issue_contract(status);
     status.issue_severity = issue_severity_from_code(status.issue_code.as_deref()).to_string();
     status.can_sync = status.auth_ready && status.issue_severity != "blocking" && status.phase != "error";
+}
+
+fn ensure_auth_required_issue_contract(status: &mut SyncRuntimeAccountStatus) {
+    if status.auth_ready {
+        return;
+    }
+    if status.issue_code.is_none() {
+        status.issue_code = Some("auth_required".to_string());
+    }
+    if status
+        .issue_message
+        .as_deref()
+        .map(str::trim)
+        .is_none_or(|value| value.is_empty())
+    {
+        status.issue_message = Some(
+            "Authentication required. Re-authenticate to resume synchronization.".to_string(),
+        );
+    }
+    ensure_issue_action(status, "reauthenticate");
+    ensure_issue_action(status, "retry_sync");
+}
+
+fn ensure_issue_action(status: &mut SyncRuntimeAccountStatus, action: &str) {
+    if !status.issue_actions.iter().any(|existing| existing == action) {
+        status.issue_actions.push(action.to_string());
+    }
 }
 
 fn issue_severity_from_code(issue_code: Option<&str>) -> &'static str {
