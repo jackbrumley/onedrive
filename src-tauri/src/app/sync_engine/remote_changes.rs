@@ -439,6 +439,7 @@ async fn fetch_and_apply_delta_changes(
                 last_download_result_at = Some(last_progress_at);
                 apply_remote_download_result(
                     graph,
+                    sync_root,
                     sync_state,
                     stats,
                     &mut remote_applied_paths,
@@ -739,6 +740,7 @@ async fn process_remote_page_items(
                     sync_state.remote_by_id.remove(&item.id);
                     sync_state.remote_path_to_id.remove(&existing.path);
                     sync_state.local_snapshot.remove(&existing.path);
+                    let _ = remove_sync_file_entry(&graph.profile_id, &existing.path);
                 }
                 continue;
             }
@@ -818,6 +820,7 @@ async fn process_remote_page_items(
                 sync_state.remote_by_id.remove(&item.id);
                 sync_state.remote_path_to_id.remove(&existing.path);
                 sync_state.local_snapshot.remove(&existing.path);
+                let _ = remove_sync_file_entry(&graph.profile_id, &existing.path);
                 remove_local_path(sync_root, &existing.path)?;
                 log::info!(
                     "{} [cycle:{}] LOCAL_DELETE_OK path={}",
@@ -874,12 +877,14 @@ async fn process_remote_page_items(
                     )
                 })?;
             }
-            upsert_remote_known_item(sync_state, remote_entry);
+            upsert_remote_known_item(sync_state, remote_entry.clone());
+            upsert_sync_file_remote_presence(&graph.profile_id, &remote_entry)?;
             continue;
         }
 
         if bootstrap_cloud_first {
             upsert_remote_known_item(sync_state, remote_entry.clone());
+            upsert_sync_file_remote_presence(&graph.profile_id, &remote_entry)?;
             let inserted = upsert_download_job(
                 &graph.profile_id,
                 &item.id,
@@ -985,6 +990,9 @@ async fn process_remote_page_items(
             }
         }
 
+        upsert_remote_known_item(sync_state, remote_entry.clone());
+        upsert_sync_file_remote_presence(&graph.profile_id, &remote_entry)?;
+
         let inserted = upsert_download_job(
             &graph.profile_id,
             &item.id,
@@ -1053,6 +1061,7 @@ async fn send_download_job_with_logging(
 
 fn apply_remote_download_result(
     graph: &GraphContext,
+    sync_root: &Path,
     sync_state: &mut PersistedSyncState,
     stats: &mut SyncCycleStats,
     remote_applied_paths: &mut HashSet<String>,
@@ -1101,34 +1110,51 @@ fn apply_remote_download_result(
             );
         }
         RemoteDownloadResultStatus::Success(outcome) => {
-            let skipped = matches!(outcome, RemoteDownloadOutcome::SkippedMissingRemote);
-            mark_download_job_done(&graph.profile_id, result.job_id, skipped)?;
             match outcome {
-        RemoteDownloadOutcome::Downloaded => {
-            runtime_record_remote_download_completed(
-                &graph.sync_runtime,
-                &graph.profile_id,
-                &result.remote_entry.id,
-            );
-            remote_applied_paths.insert(result.remote_entry.path.clone());
-            upsert_remote_known_item(sync_state, result.remote_entry);
-            stats.downloaded_files += 1;
-        }
-        RemoteDownloadOutcome::SkippedMissingRemote => {
-            sync_state.remote_by_id.remove(&result.remote_entry.id);
-            sync_state
-                .remote_path_to_id
-                .remove(&result.remote_entry.path);
-            sync_state.local_snapshot.remove(&result.remote_entry.path);
-            stats.remote_items_skipped_missing += 1;
-            log::warn!(
-                "{} [cycle:{}] REMOTE_ITEM_SKIP_MISSING path={} id={}",
-                graph.account_prefix,
-                graph.cycle_id,
-                result.remote_entry.path,
-                result.remote_entry.id
-            );
-        }
+                RemoteDownloadOutcome::Downloaded => {
+                    let local_abs = sync_root.join(path_to_local(&result.remote_entry.path));
+                    let local_entry = read_local_entry(&local_abs)?.ok_or_else(|| {
+                        format!(
+                            "Downloaded item missing on disk after completion path={} local_path={}",
+                            result.remote_entry.path,
+                            local_abs.display()
+                        )
+                    })?;
+                    mark_download_job_done_with_local_index(
+                        &graph.profile_id,
+                        result.job_id,
+                        &result.remote_entry,
+                        &local_entry,
+                    )?;
+                    runtime_record_remote_download_completed(
+                        &graph.sync_runtime,
+                        &graph.profile_id,
+                        &result.remote_entry.id,
+                    );
+                    remote_applied_paths.insert(result.remote_entry.path.clone());
+                    sync_state
+                        .local_snapshot
+                        .insert(result.remote_entry.path.clone(), local_entry);
+                    upsert_remote_known_item(sync_state, result.remote_entry);
+                    stats.downloaded_files += 1;
+                }
+                RemoteDownloadOutcome::SkippedMissingRemote => {
+                    mark_download_job_done(&graph.profile_id, result.job_id, true)?;
+                    sync_state.remote_by_id.remove(&result.remote_entry.id);
+                    sync_state
+                        .remote_path_to_id
+                        .remove(&result.remote_entry.path);
+                    sync_state.local_snapshot.remove(&result.remote_entry.path);
+                    let _ = remove_sync_file_entry(&graph.profile_id, &result.remote_entry.path);
+                    stats.remote_items_skipped_missing += 1;
+                    log::warn!(
+                        "{} [cycle:{}] REMOTE_ITEM_SKIP_MISSING path={} id={}",
+                        graph.account_prefix,
+                        graph.cycle_id,
+                        result.remote_entry.path,
+                        result.remote_entry.id
+                    );
+                }
             }
         }
     }

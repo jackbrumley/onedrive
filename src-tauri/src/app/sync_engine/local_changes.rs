@@ -409,7 +409,6 @@ async fn apply_local_changes(
 async fn reconcile_bootstrap_local_snapshot(
     graph: &mut GraphContext,
     sync_root: &Path,
-    current_local_snapshot: &HashMap<String, LocalSnapshotEntry>,
     sync_state: &mut PersistedSyncState,
     stats: &mut SyncCycleStats,
     cancel_flag: &Arc<AtomicBool>,
@@ -423,7 +422,7 @@ async fn reconcile_bootstrap_local_snapshot(
     runtime_set_current_activity(
         &graph.sync_runtime,
         &graph.profile_id,
-        "applying_local",
+        "preparing_two_way_baseline",
         "determinate",
         Some(0),
         Some(total_remote_items),
@@ -438,7 +437,7 @@ async fn reconcile_bootstrap_local_snapshot(
             runtime_set_current_activity(
                 &graph.sync_runtime,
                 &graph.profile_id,
-                "applying_local",
+                "preparing_two_way_baseline",
                 "determinate",
                 Some(remote_items_seen),
                 Some(total_remote_items),
@@ -447,7 +446,7 @@ async fn reconcile_bootstrap_local_snapshot(
             );
             last_activity_emit_at = std::time::Instant::now();
         }
-        if current_local_snapshot.contains_key(&remote_item.path) {
+        if sync_state.local_snapshot.contains_key(&remote_item.path) {
             continue;
         }
 
@@ -483,6 +482,9 @@ async fn reconcile_bootstrap_local_snapshot(
 
         match outcome {
             RemoteDownloadOutcome::Downloaded => {
+                if let Some(local_entry) = read_local_entry(&local_abs)? {
+                    sync_state.local_snapshot.insert(remote_item.path.clone(), local_entry);
+                }
                 stats.downloaded_files += 1;
             }
             RemoteDownloadOutcome::SkippedMissingRemote => {

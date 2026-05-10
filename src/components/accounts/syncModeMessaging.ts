@@ -46,6 +46,13 @@ export function syncModeMessage(
 
   const phase = runtimeStatus?.phase ?? "idle";
   if (!hasCompletedInitialSync) {
+    if (phase === "error") {
+      return {
+        title: "Initial sync needs attention",
+        detail: runtimeStatus?.issueMessage ?? "A blocking issue interrupted initial sync.",
+        tone: "warning",
+      };
+    }
     const failedDownloads = runtimeStatus?.remoteDownloadFailedTotal ?? 0;
     if (failedDownloads > 0) {
       return {
@@ -54,7 +61,7 @@ export function syncModeMessage(
         tone: "warning",
       };
     }
-    if (phase === "scanning_local" || phase === "applying_local") {
+    if (phase === "scanning_local" || phase === "applying_local" || phase === "preparing_two_way_baseline") {
       return {
         title: "Preparing two-way sync",
         detail: "Cloud files are still in control. Local adds/deletes won't sync yet.",

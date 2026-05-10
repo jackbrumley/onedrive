@@ -138,7 +138,9 @@ fn start_sync_worker(state: &tauri::State<'_, AppState>, profile_id: &str) -> Re
                                     log_context::account_prefix(&profile_id_owned),
                                     error
                                 );
+                                cancel_flag.store(true, Ordering::Relaxed);
                                 runtime_reset_transfer_activity(&sync_runtime, &profile_id_owned);
+                                runtime_set_engine_state(&sync_runtime, &profile_id_owned, "blocked");
                                 runtime_set_phase(
                                     &sync_runtime,
                                     &profile_id_owned,

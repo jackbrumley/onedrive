@@ -39,6 +39,7 @@ async fn tick_sync_cycle(
     );
 
     let mut sync_state = load_sync_state(profile_id)?;
+    let started_two_way_ready = sync_state.two_way_ready;
     let mut stats = SyncCycleStats {
         account_prefix: account_prefix.clone(),
         cycle_id: cycle_id.clone(),
@@ -66,114 +67,114 @@ async fn tick_sync_cycle(
     )
     .await?;
 
-    runtime_set_phase(
-        &graph.sync_runtime,
-        profile_id,
-        "scanning_local",
-        "Scanning local files",
-    );
-    log::info!(
-        "{} [cycle:{}] STAGE_START stage=scanning_local sync_root={}",
-        account_prefix,
-        cycle_id,
-        sync_root.display()
-    );
-    let local_scan_estimated_total = if sync_state.local_snapshot.is_empty() {
-        None
-    } else {
-        Some(sync_state.local_snapshot.len())
-    };
-    let local_snapshot = run_local_scan_with_runtime_updates(
-        &graph.account_prefix,
-        &graph.cycle_id,
-        &graph.sync_runtime,
-        profile_id,
-        &sync_root,
-        local_scan_estimated_total,
-        cancel_flag,
-    )
-    .await?;
-    log::info!(
-        "{} [cycle:{}] STAGE_COMPLETE stage=scanning_local local_items={}",
-        account_prefix,
-        cycle_id,
-        local_snapshot.len()
-    );
-    let index_started_at = std::time::Instant::now();
-    runtime_set_phase(
-        &graph.sync_runtime,
-        profile_id,
-        "building_index",
-        "Building sync index",
-    );
-    log::info!(
-        "{} [cycle:{}] STAGE_START stage=index_rebuild remote_items={} local_items={}",
-        account_prefix,
-        cycle_id,
-        sync_state.remote_by_id.len(),
-        local_snapshot.len()
-    );
-    rebuild_sync_file_index(
-        &graph.sync_runtime,
-        profile_id,
-        &sync_state,
-        &local_snapshot,
-        &graph.account_prefix,
-        &graph.cycle_id,
-    )?;
-    log::info!(
-        "{} [cycle:{}] STAGE_COMPLETE stage=index_rebuild duration_ms={}",
-        account_prefix,
-        cycle_id,
-        index_started_at.elapsed().as_millis()
-    );
-    let planner_started_at = std::time::Instant::now();
-    runtime_set_phase(
-        &graph.sync_runtime,
-        profile_id,
-        "planning_actions",
-        "Planning sync actions",
-    );
-    log::info!(
-        "{} [cycle:{}] STAGE_START stage=planner two_way_ready={}",
-        account_prefix,
-        cycle_id,
-        sync_state.two_way_ready
-    );
-    let planner_counters = recompute_sync_file_actions(profile_id, sync_state.two_way_ready)?;
-    log::info!(
-        "{} [cycle:{}] STAGE_COMPLETE stage=planner duration_ms={} need_download={} need_upload={} conflicts={}",
-        account_prefix,
-        cycle_id,
-        planner_started_at.elapsed().as_millis(),
-        planner_counters.need_download_total,
-        planner_counters.need_upload_total,
-        planner_counters.conflict_total
-    );
-    runtime_set_upload_planned_total(
-        &graph.sync_runtime,
-        profile_id,
-        planner_counters.need_upload_total,
-    );
-    log::info!(
-        "{} [cycle:{}] SYNC_PLANNER_SUMMARY cloud_discovered={} local_discovered={} need_download={} need_upload={} conflicts={} shared_references_excluded={}",
-        account_prefix,
-        cycle_id,
-        planner_counters.cloud_discovered_total,
-        planner_counters.local_discovered_total,
-        planner_counters.need_download_total,
-        planner_counters.need_upload_total,
-        planner_counters.conflict_total,
-        planner_counters.shared_reference_total,
-    );
-    stats.local_items_seen = local_snapshot.len();
-    log::info!(
-        "{} [cycle:{}] LOCAL_SCAN_SUMMARY items={}",
-        account_prefix,
-        cycle_id,
-        stats.local_items_seen
-    );
     if sync_state.two_way_ready {
+        runtime_set_phase(
+            &graph.sync_runtime,
+            profile_id,
+            "scanning_local",
+            "Scanning local files",
+        );
+        log::info!(
+            "{} [cycle:{}] STAGE_START stage=scanning_local sync_root={}",
+            account_prefix,
+            cycle_id,
+            sync_root.display()
+        );
+        let local_scan_estimated_total = if sync_state.local_snapshot.is_empty() {
+            None
+        } else {
+            Some(sync_state.local_snapshot.len())
+        };
+        let local_snapshot = run_local_scan_with_runtime_updates(
+            &graph.account_prefix,
+            &graph.cycle_id,
+            &graph.sync_runtime,
+            profile_id,
+            &sync_root,
+            local_scan_estimated_total,
+            cancel_flag,
+        )
+        .await?;
+        log::info!(
+            "{} [cycle:{}] STAGE_COMPLETE stage=scanning_local local_items={}",
+            account_prefix,
+            cycle_id,
+            local_snapshot.len()
+        );
+        let index_started_at = std::time::Instant::now();
+        runtime_set_phase(
+            &graph.sync_runtime,
+            profile_id,
+            "building_index",
+            "Building sync index",
+        );
+        log::info!(
+            "{} [cycle:{}] STAGE_START stage=index_rebuild remote_items={} local_items={}",
+            account_prefix,
+            cycle_id,
+            sync_state.remote_by_id.len(),
+            local_snapshot.len()
+        );
+        rebuild_sync_file_index(
+            &graph.sync_runtime,
+            profile_id,
+            &sync_state,
+            &local_snapshot,
+            &graph.account_prefix,
+            &graph.cycle_id,
+        )?;
+        log::info!(
+            "{} [cycle:{}] STAGE_COMPLETE stage=index_rebuild duration_ms={}",
+            account_prefix,
+            cycle_id,
+            index_started_at.elapsed().as_millis()
+        );
+        let planner_started_at = std::time::Instant::now();
+        runtime_set_phase(
+            &graph.sync_runtime,
+            profile_id,
+            "planning_actions",
+            "Planning sync actions",
+        );
+        log::info!(
+            "{} [cycle:{}] STAGE_START stage=planner two_way_ready={}",
+            account_prefix,
+            cycle_id,
+            sync_state.two_way_ready
+        );
+        let planner_counters = recompute_sync_file_actions(profile_id, sync_state.two_way_ready)?;
+        log::info!(
+            "{} [cycle:{}] STAGE_COMPLETE stage=planner duration_ms={} need_download={} need_upload={} conflicts={}",
+            account_prefix,
+            cycle_id,
+            planner_started_at.elapsed().as_millis(),
+            planner_counters.need_download_total,
+            planner_counters.need_upload_total,
+            planner_counters.conflict_total
+        );
+        runtime_set_upload_planned_total(
+            &graph.sync_runtime,
+            profile_id,
+            planner_counters.need_upload_total,
+        );
+        log::info!(
+            "{} [cycle:{}] SYNC_PLANNER_SUMMARY cloud_discovered={} local_discovered={} need_download={} need_upload={} conflicts={} shared_references_excluded={}",
+            account_prefix,
+            cycle_id,
+            planner_counters.cloud_discovered_total,
+            planner_counters.local_discovered_total,
+            planner_counters.need_download_total,
+            planner_counters.need_upload_total,
+            planner_counters.conflict_total,
+            planner_counters.shared_reference_total,
+        );
+        stats.local_items_seen = local_snapshot.len();
+        log::info!(
+            "{} [cycle:{}] LOCAL_SCAN_SUMMARY items={}",
+            account_prefix,
+            cycle_id,
+            stats.local_items_seen
+        );
         runtime_set_phase(
             &graph.sync_runtime,
             profile_id,
@@ -193,9 +194,9 @@ async fn tick_sync_cycle(
         .await?;
     } else {
         let download_counters = read_download_job_counters(profile_id)?;
+        runtime_set_upload_planned_total(&graph.sync_runtime, profile_id, 0);
         let bootstrap_ready_for_two_way = sync_state.active_delta_next_link.is_none()
             && sync_state.bootstrap_full_scan_completed
-            && planner_counters.need_download_total == 0
             && download_counters.remaining == 0
             && download_counters.failed_terminal == 0;
 
@@ -203,14 +204,13 @@ async fn tick_sync_cycle(
             runtime_set_phase(
                 &graph.sync_runtime,
                 profile_id,
-                "applying_local",
+                "preparing_two_way_baseline",
                 "Preparing two-way sync - building your local baseline",
             );
             ensure_not_cancelled(cancel_flag)?;
             reconcile_bootstrap_local_snapshot(
                 &mut graph,
                 &sync_root,
-                &local_snapshot,
                 &mut sync_state,
                 &mut stats,
                 cancel_flag,
@@ -248,30 +248,21 @@ async fn tick_sync_cycle(
                     }
                 );
             }
-            if planner_counters.need_download_total > 0 {
-                log::warn!(
-                    "{} [cycle:{}] TWO_WAY_BLOCK_REASON reason=planner_requires_downloads need_download={} queue_remaining={} failed_terminal={}",
-                    account_prefix,
-                    cycle_id,
-                    planner_counters.need_download_total,
-                    download_counters.remaining,
-                    download_counters.failed_terminal
-                );
-            }
             log::warn!(
-                "{} [cycle:{}] BOOTSTRAP_TWO_WAY_BLOCKED cursor_active={} bootstrap_full_scan_completed={} planner_need_download={} queue_remaining={} failed_terminal={}",
+                "{} [cycle:{}] BOOTSTRAP_TWO_WAY_BLOCKED cursor_active={} bootstrap_full_scan_completed={} queue_remaining={} failed_terminal={}",
                 account_prefix,
                 cycle_id,
                 sync_state.active_delta_next_link.is_some(),
                 sync_state.bootstrap_full_scan_completed,
-                planner_counters.need_download_total,
                 download_counters.remaining,
                 download_counters.failed_terminal
             );
         }
     }
 
-    sync_state.local_snapshot = collect_local_snapshot(&sync_root)?;
+    if started_two_way_ready {
+        sync_state.local_snapshot = collect_local_snapshot(&sync_root)?;
+    }
     sync_state.last_cycle_at = Some(chrono::Local::now().to_rfc3339());
     save_sync_state(profile_id, &sync_state)?;
 

@@ -817,9 +817,13 @@ struct RemoteKnownItem {
     is_dir: bool,
     size: u64,
     modified_ts: i64,
+    #[serde(default)]
     is_shared_reference: bool,
+    #[serde(default)]
     shared_drive_id: Option<String>,
+    #[serde(default)]
     shared_item_id: Option<String>,
+    #[serde(default)]
     shared_kind: Option<String>,
 }
 

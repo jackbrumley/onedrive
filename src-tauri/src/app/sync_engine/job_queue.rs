@@ -874,6 +874,150 @@ fn mark_download_job_done(profile_id: &str, job_id: i64, skipped: bool) -> Resul
     Ok(())
 }
 
+fn mark_download_job_done_with_local_index(
+    profile_id: &str,
+    job_id: i64,
+    remote_entry: &RemoteKnownItem,
+    local_entry: &LocalSnapshotEntry,
+) -> Result<(), String> {
+    let mut connection = open_sync_jobs_connection(profile_id)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("Failed starting download completion transaction: {error}"))?;
+    let now = current_unix_seconds();
+
+    transaction
+        .execute(
+            "UPDATE sync_jobs
+             SET state = ?1,
+                 run_state = ?2,
+                 lease_owner = NULL,
+                 lease_until = NULL,
+                 bytes_done = COALESCE(bytes_total, bytes_done),
+                 updated_at = ?3,
+                 finished_at = ?3,
+                 progress_updated_at = ?3
+             WHERE profile_id = ?4 AND direction = ?5 AND id = ?6",
+            params![
+                DOWNLOAD_JOB_STATE_DONE,
+                JOB_RUN_STATE_IDLE,
+                now,
+                profile_id,
+                DOWNLOAD_JOB_DIRECTION,
+                job_id,
+            ],
+        )
+        .map_err(|error| format!("Failed marking download job done: {error}"))?;
+
+    transaction
+        .execute(
+            "INSERT INTO sync_files (
+                profile_id, path, is_dir, is_shared_reference, shared_drive_id, shared_item_id, shared_kind,
+                remote_item_id, remote_present, local_present,
+                remote_size, local_size, remote_modified_ts, local_modified_ts,
+                desired_action, conflict_state, updated_at
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7,
+                ?8, 1, 1,
+                ?9, ?10, ?11, ?12,
+                'none', NULL, ?13
+             )
+             ON CONFLICT(profile_id, path)
+             DO UPDATE SET
+                is_dir = excluded.is_dir,
+                is_shared_reference = excluded.is_shared_reference,
+                shared_drive_id = excluded.shared_drive_id,
+                shared_item_id = excluded.shared_item_id,
+                shared_kind = excluded.shared_kind,
+                remote_item_id = excluded.remote_item_id,
+                remote_present = 1,
+                local_present = 1,
+                remote_size = excluded.remote_size,
+                local_size = excluded.local_size,
+                remote_modified_ts = excluded.remote_modified_ts,
+                local_modified_ts = excluded.local_modified_ts,
+                updated_at = excluded.updated_at",
+            params![
+                profile_id,
+                remote_entry.path,
+                bool_to_sql(remote_entry.is_dir),
+                bool_to_sql(remote_entry.is_shared_reference),
+                remote_entry.shared_drive_id.as_deref(),
+                remote_entry.shared_item_id.as_deref(),
+                remote_entry.shared_kind.as_deref(),
+                remote_entry.id,
+                remote_entry.size as i64,
+                local_entry.size as i64,
+                remote_entry.modified_ts,
+                local_entry.modified_ts,
+                now,
+            ],
+        )
+        .map_err(|error| format!("Failed upserting local sync file row during completion: {error}"))?;
+
+    transaction
+        .commit()
+        .map_err(|error| format!("Failed committing download completion transaction: {error}"))?;
+    Ok(())
+}
+
+fn upsert_sync_file_remote_presence(profile_id: &str, remote_entry: &RemoteKnownItem) -> Result<(), String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let now = current_unix_seconds();
+    connection
+        .execute(
+            "INSERT INTO sync_files (
+                profile_id, path, is_dir, is_shared_reference, shared_drive_id, shared_item_id, shared_kind,
+                remote_item_id, remote_present, local_present,
+                remote_size, local_size, remote_modified_ts, local_modified_ts,
+                desired_action, conflict_state, updated_at
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7,
+                ?8, 1, 0,
+                ?9, 0, ?10, 0,
+                'none', NULL, ?11
+             )
+             ON CONFLICT(profile_id, path)
+             DO UPDATE SET
+                is_dir = excluded.is_dir,
+                is_shared_reference = excluded.is_shared_reference,
+                shared_drive_id = excluded.shared_drive_id,
+                shared_item_id = excluded.shared_item_id,
+                shared_kind = excluded.shared_kind,
+                remote_item_id = excluded.remote_item_id,
+                remote_present = 1,
+                remote_size = excluded.remote_size,
+                remote_modified_ts = excluded.remote_modified_ts,
+                updated_at = excluded.updated_at",
+            params![
+                profile_id,
+                remote_entry.path,
+                bool_to_sql(remote_entry.is_dir),
+                bool_to_sql(remote_entry.is_shared_reference),
+                remote_entry.shared_drive_id.as_deref(),
+                remote_entry.shared_item_id.as_deref(),
+                remote_entry.shared_kind.as_deref(),
+                remote_entry.id,
+                remote_entry.size as i64,
+                remote_entry.modified_ts,
+                now,
+            ],
+        )
+        .map_err(|error| format!("Failed upserting remote sync file row: {error}"))?;
+    Ok(())
+}
+
+fn remove_sync_file_entry(profile_id: &str, path: &str) -> Result<(), String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    connection
+        .execute(
+            "DELETE FROM sync_files WHERE profile_id = ?1 AND path = ?2",
+            params![profile_id, path],
+        )
+        .map_err(|error| format!("Failed deleting sync file row: {error}"))?;
+    Ok(())
+}
+
 fn mark_download_job_running(profile_id: &str, job_id: i64) -> Result<(), String> {
     let connection = open_sync_jobs_connection(profile_id)?;
     let now = current_unix_seconds();
