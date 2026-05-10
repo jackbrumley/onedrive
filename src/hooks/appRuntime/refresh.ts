@@ -28,6 +28,21 @@ export function createRefreshActions({
   setUpdateError,
   setLastCheckedAt,
 }: RefreshFactoryParams) {
+  const snapshotTime = (value: string): number => {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const shouldReplaceSnapshot = (current: SyncRuntimeSnapshot, next: SyncRuntimeSnapshot): boolean => {
+    if (next.revision > current.revision) {
+      return true;
+    }
+    if (next.revision < current.revision) {
+      return false;
+    }
+    return snapshotTime(next.generatedAt) > snapshotTime(current.generatedAt);
+  };
+
   const refreshStatus = async () => {
     try {
       const snapshot = await invoke<AppStatusSnapshot>("get_status_snapshot");
@@ -49,7 +64,7 @@ export function createRefreshActions({
   const refreshSyncRuntime = async () => {
     try {
       const snapshot = await invoke<SyncRuntimeSnapshot>("get_sync_runtime_snapshot");
-      setSyncRuntime((current) => (current.revision === snapshot.revision ? current : snapshot));
+      setSyncRuntime((current) => (shouldReplaceSnapshot(current, snapshot) ? snapshot : current));
     } catch {
       // runtime telemetry is best-effort for now
     }
