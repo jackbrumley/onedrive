@@ -32,9 +32,9 @@ export function computeEffectiveSyncState(
 } {
   const runtimeIssueCode = runtimeStatus?.issueCode ?? null;
   const runtimeIssueIsBlocking = runtimeIssueCode ? BLOCKING_ISSUE_CODES.has(runtimeIssueCode) : false;
-  const hasBlockingIssue =
-    !account.authConfigured || runtimeIssueIsBlocking || account.agentState === "error" || runtimeStatus?.phase === "error";
-  const syncActive = account.agentState === "syncing" || isSyncPhaseActive(runtimeStatus?.phase);
+  const phase = runtimeStatus?.phase;
+  const hasBlockingIssue = !account.authConfigured || runtimeIssueIsBlocking || phase === "error";
+  const syncActive = isSyncPhaseActive(phase);
   const syncState: "stopped" | "syncing" | "paused" = hasBlockingIssue
     ? "stopped"
     : syncActive

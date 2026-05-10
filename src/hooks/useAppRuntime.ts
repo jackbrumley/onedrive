@@ -6,10 +6,12 @@ import type {
   ActivityEvent,
   AppStatusSnapshot,
   SyncStatusEvent,
+  SyncRuntimeAccountStatus,
   SyncRuntimeSnapshot,
   ToastType,
   UpdateCheckResult,
 } from "../types/somedrive";
+import { computeEffectiveSyncState } from "../components/accounts/syncStateSelectors";
 import { createAccountActions } from "./appRuntime/accountActions";
 import { createNavigationActions } from "./appRuntime/navigation";
 import { createRefreshActions } from "./appRuntime/refresh";
@@ -71,10 +73,9 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
         showToast,
         refreshStatus: refreshActions.refreshStatus,
         refreshActivity: refreshActions.refreshActivity,
-        refreshSyncRuntime: refreshActions.refreshSyncRuntime,
         openAccount: navigation.openAccount,
       }),
-    [navigation.openAccount, refreshActions.refreshActivity, refreshActions.refreshStatus, refreshActions.refreshSyncRuntime, showToast]
+    [navigation.openAccount, refreshActions.refreshActivity, refreshActions.refreshStatus, showToast]
   );
   const systemActions = useMemo(() => createSystemActions({ showToast }), [showToast]);
 
@@ -83,11 +84,7 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     let isDisposed = false;
     const unlistenAuthUpdatePromise = listen("account-auth-updated", () => {
       if (!isDisposed) {
-        void Promise.all([
-          refreshActions.refreshStatus(),
-          refreshActions.refreshActivity(),
-          refreshActions.refreshSyncRuntime(),
-        ]);
+        void Promise.all([refreshActions.refreshStatus(), refreshActions.refreshActivity()]);
       }
     });
 
@@ -130,7 +127,6 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     window.addEventListener("hashchange", syncRoute);
     void refreshActions.refreshStatus();
     void refreshActions.refreshActivity();
-    void refreshActions.refreshSyncRuntime();
     void invoke("request_sync_status_snapshot").catch(() => {
       // best effort initial event hydration
     });
@@ -152,6 +148,26 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
         });
     };
   }, []);
+
+  const syncRuntimeByAccountId = useMemo<Record<string, SyncRuntimeAccountStatus>>(
+    () => Object.fromEntries(syncRuntime.accounts.map((status) => [status.profileId, status])),
+    [syncRuntime.accounts]
+  );
+
+  const syncCounts = useMemo(() => {
+    let syncing = 0;
+    let paused = 0;
+    for (const account of status.accounts) {
+      const runtimeStatus = syncRuntimeByAccountId[account.id] ?? null;
+      const { syncState } = computeEffectiveSyncState(account, runtimeStatus);
+      if (syncState === "syncing") {
+        syncing += 1;
+      } else if (syncState === "paused") {
+        paused += 1;
+      }
+    }
+    return { syncing, paused };
+  }, [status.accounts, syncRuntimeByAccountId]);
 
   const toggleAutostart = async (enabled: boolean) => {
     const updated = await systemActions.setAutostartEnabled(enabled);
@@ -183,8 +199,8 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
     lastCheckedAt,
     activityEvents,
     syncRuntime,
-    syncingCount: status.accounts.filter((account) => account.agentState === "syncing").length,
-    pausedCount: status.accounts.filter((account) => account.agentState === "paused").length,
+    syncingCount: syncCounts.syncing,
+    pausedCount: syncCounts.paused,
     navigate: navigation.navigate,
     goHome: navigation.goHome,
     openAccount: navigation.openAccount,

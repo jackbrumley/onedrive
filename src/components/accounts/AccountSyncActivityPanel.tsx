@@ -104,110 +104,22 @@ function buildCurrentActivityState(runtimeStatus: SyncRuntimeAccountStatus | nul
   }
 
   const activity = runtimeStatus.currentActivity;
-  if (activity) {
-    const current = activity.current ?? null;
-    const total = activity.total ?? null;
-    const unit = activity.unit ?? "items";
-    const progressLabel =
-      current !== null
-        ? total !== null
-          ? `${current.toLocaleString()} / ${total.toLocaleString()} ${unit}`
-          : `${current.toLocaleString()} ${unit}`
-        : "";
-
-    return {
-      title: runtimeStatus.phaseMessage || activity.stage,
-      detail: activity.detail ?? "",
-      progressLabel,
-      progressPercent: current !== null && total !== null ? toProgressPercent(current, total) : null,
-      progressMode: activity.progressMode as CurrentActivityState["progressMode"],
-    };
-  }
-
-  const phase = runtimeStatus.phase;
-  const scanned = runtimeStatus.localScanScannedCount ?? 0;
-  const estimated = runtimeStatus.localScanEstimatedTotal ?? null;
-  const scanPath = runtimeStatus.localScanCurrentPath ?? null;
-
-  if (phase === "scanning_local") {
-    if (estimated && estimated > 0) {
-      const safeTotal = Math.max(estimated, scanned);
-      return {
-        title: "Scanning local files",
-        detail: scanPath ? `Current: ${scanPath}` : "Walking local filesystem",
-        progressLabel: `${scanned.toLocaleString()} / ~${safeTotal.toLocaleString()} files`,
-        progressPercent: toProgressPercent(scanned, safeTotal),
-        progressMode: "determinate",
-      };
-    }
-    return {
-      title: "Scanning local files",
-      detail: scanPath ? `Current: ${scanPath}` : "Walking local filesystem",
-      progressLabel: `${scanned.toLocaleString()} files scanned`,
-      progressPercent: null,
-      progressMode: "indeterminate",
-    };
-  }
-
-  if (phase === "building_index") {
-    const local = runtimeStatus.localScanScannedCount ?? 0;
-    const remote = runtimeStatus.remoteDiscoveredTotal ?? 0;
-    return {
-      title: "Building sync index",
-      detail: "Comparing local and cloud snapshots",
-      progressLabel: `${local.toLocaleString()} local + ${remote.toLocaleString()} cloud entries`,
-      progressPercent: null,
-      progressMode: "indeterminate",
-    };
-  }
-
-  if (phase === "planning_actions") {
-    return {
-      title: "Planning sync actions",
-      detail: "Computing download, upload, and conflict actions",
-      progressLabel: "Finalizing action plan",
-      progressPercent: null,
-      progressMode: "indeterminate",
-    };
-  }
-
-  if (phase === "scanning_remote") {
-    const discovered = runtimeStatus.remoteDiscoveredTotal ?? 0;
-    return {
-      title: "Scanning cloud files",
-      detail: "Reading OneDrive delta feed",
-      progressLabel: `${discovered.toLocaleString()} files discovered`,
-      progressPercent: null,
-      progressMode: "indeterminate",
-    };
-  }
-
-  if (phase === "paused") {
-    return {
-      title: "Synchronization paused",
-      detail: "Resume to continue sync",
-      progressLabel: "",
-      progressPercent: null,
-      progressMode: "hidden",
-    };
-  }
-
-  if (phase === "idle" || phase === "error") {
-    return {
-      title: runtimeStatus.phaseMessage || (phase === "error" ? "Sync error" : "Idle"),
-      detail: phase === "error" ? "No active transfers" : "Waiting for next sync work",
-      progressLabel: "",
-      progressPercent: null,
-      progressMode: "hidden",
-    };
-  }
+  const current = activity?.current ?? null;
+  const total = activity?.total ?? null;
+  const unit = activity?.unit ?? "items";
+  const progressLabel =
+    current !== null
+      ? total !== null
+        ? `${current.toLocaleString()} / ${total.toLocaleString()} ${unit}`
+        : `${current.toLocaleString()} ${unit}`
+      : "";
 
   return {
-    title: runtimeStatus.phaseMessage || "Idle",
-    detail: "Waiting for next sync work",
-    progressLabel: "",
-    progressPercent: null,
-    progressMode: "hidden",
+    title: runtimeStatus.phaseMessage || activity?.stage || "Idle",
+    detail: activity?.detail ?? "",
+    progressLabel,
+    progressPercent: current !== null && total !== null ? toProgressPercent(current, total) : null,
+    progressMode: (activity?.progressMode as CurrentActivityState["progressMode"]) ?? "hidden",
   };
 }
 

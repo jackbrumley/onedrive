@@ -15,7 +15,6 @@ interface AccountActionsFactoryParams {
   showToast: (message: string, type?: ToastType, durationMs?: number) => void;
   refreshStatus: () => Promise<void>;
   refreshActivity: () => Promise<void>;
-  refreshSyncRuntime: () => Promise<void>;
   openAccount: (accountId: string) => void;
 }
 
@@ -23,10 +22,9 @@ export function createAccountActions({
   showToast,
   refreshStatus,
   refreshActivity,
-  refreshSyncRuntime,
   openAccount,
 }: AccountActionsFactoryParams) {
-  const refreshAll = () => Promise.all([refreshStatus(), refreshActivity(), refreshSyncRuntime()]);
+  const refreshAll = () => Promise.all([refreshStatus(), refreshActivity()]);
 
   const startInteractiveAuth = async (profileId: string) => {
     try {
