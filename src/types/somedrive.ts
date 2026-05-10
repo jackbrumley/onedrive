@@ -160,6 +160,14 @@ export interface SyncRuntimeSnapshot {
   accounts: SyncRuntimeAccountStatus[];
 }
 
+export interface SyncStatusEvent {
+  profileId: string;
+  statusSeq: number;
+  generatedAt: string;
+  kind: "upsert" | "removed" | string;
+  status: SyncRuntimeAccountStatus | null;
+}
+
 export type ToastType = "success" | "error" | "info";
 
 export interface ToastMessage {
