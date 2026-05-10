@@ -46,6 +46,8 @@ pub fn run() {
             set_account_agent_state,
             confirm_account_large_delete,
             keep_cloud_files_after_large_delete,
+            retry_failed_download,
+            retry_all_failed_downloads,
             get_account_large_delete_preview,
             export_account_large_delete_preview,
             pause_all_accounts,

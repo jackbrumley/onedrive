@@ -16,6 +16,8 @@ interface AccountDetailUnifiedPanelProps {
   onOpenItemFolder: (accountId: string, relativePath: string) => Promise<void>;
   onReauthenticate: (accountId: string) => Promise<unknown>;
   onRetrySync: (accountId: string) => Promise<void>;
+  onRetryFailedDownload: (accountId: string, recentItemId: string, path: string) => Promise<void>;
+  onRetryAllFailedDownloads: (accountId: string) => Promise<void>;
   onConfirmLargeDelete: (accountId: string) => Promise<void>;
   onKeepCloudFiles: (accountId: string) => Promise<void>;
   onFetchLargeDeletePreview: (accountId: string) => Promise<string[]>;
@@ -36,6 +38,8 @@ export function AccountDetailUnifiedPanel({
   onOpenItemFolder,
   onReauthenticate,
   onRetrySync,
+  onRetryFailedDownload,
+  onRetryAllFailedDownloads,
   onConfirmLargeDelete,
   onKeepCloudFiles,
   onFetchLargeDeletePreview,
@@ -123,6 +127,8 @@ export function AccountDetailUnifiedPanel({
           onOpenSyncRootFolder={() => onOpenSyncRootFolder(account.id)}
           onReauthenticate={() => onReauthenticate(account.id)}
           onRetrySync={() => onRetrySync(account.id)}
+          onRetryFailedDownload={(recentItemId, path) => onRetryFailedDownload(account.id, recentItemId, path)}
+          onRetryAllFailedDownloads={() => onRetryAllFailedDownloads(account.id)}
           onConfirmLargeDelete={() => onConfirmLargeDelete(account.id)}
           onKeepCloudFiles={() => onKeepCloudFiles(account.id)}
           largeDeletePreviewPaths={largeDeletePreviewPaths}

@@ -652,6 +652,12 @@
   margin: 0;
 }
 
+.account-sync-preview-item-with-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .account-sync-preview-item:not(:last-child) {
   border-bottom: 1px solid #d9e5f3;
 }
@@ -668,6 +674,14 @@
   color: inherit;
   padding: 5px 2px;
   border-radius: 4px;
+}
+
+.account-sync-preview-item-retry-btn {
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.72rem;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .account-sync-preview-item-button:hover {

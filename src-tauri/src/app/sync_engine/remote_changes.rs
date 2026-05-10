@@ -64,15 +64,29 @@ async fn fetch_and_apply_delta_changes(
     heartbeat_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut watchdog_ticker = tokio::time::interval(Duration::from_secs(2));
     watchdog_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let cycle_cancel_flag = Arc::new(AtomicBool::new(false));
+    let cycle_cancel_bridge_flag = Arc::clone(&cycle_cancel_flag);
+    let global_cancel_flag = Arc::clone(cancel_flag);
+    tauri::async_runtime::spawn(async move {
+        while !cycle_cancel_bridge_flag.load(Ordering::Relaxed) {
+            if global_cancel_flag.load(Ordering::Relaxed) {
+                cycle_cancel_bridge_flag.store(true, Ordering::Relaxed);
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
     let producer_alive = Arc::new(AtomicBool::new(false));
     let active_download_workers = Arc::new(AtomicUsize::new(0));
     let mut last_page_progress_at: Option<std::time::Instant> = None;
     let mut last_download_result_at: Option<std::time::Instant> = None;
+    let mut last_download_counter_signature: Option<(usize, usize, usize, usize, u64, u64, u64)> =
+        None;
 
     let (page_tx, mut page_rx) =
         mpsc::channel::<Result<DeltaPageWorkItem, String>>(delta_page_queue_capacity);
     let mut producer_graph = graph.clone();
-    let producer_cancel = Arc::clone(cancel_flag);
+    let producer_cancel = Arc::clone(&cycle_cancel_flag);
     let producer_alive_flag = Arc::clone(&producer_alive);
     tauri::async_runtime::spawn(async move {
         producer_alive_flag.store(true, Ordering::Relaxed);
@@ -173,7 +187,7 @@ async fn fetch_and_apply_delta_changes(
 
     for worker_index in 0..download_concurrency {
         let worker_graph = graph.clone();
-        let worker_cancel = Arc::clone(cancel_flag);
+        let worker_cancel = Arc::clone(&cycle_cancel_flag);
         let worker_download_rx = Arc::clone(&download_rx);
         let worker_result_tx = download_result_tx.clone();
         let active_worker_count = Arc::clone(&active_download_workers);
@@ -208,6 +222,7 @@ async fn fetch_and_apply_delta_changes(
                     Some(job.job_id),
                     &job.item_id,
                     &job.path,
+                    Some(job.remote_entry.size),
                     &job.local_abs,
                     &worker_cancel,
                 )
@@ -249,7 +264,23 @@ async fn fetch_and_apply_delta_changes(
                     |current| Some(current.saturating_sub(1)),
                 );
 
-                if worker_result_tx.send(result).await.is_err() {
+                if let Err(send_error) = worker_result_tx.send(result).await {
+                    let dropped_result = send_error.0;
+                    if let Err(error) = mark_download_job_retry_wait(
+                        &worker_graph.profile_id,
+                        dropped_result.job_id,
+                        "Download worker result channel closed; retry scheduled",
+                        Duration::from_secs(1),
+                    ) {
+                        log::warn!(
+                            "{} [cycle:{}] DOWNLOAD_WORKER_RESULT_REQUEUE_FAILED worker_index={} job_id={} error={}",
+                            worker_graph.account_prefix,
+                            worker_graph.cycle_id,
+                            worker_index,
+                            dropped_result.job_id,
+                            error
+                        );
+                    }
                     log::info!(
                         "{} [cycle:{}] DOWNLOAD_WORKER_STOP worker_index={} reason=result_channel_closed",
                         worker_graph.account_prefix,
@@ -356,11 +387,26 @@ async fn fetch_and_apply_delta_changes(
     let mut terminal_error: Option<String> = None;
 
     loop {
-        if let Err(error) = ensure_not_cancelled(cancel_flag) {
+        if let Err(error) = ensure_not_cancelled(&cycle_cancel_flag) {
             terminal_error = Some(error);
             break;
         }
         let download_counters = sync_download_counters_from_db(graph)?;
+        let current_counter_signature = (
+            download_counters.remaining,
+            download_counters.in_progress,
+            download_counters.retry_waiting,
+            download_counters.completed,
+            download_counters.completed_bytes,
+            download_counters.in_flight_bytes_done,
+            download_counters.remaining_bytes,
+        );
+        if last_download_counter_signature != Some(current_counter_signature) {
+            let now = std::time::Instant::now();
+            last_progress_at = now;
+            last_download_result_at = Some(now);
+            last_download_counter_signature = Some(current_counter_signature);
+        }
         let current_pending_downloads = pending_download_count.load(Ordering::Relaxed);
         if producer_done && current_pending_downloads == 0 && download_counters.remaining == 0 {
             break;
@@ -436,7 +482,7 @@ async fn fetch_and_apply_delta_changes(
                         .map(|instant| format!("{}s", instant.elapsed().as_secs()))
                         .unwrap_or_else(|| "none".to_string());
                     log::warn!(
-                        "{} [cycle:{}] SYNC_STALLED phase=scanning_remote no_progress_for={}s pages={} items={} pending_downloads={} remaining_download_jobs={} retry_waiting={} producer_alive={} active_workers={} last_page_progress={} last_download_result_progress={}",
+                        "{} [cycle:{}] SYNC_STALLED phase=scanning_remote no_progress_for={}s pages={} items={} pending_downloads={} remaining_download_jobs={} in_progress={} retry_waiting={} producer_alive={} active_workers={} last_page_progress={} last_download_result_progress={}",
                         graph.account_prefix,
                         graph.cycle_id,
                         stall_timeout.as_secs(),
@@ -444,12 +490,17 @@ async fn fetch_and_apply_delta_changes(
                         stats.remote_items_received,
                         pending_download_count.load(Ordering::Relaxed),
                         download_counters.remaining,
+                        download_counters.in_progress,
                         download_counters.retry_waiting,
                         producer_alive.load(Ordering::Relaxed),
                         active_download_workers.load(Ordering::Relaxed),
                         last_page_progress,
                         last_download_progress
                     );
+                    if download_counters.in_progress > 0 {
+                        last_progress_at = std::time::Instant::now();
+                        continue;
+                    }
                     if producer_done && download_counters.retry_waiting > 0 {
                         last_progress_at = std::time::Instant::now();
                         continue;
@@ -542,7 +593,7 @@ async fn fetch_and_apply_delta_changes(
                     sync_root,
                     sync_state,
                     stats,
-                    cancel_flag,
+                    &cycle_cancel_flag,
                     page_payload.items,
                 )
                 .await;
@@ -563,6 +614,7 @@ async fn fetch_and_apply_delta_changes(
         }
     }
 
+    cycle_cancel_flag.store(true, Ordering::Relaxed);
     dispatcher_stop.store(true, Ordering::Relaxed);
     let _ = download_tx.take();
     if let Some(error) = terminal_error {

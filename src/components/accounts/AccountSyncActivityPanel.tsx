@@ -31,6 +31,8 @@ interface AccountSyncActivityPanelProps {
   onOpenSyncRootFolder: () => Promise<void>;
   onReauthenticate: () => Promise<unknown>;
   onRetrySync: () => Promise<void>;
+  onRetryFailedDownload: (recentItemId: string, path: string) => Promise<void>;
+  onRetryAllFailedDownloads: () => Promise<void>;
   onConfirmLargeDelete: () => Promise<void>;
   onKeepCloudFiles: () => Promise<void>;
   largeDeletePreviewPaths: string[];
@@ -98,6 +100,14 @@ function extensionFromPath(path: string): string {
   return filename.slice(dotIndex + 1).toLowerCase();
 }
 
+function isPermissionDeniedError(errorText: string | null): boolean {
+  if (!errorText) {
+    return false;
+  }
+  const normalized = errorText.toLowerCase();
+  return normalized.includes("status 403") || normalized.includes("accessdenied");
+}
+
 const FILE_TYPE_ICON_SIZE = 34;
 const ACTIVITY_ICON_SIZE = 24;
 
@@ -155,6 +165,8 @@ export function AccountSyncActivityPanel({
   onOpenSyncRootFolder,
   onReauthenticate,
   onRetrySync,
+  onRetryFailedDownload,
+  onRetryAllFailedDownloads,
   onConfirmLargeDelete,
   onKeepCloudFiles,
   largeDeletePreviewPaths,
@@ -163,6 +175,8 @@ export function AccountSyncActivityPanel({
   const throughputSampleRef = useRef<{ timestampMs: number; downloadedBytes: number; uploadedBytes: number } | null>(null);
   const [downloadBytesPerSecond, setDownloadBytesPerSecond] = useState(0);
   const [uploadBytesPerSecond, setUploadBytesPerSecond] = useState(0);
+  const [retryAllInFlight, setRetryAllInFlight] = useState(false);
+  const [retryingFailedIds, setRetryingFailedIds] = useState<Record<string, boolean>>({});
   const modeMessage = syncModeMessage(runtimeStatus, hasCompletedInitialSync);
   const isPausedPhase = runtimeStatus?.phase === "paused";
   const inProgress = runtimeStatus?.inProgress ?? [];
@@ -540,39 +554,85 @@ export function AccountSyncActivityPanel({
               )}
             </div>
           )}
+          {recentFailed.some((item) => !isPermissionDeniedError(item.error)) && (
+            <div class="account-sync-preview-actions">
+              <button
+                type="button"
+                class="account-sync-preview-action-btn"
+                disabled={retryAllInFlight}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (retryAllInFlight) {
+                    return;
+                  }
+                  setRetryAllInFlight(true);
+                  void onRetryAllFailedDownloads().finally(() => {
+                    setRetryAllInFlight(false);
+                  });
+                }}
+              >
+                {retryAllInFlight ? "Retrying..." : "Retry All Failed Downloads"}
+              </button>
+            </div>
+          )}
           {recentFailed.length > 0 && (
             <div class="account-sync-preview-list account-sync-preview-list-errors">
               {recentFailed.map((item) => (
                 <article key={item.id} class="account-sync-preview-item">
-                  <button
-                    type="button"
-                    class="account-sync-preview-item-button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void onOpenItemFolder(item.path);
-                    }}
-                  >
-                    <div class="account-sync-preview-row">
-                      <span class="account-sync-preview-file-icon">
-                        {iconForFilePath(item.path)}
-                      </span>
-                      <div class="account-sync-preview-content">
-                        <p class="account-sync-preview-path">{item.path}</p>
-                        <p class="account-sync-preview-meta">
-                          <span>{item.error ?? "Transfer failed"}</span>
-                          <span>{new Date(item.finishedAt).toLocaleTimeString()}</span>
-                        </p>
+                  <div class="account-sync-preview-item-with-action">
+                    <button
+                      type="button"
+                      class="account-sync-preview-item-button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void onOpenItemFolder(item.path);
+                      }}
+                    >
+                      <div class="account-sync-preview-row">
+                        <span class="account-sync-preview-file-icon">
+                          {iconForFilePath(item.path)}
+                        </span>
+                        <div class="account-sync-preview-content">
+                          <p class="account-sync-preview-path">{item.path}</p>
+                          <p class="account-sync-preview-meta">
+                            <span>{item.error ?? "Transfer failed"}</span>
+                            <span>{new Date(item.finishedAt).toLocaleTimeString()}</span>
+                          </p>
+                        </div>
+                        <span class="account-sync-preview-right-icons">
+                          <span class="account-sync-preview-direction-icon">
+                            {iconForDirection(item.direction)}
+                          </span>
+                          <span class="account-sync-preview-status-icon">
+                            <IconAlertCircle size={ACTIVITY_ICON_SIZE} class="sync-preview-icon-error" />
+                          </span>
+                        </span>
                       </div>
-                      <span class="account-sync-preview-right-icons">
-                        <span class="account-sync-preview-direction-icon">
-                          {iconForDirection(item.direction)}
-                        </span>
-                        <span class="account-sync-preview-status-icon">
-                          <IconAlertCircle size={ACTIVITY_ICON_SIZE} class="sync-preview-icon-error" />
-                        </span>
-                      </span>
-                    </div>
-                  </button>
+                    </button>
+                    {!isPermissionDeniedError(item.error) && (
+                      <button
+                        type="button"
+                        class="account-sync-preview-item-retry-btn"
+                        disabled={retryAllInFlight || Boolean(retryingFailedIds[item.id])}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (retryAllInFlight || retryingFailedIds[item.id]) {
+                            return;
+                          }
+                          setRetryingFailedIds((current) => ({ ...current, [item.id]: true }));
+                          void onRetryFailedDownload(item.id, item.path).finally(() => {
+                            setRetryingFailedIds((current) => {
+                              const next = { ...current };
+                              delete next[item.id];
+                              return next;
+                            });
+                          });
+                        }}
+                      >
+                        {retryingFailedIds[item.id] ? "Retrying..." : "Retry"}
+                      </button>
+                    )}
+                  </div>
                 </article>
               ))}
             </div>

@@ -120,6 +120,7 @@ fn open_sync_jobs_connection(profile_id: &str) -> Result<Connection, String> {
     connection
         .execute_batch(
             "PRAGMA journal_mode = WAL;
+             PRAGMA busy_timeout = 5000;
              PRAGMA synchronous = NORMAL;
              CREATE TABLE IF NOT EXISTS sync_jobs (
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -196,6 +197,25 @@ fn open_sync_jobs_connection(profile_id: &str) -> Result<Connection, String> {
     run_sync_jobs_migrations(&connection)?;
 
     Ok(connection)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetryFailedDownloadJobStatus {
+    Retried,
+    AlreadyRetrying,
+    PermissionDenied,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RetryAllFailedDownloadJobsReport {
+    pub retried: usize,
+    pub skipped_permission_denied: usize,
+    pub already_retrying: usize,
+}
+
+fn is_permission_denied_error_text(error_text: &str) -> bool {
+    let normalized = error_text.to_lowercase();
+    normalized.contains("status 403") || normalized.contains("accessdenied")
 }
 
 fn run_sync_jobs_migrations(connection: &Connection) -> Result<(), String> {
@@ -609,6 +629,155 @@ fn mark_download_job_failed(profile_id: &str, job_id: i64, error_text: &str) -> 
         )
         .map_err(|error| format!("Failed marking download job failed: {error}"))?;
     Ok(())
+}
+
+pub fn retry_failed_download_job(
+    profile_id: &str,
+    recent_item_id: &str,
+) -> Result<RetryFailedDownloadJobStatus, String> {
+    let job_id_text = recent_item_id
+        .strip_prefix("job-")
+        .ok_or_else(|| "Invalid sync activity item id; expected 'job-<id>'".to_string())?;
+    let job_id = job_id_text
+        .parse::<i64>()
+        .map_err(|_| "Invalid sync activity job id".to_string())?;
+    if job_id <= 0 {
+        return Err("Invalid sync activity job id".to_string());
+    }
+
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let current_row: Option<(String, Option<String>)> = connection
+        .query_row(
+            "SELECT state, last_error
+             FROM sync_jobs
+             WHERE profile_id = ?1 AND direction = ?2 AND id = ?3",
+            params![profile_id, DOWNLOAD_JOB_DIRECTION, job_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|error| format!("Failed loading failed download job: {error}"))?;
+
+    let Some((state, last_error)) = current_row else {
+        return Ok(RetryFailedDownloadJobStatus::AlreadyRetrying);
+    };
+
+    if state != DOWNLOAD_JOB_STATE_FAILED_TERMINAL {
+        return Ok(RetryFailedDownloadJobStatus::AlreadyRetrying);
+    }
+
+    if last_error
+        .as_deref()
+        .is_some_and(is_permission_denied_error_text)
+    {
+        return Ok(RetryFailedDownloadJobStatus::PermissionDenied);
+    }
+
+    let now = current_unix_seconds();
+    let updated = connection
+        .execute(
+            "UPDATE sync_jobs
+             SET state = ?1,
+                 run_state = ?2,
+                 lease_owner = NULL,
+                 lease_until = NULL,
+                 last_error = NULL,
+                 next_retry_at = NULL,
+                 bytes_done = 0,
+                 finished_at = NULL,
+                 updated_at = ?3,
+                 progress_updated_at = ?3
+             WHERE profile_id = ?4
+               AND direction = ?5
+               AND id = ?6
+               AND state = ?7",
+            params![
+                DOWNLOAD_JOB_STATE_QUEUED,
+                JOB_RUN_STATE_IDLE,
+                now,
+                profile_id,
+                DOWNLOAD_JOB_DIRECTION,
+                job_id,
+                DOWNLOAD_JOB_STATE_FAILED_TERMINAL,
+            ],
+        )
+        .map_err(|error| format!("Failed retrying failed download job: {error}"))?;
+
+    if updated == 0 {
+        return Ok(RetryFailedDownloadJobStatus::AlreadyRetrying);
+    }
+
+    Ok(RetryFailedDownloadJobStatus::Retried)
+}
+
+pub fn retry_all_failed_download_jobs(
+    profile_id: &str,
+) -> Result<RetryAllFailedDownloadJobsReport, String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let (failed_total, permission_denied_total): (usize, usize) = connection
+        .query_row(
+            "SELECT
+                SUM(CASE WHEN state = ?1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN state = ?1 AND (
+                    lower(COALESCE(last_error, '')) LIKE '%status 403%'
+                    OR lower(COALESCE(last_error, '')) LIKE '%accessdenied%'
+                ) THEN 1 ELSE 0 END)
+             FROM sync_jobs
+             WHERE profile_id = ?2
+               AND direction = ?3",
+            params![
+                DOWNLOAD_JOB_STATE_FAILED_TERMINAL,
+                profile_id,
+                DOWNLOAD_JOB_DIRECTION,
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, Option<i64>>(0)?.unwrap_or(0).max(0) as usize,
+                    row.get::<_, Option<i64>>(1)?.unwrap_or(0).max(0) as usize,
+                ))
+            },
+        )
+        .map_err(|error| format!("Failed counting failed download jobs: {error}"))?;
+    let now = current_unix_seconds();
+    let retried = connection
+        .execute(
+            "UPDATE sync_jobs
+             SET state = ?1,
+                 run_state = ?2,
+                 lease_owner = NULL,
+                 lease_until = NULL,
+                 last_error = NULL,
+                 next_retry_at = NULL,
+                 bytes_done = 0,
+                 finished_at = NULL,
+                 updated_at = ?3,
+                 progress_updated_at = ?3
+             WHERE profile_id = ?4
+               AND direction = ?5
+               AND state = ?6
+               AND (last_error IS NULL OR (
+                    lower(last_error) NOT LIKE '%status 403%'
+                    AND lower(last_error) NOT LIKE '%accessdenied%'
+               ))",
+            params![
+                DOWNLOAD_JOB_STATE_QUEUED,
+                JOB_RUN_STATE_IDLE,
+                now,
+                profile_id,
+                DOWNLOAD_JOB_DIRECTION,
+                DOWNLOAD_JOB_STATE_FAILED_TERMINAL,
+            ],
+        )
+        .map_err(|error| format!("Failed retrying failed download jobs: {error}"))?
+        as usize;
+
+    let retryable_total = failed_total.saturating_sub(permission_denied_total);
+    let already_retrying = retryable_total.saturating_sub(retried);
+
+    Ok(RetryAllFailedDownloadJobsReport {
+        retried,
+        skipped_permission_denied: permission_denied_total,
+        already_retrying,
+    })
 }
 
 fn mark_download_job_retry_wait(

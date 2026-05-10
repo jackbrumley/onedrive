@@ -339,6 +339,8 @@ export function UiLabPage({ onBack }: UiLabPageProps) {
         onOpenItemFolder={async () => undefined}
         onReauthenticate={async () => null}
         onRetrySync={async () => undefined}
+        onRetryFailedDownload={async () => undefined}
+        onRetryAllFailedDownloads={async () => undefined}
         onConfirmLargeDelete={async () => undefined}
         onKeepCloudFiles={async () => undefined}
         onFetchLargeDeletePreview={async () => []}

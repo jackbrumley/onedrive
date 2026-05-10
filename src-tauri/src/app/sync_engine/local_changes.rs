@@ -394,6 +394,7 @@ async fn reconcile_bootstrap_local_snapshot(
             None,
             &remote_item.id,
             &remote_item.path,
+            Some(remote_item.size),
             &local_abs,
             cancel_flag,
         )

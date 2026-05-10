@@ -43,6 +43,7 @@ pub fn configure_shell(app: &mut tauri::App<tauri::Wry>) -> Result<(), Box<dyn s
             let mut resumed_count = 0_u32;
             let mut paused_count = 0_u32;
             let mut skipped_count = 0_u32;
+            let mut drained_jobs_total = 0_usize;
 
             for account in accounts {
                 let prefix = log_context::account_prefix_from_parts(&account.id, &account.email);
@@ -59,6 +60,14 @@ pub fn configure_shell(app: &mut tauri::App<tauri::Wry>) -> Result<(), Box<dyn s
 
                 if account.agent_state == "syncing" {
                     if account.auth_configured {
+                        match sync_engine::prepare_startup_sync_resume(&account.id) {
+                            Ok(cleared_jobs) => {
+                                drained_jobs_total = drained_jobs_total.saturating_add(cleared_jobs);
+                            }
+                            Err(error) => {
+                                log::warn!("{} STARTUP_SYNC_PREP_FAILED {}", prefix, error);
+                            }
+                        }
                         match sync_engine::on_agent_state_changed(
                             &app_state,
                             &account.id,
@@ -83,10 +92,11 @@ pub fn configure_shell(app: &mut tauri::App<tauri::Wry>) -> Result<(), Box<dyn s
             }
 
             log::info!(
-                "Startup sync restore summary | resumed={} paused={} skipped={}",
+                "Startup sync restore summary | resumed={} paused={} skipped={} startup_drained_jobs={}",
                 resumed_count,
                 paused_count,
-                skipped_count
+                skipped_count,
+                drained_jobs_total
             );
         }
         Err(error) => {

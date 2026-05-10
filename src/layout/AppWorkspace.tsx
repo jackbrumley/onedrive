@@ -53,6 +53,8 @@ export function AppWorkspace({ runtime }: AppWorkspaceProps) {
           onOpenItemFolder={runtime.openAccountItemFolder}
           onReauthenticate={runtime.startInteractiveAuth}
           onRetrySync={runtime.retryAccountSync}
+          onRetryFailedDownload={runtime.retryFailedDownload}
+          onRetryAllFailedDownloads={runtime.retryAllFailedDownloads}
           onConfirmLargeDelete={runtime.confirmAccountLargeDelete}
           onKeepCloudFiles={runtime.keepCloudFilesAfterLargeDelete}
           onFetchLargeDeletePreview={runtime.fetchAccountLargeDeletePreview}

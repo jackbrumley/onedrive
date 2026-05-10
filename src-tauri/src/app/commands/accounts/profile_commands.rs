@@ -142,6 +142,55 @@ pub fn keep_cloud_files_after_large_delete(
 }
 
 #[tauri::command]
+pub fn retry_failed_download(
+    profile_id: String,
+    recent_item_id: String,
+) -> Result<RetryFailedDownloadResponse, String> {
+    let status = sync_engine::retry_failed_download_job(&profile_id, &recent_item_id)?;
+    let status_text = match status {
+        sync_engine::RetryFailedDownloadJobStatus::Retried => "retried",
+        sync_engine::RetryFailedDownloadJobStatus::AlreadyRetrying => "already_retrying",
+        sync_engine::RetryFailedDownloadJobStatus::PermissionDenied => "permission_denied",
+    };
+    let _ = activity_log::append_event(
+        &profile_id,
+        &log_context::account_identity(&profile_id),
+        "info",
+        &format!(
+            "{} Retry failed download item {} status={}",
+            log_context::account_prefix(&profile_id),
+            recent_item_id,
+            status_text
+        ),
+    );
+    Ok(RetryFailedDownloadResponse {
+        status: status_text.to_string(),
+    })
+}
+
+#[tauri::command]
+pub fn retry_all_failed_downloads(profile_id: String) -> Result<RetryAllFailedDownloadsResponse, String> {
+    let report = sync_engine::retry_all_failed_download_jobs(&profile_id)?;
+    let _ = activity_log::append_event(
+        &profile_id,
+        &log_context::account_identity(&profile_id),
+        "info",
+        &format!(
+            "{} Retry-all failed downloads retried={} skipped_permission_denied={} already_retrying={}",
+            log_context::account_prefix(&profile_id),
+            report.retried,
+            report.skipped_permission_denied,
+            report.already_retrying
+        ),
+    );
+    Ok(RetryAllFailedDownloadsResponse {
+        retried: report.retried,
+        skipped_permission_denied: report.skipped_permission_denied,
+        already_retrying: report.already_retrying,
+    })
+}
+
+#[tauri::command]
 pub fn get_account_large_delete_preview(profile_id: String) -> Result<Vec<String>, String> {
     sync_engine::get_large_delete_pending_paths(&profile_id)
 }
@@ -182,4 +231,17 @@ pub fn export_account_large_delete_preview(
     })?;
 
     Ok(destination_path)
+}
+#[derive(serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RetryFailedDownloadResponse {
+    pub status: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetryAllFailedDownloadsResponse {
+    pub retried: usize,
+    pub skipped_permission_denied: usize,
+    pub already_retrying: usize,
 }

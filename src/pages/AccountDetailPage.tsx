@@ -37,6 +37,8 @@ interface AccountDetailPageProps {
   onOpenItemFolder: (accountId: string, relativePath: string) => Promise<void>;
   onReauthenticate: (accountId: string) => Promise<unknown>;
   onRetrySync: (accountId: string) => Promise<void>;
+  onRetryFailedDownload: (accountId: string, recentItemId: string, path: string) => Promise<void>;
+  onRetryAllFailedDownloads: (accountId: string) => Promise<void>;
   onConfirmLargeDelete: (accountId: string) => Promise<void>;
   onKeepCloudFiles: (accountId: string) => Promise<void>;
   onFetchLargeDeletePreview: (accountId: string) => Promise<string[]>;
@@ -168,6 +170,8 @@ export function AccountDetailPage({
   onOpenItemFolder,
   onReauthenticate,
   onRetrySync,
+  onRetryFailedDownload,
+  onRetryAllFailedDownloads,
   onConfirmLargeDelete,
   onKeepCloudFiles,
   onFetchLargeDeletePreview,
@@ -218,6 +222,8 @@ export function AccountDetailPage({
           onOpenItemFolder={onOpenItemFolder}
           onReauthenticate={onReauthenticate}
           onRetrySync={onRetrySync}
+          onRetryFailedDownload={onRetryFailedDownload}
+          onRetryAllFailedDownloads={onRetryAllFailedDownloads}
           onConfirmLargeDelete={onConfirmLargeDelete}
           onKeepCloudFiles={onKeepCloudFiles}
           onFetchLargeDeletePreview={onFetchLargeDeletePreview}
