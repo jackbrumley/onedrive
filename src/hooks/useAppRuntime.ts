@@ -106,7 +106,9 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
         return;
       }
       if (currentSeq > 0 && incomingSeq > currentSeq + 1) {
-        void refreshActions.refreshSyncRuntime();
+        void refreshActions.refreshSyncRuntime().catch(() => {
+          // refresh action already surfaces hard failure
+        });
       }
       syncStatusSeqByAccountRef.current = {
         ...syncStatusSeqByAccountRef.current,
@@ -145,12 +147,14 @@ export function useAppRuntime({ showToast }: UseAppRuntimeProps) {
           if (isDisposed || hasReceivedSyncStatusRef.current) {
             return;
           }
-          void refreshActions.refreshSyncRuntime();
+          void refreshActions.refreshSyncRuntime().catch(() => {
+            // refresh action already surfaces hard failure
+          });
         }, 1200);
       })
       .catch(() => {
         if (!isDisposed) {
-          void refreshActions.refreshSyncRuntime();
+          showToast("Failed to bootstrap authoritative sync status snapshot.", "error", 4200);
         }
       });
     void systemActions.getAutostartEnabled().then(setAutostartEnabled);

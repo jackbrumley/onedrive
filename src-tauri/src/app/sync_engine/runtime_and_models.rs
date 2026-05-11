@@ -476,6 +476,25 @@ fn runtime_set_local_scan_progress(
             current_path,
         );
     }
+    if let Err(error) = persist_sync_lifecycle_activity(
+        profile_id,
+        "scanning_local",
+        if estimated_total.is_some() {
+            "determinate"
+        } else {
+            "indeterminate"
+        },
+        Some(scanned_count),
+        estimated_total,
+        Some("files"),
+        current_path,
+    ) {
+        log::warn!(
+            "{} SYNC_LIFECYCLE_ACTIVITY_PERSIST_FAILED stage=scanning_local error={}",
+            log_context::account_prefix(profile_id),
+            error
+        );
+    }
 }
 
 fn runtime_set_current_activity(
@@ -498,6 +517,22 @@ fn runtime_set_current_activity(
             total,
             unit,
             detail,
+        );
+    }
+    if let Err(error) = persist_sync_lifecycle_activity(
+        profile_id,
+        stage,
+        progress_mode,
+        current,
+        total,
+        unit,
+        detail,
+    ) {
+        log::warn!(
+            "{} SYNC_LIFECYCLE_ACTIVITY_PERSIST_FAILED stage={} error={}",
+            log_context::account_prefix(profile_id),
+            stage,
+            error
         );
     }
 }

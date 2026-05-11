@@ -65,8 +65,9 @@ export function createRefreshActions({
     try {
       const snapshot = await invoke<SyncRuntimeSnapshot>("get_sync_runtime_snapshot");
       setSyncRuntime((current) => (shouldReplaceSnapshot(current, snapshot) ? snapshot : current));
-    } catch {
-      // runtime telemetry is best-effort for now
+    } catch (error) {
+      showToast(`Failed to load sync runtime: ${error}`, "error", 4200);
+      throw error;
     }
   };
 

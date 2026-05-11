@@ -99,6 +99,13 @@ struct SyncLifecycleStateRow {
     phase: String,
     phase_message: String,
     remote_scan_complete: bool,
+    activity_stage: String,
+    activity_progress_mode: String,
+    activity_current: Option<usize>,
+    activity_total: Option<usize>,
+    activity_unit: Option<String>,
+    activity_detail: Option<String>,
+    activity_updated_at: i64,
     agent_state: String,
     last_sync_at: Option<String>,
 }
@@ -115,6 +122,13 @@ impl Default for SyncLifecycleStateRow {
             phase: "idle".to_string(),
             phase_message: "Idle".to_string(),
             remote_scan_complete: false,
+            activity_stage: "idle".to_string(),
+            activity_progress_mode: "hidden".to_string(),
+            activity_current: None,
+            activity_total: None,
+            activity_unit: None,
+            activity_detail: Some("Idle".to_string()),
+            activity_updated_at: 0,
             agent_state: "idle".to_string(),
             last_sync_at: None,
         }
@@ -237,6 +251,13 @@ fn open_sync_jobs_connection(profile_id: &str) -> Result<Connection, String> {
                  phase TEXT NOT NULL DEFAULT 'idle',
                  phase_message TEXT NOT NULL DEFAULT 'Idle',
                  remote_scan_complete INTEGER NOT NULL DEFAULT 0,
+                 activity_stage TEXT NOT NULL DEFAULT 'idle',
+                 activity_progress_mode TEXT NOT NULL DEFAULT 'hidden',
+                 activity_current INTEGER,
+                 activity_total INTEGER,
+                 activity_unit TEXT,
+                 activity_detail TEXT,
+                 activity_updated_at INTEGER NOT NULL DEFAULT 0,
                  agent_state TEXT NOT NULL DEFAULT 'idle',
                  last_sync_at TEXT,
                  updated_at INTEGER NOT NULL
@@ -355,6 +376,50 @@ fn run_sync_jobs_migrations(connection: &Connection) -> Result<(), String> {
             .map_err(|error| format!("Failed applying sync_jobs schema migration v3: {error}"))?;
     }
 
+    let current_version = connection
+        .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+        .map_err(|error| format!("Failed re-reading sync_jobs schema version: {error}"))?;
+    if current_version < 4 {
+        add_sync_lifecycle_column_if_missing(
+            connection,
+            "activity_stage",
+            "ALTER TABLE sync_lifecycle_state ADD COLUMN activity_stage TEXT NOT NULL DEFAULT 'idle'",
+        )?;
+        add_sync_lifecycle_column_if_missing(
+            connection,
+            "activity_progress_mode",
+            "ALTER TABLE sync_lifecycle_state ADD COLUMN activity_progress_mode TEXT NOT NULL DEFAULT 'hidden'",
+        )?;
+        add_sync_lifecycle_column_if_missing(
+            connection,
+            "activity_current",
+            "ALTER TABLE sync_lifecycle_state ADD COLUMN activity_current INTEGER",
+        )?;
+        add_sync_lifecycle_column_if_missing(
+            connection,
+            "activity_total",
+            "ALTER TABLE sync_lifecycle_state ADD COLUMN activity_total INTEGER",
+        )?;
+        add_sync_lifecycle_column_if_missing(
+            connection,
+            "activity_unit",
+            "ALTER TABLE sync_lifecycle_state ADD COLUMN activity_unit TEXT",
+        )?;
+        add_sync_lifecycle_column_if_missing(
+            connection,
+            "activity_detail",
+            "ALTER TABLE sync_lifecycle_state ADD COLUMN activity_detail TEXT",
+        )?;
+        add_sync_lifecycle_column_if_missing(
+            connection,
+            "activity_updated_at",
+            "ALTER TABLE sync_lifecycle_state ADD COLUMN activity_updated_at INTEGER NOT NULL DEFAULT 0",
+        )?;
+        connection
+            .execute_batch("PRAGMA user_version = 4;")
+            .map_err(|error| format!("Failed applying sync_jobs schema migration v4: {error}"))?;
+    }
+
     Ok(())
 }
 
@@ -385,10 +450,17 @@ fn upsert_sync_lifecycle_row(
                  phase,
                  phase_message,
                  remote_scan_complete,
+                 activity_stage,
+                 activity_progress_mode,
+                 activity_current,
+                 activity_total,
+                 activity_unit,
+                 activity_detail,
+                 activity_updated_at,
                  agent_state,
                  last_sync_at,
                  updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
              ON CONFLICT(profile_id)
              DO UPDATE SET
                  two_way_ready = excluded.two_way_ready,
@@ -400,6 +472,13 @@ fn upsert_sync_lifecycle_row(
                  phase = excluded.phase,
                  phase_message = excluded.phase_message,
                  remote_scan_complete = excluded.remote_scan_complete,
+                 activity_stage = excluded.activity_stage,
+                 activity_progress_mode = excluded.activity_progress_mode,
+                 activity_current = excluded.activity_current,
+                 activity_total = excluded.activity_total,
+                 activity_unit = excluded.activity_unit,
+                 activity_detail = excluded.activity_detail,
+                 activity_updated_at = excluded.activity_updated_at,
                  agent_state = excluded.agent_state,
                  last_sync_at = excluded.last_sync_at,
                  updated_at = excluded.updated_at",
@@ -414,6 +493,13 @@ fn upsert_sync_lifecycle_row(
                 row.phase,
                 row.phase_message,
                 bool_to_sql(row.remote_scan_complete),
+                row.activity_stage,
+                row.activity_progress_mode,
+                row.activity_current.map(|value| value as i64),
+                row.activity_total.map(|value| value as i64),
+                row.activity_unit,
+                row.activity_detail,
+                row.activity_updated_at,
                 row.agent_state,
                 row.last_sync_at,
                 now,
@@ -436,6 +522,13 @@ fn read_sync_lifecycle_row(profile_id: &str) -> Result<Option<SyncLifecycleState
                     phase,
                     phase_message,
                     remote_scan_complete,
+                    activity_stage,
+                    activity_progress_mode,
+                    activity_current,
+                    activity_total,
+                    activity_unit,
+                    activity_detail,
+                    activity_updated_at,
                     agent_state,
                     last_sync_at
              FROM sync_lifecycle_state
@@ -452,8 +545,15 @@ fn read_sync_lifecycle_row(profile_id: &str) -> Result<Option<SyncLifecycleState
                     phase: row.get(6)?,
                     phase_message: row.get(7)?,
                     remote_scan_complete: sql_to_bool(row.get::<_, i64>(8)?),
-                    agent_state: row.get(9)?,
-                    last_sync_at: row.get(10)?,
+                    activity_stage: row.get(9)?,
+                    activity_progress_mode: row.get(10)?,
+                    activity_current: row.get::<_, Option<i64>>(11)?.map(|value| value.max(0) as usize),
+                    activity_total: row.get::<_, Option<i64>>(12)?.map(|value| value.max(0) as usize),
+                    activity_unit: row.get(13)?,
+                    activity_detail: row.get(14)?,
+                    activity_updated_at: row.get(15)?,
+                    agent_state: row.get(16)?,
+                    last_sync_at: row.get(17)?,
                 })
             },
         )
@@ -493,14 +593,45 @@ fn hydrate_sync_state_from_lifecycle(
 
 fn persist_sync_lifecycle_phase(profile_id: &str, phase: &str, phase_message: &str) -> Result<(), String> {
     let mut row = read_sync_lifecycle_row(profile_id)?.unwrap_or_default();
+    let progress_mode = match phase {
+        "paused" | "idle" | "error" => "hidden",
+        _ => "indeterminate",
+    };
     row.phase = phase.to_string();
     row.phase_message = phase_message.to_string();
+    row.activity_stage = phase.to_string();
+    row.activity_progress_mode = progress_mode.to_string();
+    row.activity_current = if phase == "scanning_local" { Some(0) } else { None };
+    row.activity_total = None;
+    row.activity_unit = None;
+    row.activity_detail = Some(phase_message.to_string());
+    row.activity_updated_at = current_unix_seconds();
     upsert_sync_lifecycle_row(profile_id, &row)
 }
 
 fn persist_sync_lifecycle_remote_scan_complete(profile_id: &str, complete: bool) -> Result<(), String> {
     let mut row = read_sync_lifecycle_row(profile_id)?.unwrap_or_default();
     row.remote_scan_complete = complete;
+    upsert_sync_lifecycle_row(profile_id, &row)
+}
+
+fn persist_sync_lifecycle_activity(
+    profile_id: &str,
+    stage: &str,
+    progress_mode: &str,
+    current: Option<usize>,
+    total: Option<usize>,
+    unit: Option<&str>,
+    detail: Option<&str>,
+) -> Result<(), String> {
+    let mut row = read_sync_lifecycle_row(profile_id)?.unwrap_or_default();
+    row.activity_stage = stage.to_string();
+    row.activity_progress_mode = progress_mode.to_string();
+    row.activity_current = current;
+    row.activity_total = total;
+    row.activity_unit = unit.map(ToString::to_string);
+    row.activity_detail = detail.map(ToString::to_string);
+    row.activity_updated_at = current_unix_seconds();
     upsert_sync_lifecycle_row(profile_id, &row)
 }
 
@@ -633,6 +764,34 @@ fn add_sync_files_column_if_missing(
     connection
         .execute(alter_sql, [])
         .map_err(|error| format!("Failed adding sync_files column '{column_name}': {error}"))?;
+    Ok(())
+}
+
+fn add_sync_lifecycle_column_if_missing(
+    connection: &Connection,
+    column_name: &str,
+    alter_sql: &str,
+) -> Result<(), String> {
+    let mut statement = connection
+        .prepare("PRAGMA table_info(sync_lifecycle_state)")
+        .map_err(|error| format!("Failed preparing sync_lifecycle_state schema query: {error}"))?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| format!("Failed querying sync_lifecycle_state schema info: {error}"))?;
+    for row in rows {
+        let existing = row
+            .map_err(|error| format!("Failed reading sync_lifecycle_state schema row: {error}"))?;
+        if existing == column_name {
+            return Ok(());
+        }
+    }
+    connection
+        .execute(alter_sql, [])
+        .map_err(|error| {
+            format!(
+                "Failed adding sync_lifecycle_state column '{column_name}': {error}"
+            )
+        })?;
     Ok(())
 }
 
@@ -1908,17 +2067,52 @@ pub fn hydrate_runtime_status_from_db(
         status.issue_secondary_path = None;
     }
 
-    if let Some(lifecycle) = read_sync_lifecycle_row(&profile_id)? {
-        status.phase = lifecycle.phase;
-        status.phase_message = lifecycle.phase_message;
-        status.remote_scan_complete = lifecycle.remote_scan_complete;
-        status.two_way_ready = lifecycle.two_way_ready;
-        status.engine_state = if lifecycle.agent_state == "syncing" {
-            "running".to_string()
-        } else {
-            "paused".to_string()
-        };
+    let lifecycle = read_sync_lifecycle_row(&profile_id)?
+        .ok_or_else(|| format!("Missing sync lifecycle state row for profile '{}'.", profile_id))?;
+    status.phase = lifecycle.phase;
+    status.phase_message = lifecycle.phase_message;
+    status.remote_scan_complete = lifecycle.remote_scan_complete;
+    status.two_way_ready = lifecycle.two_way_ready;
+    if lifecycle.activity_stage.trim().is_empty() {
+        return Err(format!(
+            "Missing lifecycle activity stage for profile '{}'.",
+            profile_id
+        ));
     }
+    if lifecycle.activity_progress_mode.trim().is_empty() {
+        return Err(format!(
+            "Missing lifecycle activity progress mode for profile '{}'.",
+            profile_id
+        ));
+    }
+    status.current_activity.stage = lifecycle.activity_stage;
+    status.current_activity.progress_mode = lifecycle.activity_progress_mode;
+    status.current_activity.current = lifecycle.activity_current;
+    status.current_activity.total = lifecycle.activity_total;
+    status.current_activity.unit = lifecycle.activity_unit;
+    status.current_activity.detail = lifecycle.activity_detail;
+    if status.current_activity.stage == "scanning_local" {
+        let scanned_count = status.current_activity.current.ok_or_else(|| {
+            format!(
+                "Missing lifecycle local scan current counter for profile '{}'.",
+                profile_id
+            )
+        })?;
+        status.local_scan_scanned_count = scanned_count;
+        status.local_scan_estimated_total = status.current_activity.total;
+        status.local_scan_current_path = status.current_activity.detail.clone();
+    } else {
+        status.local_scan_scanned_count = 0;
+        status.local_scan_estimated_total = None;
+        status.local_scan_current_path = None;
+    }
+    status.engine_state = if status.phase == "error" {
+        "blocked".to_string()
+    } else if lifecycle.agent_state == "syncing" {
+        "running".to_string()
+    } else {
+        "paused".to_string()
+    };
 
     Ok(())
 }

@@ -206,10 +206,10 @@ pub fn initialize_status_event_stream(app_handle: AppHandle) {
     }
 }
 
-pub fn emit_full_sync_status_snapshot(runtime_map: &SyncRuntimeMap) {
-    let mut accounts: Vec<SyncRuntimeAccountStatus> = runtime_map.values().cloned().collect();
-    accounts.sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
-    for mut account in accounts {
+pub fn emit_sync_status_snapshot_accounts(accounts: &[SyncRuntimeAccountStatus]) {
+    let mut sorted_accounts: Vec<SyncRuntimeAccountStatus> = accounts.to_vec();
+    sorted_accounts.sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
+    for mut account in sorted_accounts {
         recompute_authority_fields(&mut account);
         emit_upsert_status_event(&account.profile_id, &account);
     }
