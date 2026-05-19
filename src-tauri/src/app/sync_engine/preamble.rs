@@ -379,10 +379,34 @@ mod preamble_tests {
             JOB_RUN_STATE_IDLE,
             None,
         );
+        insert_job_row(
+            &profile_id,
+            DELETE_REMOTE_JOB_DIRECTION,
+            "docs/claimed-delete-remote.txt",
+            DOWNLOAD_JOB_STATE_IN_PROGRESS,
+            JOB_RUN_STATE_CLAIMED,
+            Some("lease-delete-remote"),
+        );
+        insert_job_row(
+            &profile_id,
+            CONFLICT_JOB_DIRECTION,
+            "docs/running-conflict.txt",
+            DOWNLOAD_JOB_STATE_IN_PROGRESS,
+            JOB_RUN_STATE_RUNNING,
+            Some("lease-conflict"),
+        );
+        insert_job_row(
+            &profile_id,
+            DELETE_LOCAL_JOB_DIRECTION,
+            "docs/retry-delete-local.txt",
+            DOWNLOAD_JOB_STATE_RETRY_WAIT,
+            JOB_RUN_STATE_IDLE,
+            None,
+        );
 
         let first_drain =
             prepare_startup_sync_resume(&profile_id).expect("first startup resume drain");
-        assert_eq!(first_drain, 2);
+        assert_eq!(first_drain, 4);
 
         let second_drain =
             prepare_startup_sync_resume(&profile_id).expect("second startup resume drain");
@@ -410,7 +434,7 @@ mod preamble_tests {
             rows.map(|row| row.expect("read startup idempotency row")).collect();
 
         for (item_id, state, run_state) in collected {
-            if item_id == "docs/retry-upload.txt" {
+            if item_id == "docs/retry-upload.txt" || item_id == "docs/retry-delete-local.txt" {
                 assert_eq!(state, DOWNLOAD_JOB_STATE_RETRY_WAIT);
                 assert_eq!(run_state, JOB_RUN_STATE_IDLE);
             } else {
