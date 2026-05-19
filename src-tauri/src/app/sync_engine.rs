@@ -3,6 +3,8 @@ include!("sync_engine/worker_lifecycle.rs");
 include!("sync_engine/runtime_and_models.rs");
 include!("sync_engine/lifecycle_writer.rs");
 include!("sync_engine/job_queue.rs");
+include!("sync_engine/planner_transitions.rs");
+include!("sync_engine/planner_index.rs");
 include!("sync_engine/planner.rs");
 include!("sync_engine/cycle.rs");
 include!("sync_engine/remote_changes.rs");

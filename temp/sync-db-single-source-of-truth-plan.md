@@ -76,6 +76,7 @@ Legend:
 - `[~]` Initial planner/execution invariant logging added (planner vs active job inventory now logged).
 - `[x]` Legacy file fallback for sync state load removed (DB-backed state store only).
 - `[~]` Module decomposition advanced (`lifecycle_writer.rs` extracted; major queue/lane splits still pending).
+- `[~]` Module decomposition advanced (`lifecycle_writer.rs`, `planner_index.rs`, and `planner_transitions.rs` extracted).
 - `[~]` Initial planner tests added (`planner_*` transition coverage).
 - `[x]` Roadmap document created in `temp/`.
 
@@ -97,8 +98,8 @@ Legend:
 
 3. Complete module ownership decomposition
    - `[x]` Extract lifecycle writer into `lifecycle_writer.rs`.
-   - `[ ]` Extract sync_files DB primitives into `planner_index.rs`.
-   - `[ ]` Extract transition rules into `planner_transitions.rs`.
+   - `[x]` Extract sync_files DB primitives into `planner_index.rs`.
+   - `[x]` Extract transition rules into `planner_transitions.rs`.
    - `[ ]` Extract action enqueue/update to `job_materializer.rs`.
    - `[ ]` Extract remote lane mechanics to `download_lane.rs`.
    - `[ ]` Extract upload lane mechanics to `upload_lane.rs`.
