@@ -1,7 +1,7 @@
 use chrono::Local;
 use crate::app::sync_engine::build_authoritative_runtime_status;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 use tauri::{AppHandle, Emitter};
@@ -131,14 +131,6 @@ pub struct SyncRuntimeAccountStatus {
     pub current_activity: SyncRuntimeCurrentActivity,
     pub consistency: SyncRuntimeConsistency,
     pub updated_at: String,
-    #[serde(skip_serializing)]
-    remote_session_discovered_ids: HashSet<String>,
-    #[serde(skip_serializing)]
-    remote_session_planned_ids: HashSet<String>,
-    #[serde(skip_serializing)]
-    remote_session_completed_ids: HashSet<String>,
-    #[serde(skip_serializing)]
-    remote_session_failed_ids: HashSet<String>,
 }
 
 impl SyncRuntimeAccountStatus {
@@ -212,10 +204,6 @@ impl SyncRuntimeAccountStatus {
                 violations: Vec::new(),
             },
             updated_at: now,
-            remote_session_discovered_ids: HashSet::new(),
-            remote_session_planned_ids: HashSet::new(),
-            remote_session_completed_ids: HashSet::new(),
-            remote_session_failed_ids: HashSet::new(),
         }
     }
 
@@ -449,16 +437,11 @@ pub fn set_remote_scan_complete(
 }
 
 pub fn record_remote_discovered(runtime_map: &mut SyncRuntimeMap, profile_id: &str, item_id: &str) {
+    let _ = item_id;
     let status = ensure_account_status(runtime_map, profile_id);
-    if status
-        .remote_session_discovered_ids
-        .insert(item_id.to_string())
-    {
-        status.remote_discovered_total += 1;
-        status.updated_at = now_rfc3339();
-        bump_runtime_revision();
-        emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Throttled);
-    }
+    status.updated_at = now_rfc3339();
+    bump_runtime_revision();
+    emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Throttled);
 }
 
 pub fn record_remote_download_completed(
@@ -466,16 +449,8 @@ pub fn record_remote_download_completed(
     profile_id: &str,
     item_id: &str,
 ) {
+    let _ = item_id;
     let status = ensure_account_status(runtime_map, profile_id);
-    if status
-        .remote_session_completed_ids
-        .insert(item_id.to_string())
-    {
-        status.remote_download_completed_total += 1;
-    }
-    if status.remote_session_failed_ids.remove(item_id) {
-        status.remote_download_failed_total = status.remote_download_failed_total.saturating_sub(1);
-    }
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
     emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Throttled);
@@ -486,13 +461,11 @@ pub fn record_remote_download_failed(
     profile_id: &str,
     item_id: &str,
 ) {
+    let _ = item_id;
     let status = ensure_account_status(runtime_map, profile_id);
-    if status.remote_session_failed_ids.insert(item_id.to_string()) {
-        status.remote_download_failed_total += 1;
-        status.updated_at = now_rfc3339();
-        bump_runtime_revision();
-        emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Immediate);
-    }
+    status.updated_at = now_rfc3339();
+    bump_runtime_revision();
+    emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Immediate);
 }
 
 pub fn set_remote_download_counters(
@@ -505,11 +478,7 @@ pub fn set_remote_download_counters(
     retry_waiting: usize,
 ) {
     let status = ensure_account_status(runtime_map, profile_id);
-    status.remote_download_planned_total = planned_total;
-    status.remote_download_completed_total = completed_total;
-    status.remote_download_failed_total = failed_total;
-    status.remote_download_in_flight = in_flight;
-    status.remote_download_retry_waiting = retry_waiting;
+    let _ = (planned_total, completed_total, failed_total, in_flight, retry_waiting);
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
     emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Throttled);
@@ -524,10 +493,7 @@ pub fn set_upload_counters(
     in_flight: usize,
 ) {
     let status = ensure_account_status(runtime_map, profile_id);
-    status.upload_planned_total = planned_total;
-    status.upload_completed_total = completed_total;
-    status.upload_failed_total = failed_total;
-    status.upload_in_flight = in_flight;
+    let _ = (planned_total, completed_total, failed_total, in_flight);
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
     emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Throttled);
@@ -539,7 +505,7 @@ pub fn set_upload_planned_total(
     planned_total: usize,
 ) {
     let status = ensure_account_status(runtime_map, profile_id);
-    status.upload_planned_total = planned_total;
+    let _ = planned_total;
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
     emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Throttled);
@@ -935,10 +901,6 @@ fn reset_remote_session_progress(status: &mut SyncRuntimeAccountStatus) {
     status.remote_download_throttle_total = 0;
     status.remote_download_throttle_last_minute = 0;
     status.remote_scan_complete = false;
-    status.remote_session_discovered_ids.clear();
-    status.remote_session_planned_ids.clear();
-    status.remote_session_completed_ids.clear();
-    status.remote_session_failed_ids.clear();
 }
 
 fn reset_upload_session_progress(status: &mut SyncRuntimeAccountStatus) {
