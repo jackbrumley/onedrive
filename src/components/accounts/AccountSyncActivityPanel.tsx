@@ -231,15 +231,15 @@ export function AccountSyncActivityPanel({
   const recentCompleted = runtimeStatus?.recentCompleted ?? [];
   const recentRetryWaiting = runtimeStatus?.recentRetryWaiting ?? [];
   const recentFailed = runtimeStatus?.recentFailed ?? [];
-  const remoteDiscoveredCount = runtimeStatus?.remoteDiscoveredTotal ?? 0;
-  const plannerCloudDiscoveredCount = runtimeStatus?.plannerCloudDiscoveredTotal ?? remoteDiscoveredCount;
+  const plannerCloudDiscoveredCount = runtimeStatus?.plannerCloudDiscoveredTotal ?? 0;
   const plannerLocalDiscoveredCount = runtimeStatus?.plannerLocalDiscoveredTotal ?? 0;
   const plannerNoActionCount = runtimeStatus?.plannerNoneTotal ?? 0;
+  const plannerNeedDownloadCount = runtimeStatus?.plannerNeedDownloadTotal ?? 0;
+  const plannerNeedUploadCount = runtimeStatus?.plannerNeedUploadTotal ?? 0;
   const plannerNeedDeleteRemoteCount = runtimeStatus?.plannerNeedDeleteRemoteTotal ?? 0;
   const plannerNeedDeleteLocalCount = runtimeStatus?.plannerNeedDeleteLocalTotal ?? 0;
   const plannerConflictCount = runtimeStatus?.plannerConflictTotal ?? 0;
   const remoteDownloadPlannedCount = runtimeStatus?.remoteDownloadPlannedTotal ?? 0;
-  const plannerNeedDownloadCount = runtimeStatus?.plannerNeedDownloadTotal ?? remoteDownloadPlannedCount;
   const remoteDownloadedCount = runtimeStatus?.remoteDownloadCompletedTotal ?? 0;
   const remoteDownloadFailedCount = runtimeStatus?.remoteDownloadFailedTotal ?? 0;
   const remoteDownloadInFlight = isPausedPhase ? 0 : (runtimeStatus?.remoteDownloadInFlight ?? 0);
@@ -250,7 +250,6 @@ export function AccountSyncActivityPanel({
   const remoteDownloadThrottleTotal = runtimeStatus?.remoteDownloadThrottleTotal ?? 0;
   const remoteDownloadThrottleLastMinute = runtimeStatus?.remoteDownloadThrottleLastMinute ?? 0;
   const uploadPlannedCount = runtimeStatus?.uploadPlannedTotal ?? 0;
-  const plannerNeedUploadCount = runtimeStatus?.plannerNeedUploadTotal ?? uploadPlannedCount;
   const activeUploadCount = isPausedPhase ? 0 : (runtimeStatus?.uploadInFlight ?? 0);
   const uploadedCount = runtimeStatus?.uploadCompletedTotal ?? 0;
   const uploadFailedCount = runtimeStatus?.uploadFailedTotal ?? 0;
@@ -288,7 +287,7 @@ export function AccountSyncActivityPanel({
   const consistency = runtimeStatus?.consistency;
   const consistencyViolations = consistency?.violations ?? [];
   const hasConsistencyViolation = consistency?.ok === false;
-  const plannerUpdatedAtLabel = formatTelemetryTimestamp(runtimeStatus?.updatedAt);
+  const authoritativeUpdatedAtLabel = formatTelemetryTimestamp(runtimeStatus?.updatedAt);
   const activityUpdatedAtLabel = formatTelemetryTimestamp(runtimeStatus?.currentActivity?.updatedAt);
 
   const metricText = (value: number | string): string => (runtimeUnavailable ? "null" : String(value));
@@ -452,7 +451,7 @@ export function AccountSyncActivityPanel({
           )}
           <section class="account-sync-preview-stats-group">
             <p class="account-sync-preview-stats-section">Discovery lane</p>
-            <p class="account-sync-lane-meta">snapshot update {plannerUpdatedAtLabel}</p>
+            <p class="account-sync-lane-meta">authoritative update {authoritativeUpdatedAtLabel}</p>
             <div class="account-sync-preview-metrics-grid">
               <div class="account-sync-preview-metric">
                 <span class="account-sync-preview-metric-label">Cloud files discovered (count)</span>
@@ -467,7 +466,7 @@ export function AccountSyncActivityPanel({
 
           <section class="account-sync-preview-stats-group">
             <p class="account-sync-preview-stats-section">Planner lane</p>
-            <p class="account-sync-lane-meta">snapshot update {plannerUpdatedAtLabel}</p>
+            <p class="account-sync-lane-meta">authoritative update {authoritativeUpdatedAtLabel}</p>
             <div class="account-sync-preview-metrics-grid">
                <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Need download (count)</span><span class="account-sync-preview-metric-value">{metricText(plannerNeedDownloadCount)}</span></div>
                <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Need upload (count)</span><span class="account-sync-preview-metric-value">{metricText(plannerNeedUploadCount)}</span></div>
@@ -482,7 +481,7 @@ export function AccountSyncActivityPanel({
 
           <section class="account-sync-preview-stats-group">
             <p class="account-sync-preview-stats-section">Executor lane - Downloads</p>
-            <p class="account-sync-lane-meta">snapshot update {plannerUpdatedAtLabel}</p>
+            <p class="account-sync-lane-meta">authoritative update {authoritativeUpdatedAtLabel}</p>
             <div class="account-sync-preview-metrics-grid">
                <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Planned downloads (count)</span><span class="account-sync-preview-metric-value">{metricText(remoteDownloadPlannedCount)}</span></div>
                <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Remaining downloads (size)</span><span class="account-sync-preview-metric-value">{runtimeUnavailable ? "null" : formatBytes(remoteDownloadRemainingBytesTotal)}</span></div>
@@ -499,7 +498,7 @@ export function AccountSyncActivityPanel({
 
           <section class="account-sync-preview-stats-group">
             <p class="account-sync-preview-stats-section">Executor lane - Uploads</p>
-            <p class="account-sync-lane-meta">snapshot update {plannerUpdatedAtLabel}</p>
+            <p class="account-sync-lane-meta">authoritative update {authoritativeUpdatedAtLabel}</p>
             <div class="account-sync-preview-metrics-grid">
                <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Planned uploads (count)</span><span class="account-sync-preview-metric-value">{metricText(uploadPlannedCount)}</span></div>
                <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Remaining uploads (size)</span><span class="account-sync-preview-metric-value">{runtimeUnavailable ? "null" : formatBytes(uploadRemainingBytesTotal)}</span></div>
