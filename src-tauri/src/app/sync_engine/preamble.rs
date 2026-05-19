@@ -341,4 +341,82 @@ mod preamble_tests {
         assert!(rebuilt.local_snapshot.contains_key("docs/resume.txt"));
         assert!(!rebuilt.remote_by_id.contains_key("stale"));
     }
+
+    #[test]
+    fn prepare_startup_sync_resume_is_idempotent_across_restarts() {
+        let profile_id = test_profile_id("startup-idempotent");
+        clear_profile_rows(&profile_id);
+
+        insert_job_row(
+            &profile_id,
+            DOWNLOAD_JOB_DIRECTION,
+            "docs/running-download.txt",
+            DOWNLOAD_JOB_STATE_IN_PROGRESS,
+            JOB_RUN_STATE_RUNNING,
+            Some("lease-dl"),
+        );
+        insert_job_row(
+            &profile_id,
+            UPLOAD_JOB_DIRECTION,
+            "docs/claimed-upload.txt",
+            DOWNLOAD_JOB_STATE_IN_PROGRESS,
+            JOB_RUN_STATE_CLAIMED,
+            Some("lease-up"),
+        );
+        insert_job_row(
+            &profile_id,
+            DOWNLOAD_JOB_DIRECTION,
+            "docs/already-queued.txt",
+            DOWNLOAD_JOB_STATE_QUEUED,
+            JOB_RUN_STATE_IDLE,
+            None,
+        );
+        insert_job_row(
+            &profile_id,
+            UPLOAD_JOB_DIRECTION,
+            "docs/retry-upload.txt",
+            DOWNLOAD_JOB_STATE_RETRY_WAIT,
+            JOB_RUN_STATE_IDLE,
+            None,
+        );
+
+        let first_drain =
+            prepare_startup_sync_resume(&profile_id).expect("first startup resume drain");
+        assert_eq!(first_drain, 2);
+
+        let second_drain =
+            prepare_startup_sync_resume(&profile_id).expect("second startup resume drain");
+        assert_eq!(second_drain, 0);
+
+        let connection = open_sync_jobs_connection(&profile_id).expect("open sync jobs db");
+        let mut statement = connection
+            .prepare(
+                "SELECT item_id, state, run_state
+                 FROM sync_jobs
+                 WHERE profile_id = ?1
+                 ORDER BY item_id",
+            )
+            .expect("prepare startup idempotency state query");
+        let rows = statement
+            .query_map(params![&profile_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .expect("query startup idempotency rows");
+        let collected: Vec<(String, String, String)> =
+            rows.map(|row| row.expect("read startup idempotency row")).collect();
+
+        for (item_id, state, run_state) in collected {
+            if item_id == "docs/retry-upload.txt" {
+                assert_eq!(state, DOWNLOAD_JOB_STATE_RETRY_WAIT);
+                assert_eq!(run_state, JOB_RUN_STATE_IDLE);
+            } else {
+                assert_eq!(state, DOWNLOAD_JOB_STATE_QUEUED);
+                assert_eq!(run_state, JOB_RUN_STATE_IDLE);
+            }
+        }
+    }
 }

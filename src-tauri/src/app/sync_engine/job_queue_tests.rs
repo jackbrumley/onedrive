@@ -289,4 +289,56 @@ mod job_queue_tests {
             .expect("count retried queued jobs");
         assert_eq!(queued_count, 2);
     }
+
+    #[test]
+    fn bootstrap_gate_transitions_from_blocked_to_ready_after_retry_and_completion() {
+        let profile_id = test_profile_id("bootstrap-retry-ready");
+        clear_profile_rows(&profile_id);
+
+        let lifecycle = SyncLifecycleOperationalState {
+            two_way_ready: false,
+            bootstrap_scan_initialized: true,
+            bootstrap_full_scan_completed: true,
+            delta_link: Some("https://example.test/delta".to_string()),
+            active_delta_next_link: None,
+            last_cycle_at: None,
+        };
+        persist_sync_lifecycle_operational_state(&profile_id, &lifecycle)
+            .expect("persist lifecycle gate state");
+
+        insert_failed_download_job(&profile_id, "failed-bootstrap", "docs/failed-bootstrap.txt");
+
+        let lifecycle = read_sync_lifecycle_operational_state(&profile_id)
+            .expect("read lifecycle gate state");
+        let blocked_counters =
+            read_download_job_counters(&profile_id).expect("read blocked download counters");
+        assert!(!bootstrap_ready_for_two_way(&lifecycle, &blocked_counters));
+
+        let retry_report = retry_all_failed_download_jobs(&profile_id)
+            .expect("retry failed download jobs for bootstrap gate");
+        assert_eq!(retry_report.retried, 1);
+
+        let queued_counters =
+            read_download_job_counters(&profile_id).expect("read queued download counters");
+        assert!(!bootstrap_ready_for_two_way(&lifecycle, &queued_counters));
+
+        let connection = open_sync_jobs_connection(&profile_id).expect("open sync jobs db");
+        let retried_job_id: i64 = connection
+            .query_row(
+                "SELECT id
+                 FROM sync_jobs
+                 WHERE profile_id = ?1
+                   AND direction = 'download'
+                   AND item_id = 'failed-bootstrap'",
+                params![&profile_id],
+                |row| row.get(0),
+            )
+            .expect("read retried download job id");
+        mark_download_job_done(&profile_id, retried_job_id, false)
+            .expect("mark retried bootstrap job done");
+
+        let ready_counters =
+            read_download_job_counters(&profile_id).expect("read ready download counters");
+        assert!(bootstrap_ready_for_two_way(&lifecycle, &ready_counters));
+    }
 }
