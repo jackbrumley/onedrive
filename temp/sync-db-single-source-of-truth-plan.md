@@ -68,85 +68,81 @@ Legend:
 - `[~]` partially done
 - `[ ]` not started
 
-### Current Completion Snapshot
+### Now (In Progress)
 
-- `[x]` Planner ownership extracted to dedicated module (`planner.rs`).
-- `[~]` Planner-driven upload execution adopted (selection is planner-based; delete/conflict materialization still pending).
-- `[~]` Structured lifecycle activity contract improved with `cycle_id` and `updated_at` propagation.
-- `[~]` Initial planner/execution invariant logging added (planner vs active job inventory now logged).
-- `[~]` Planner delete action derivation now uses retained index presence (`delete_remote`, `delete_local` states derived).
-- `[x]` Legacy file fallback for sync state load removed (DB-backed state store only).
-- `[~]` Module decomposition advanced (`lifecycle_writer.rs`, `planner_index.rs`, `planner_transitions.rs`, `download_lane.rs`, `upload_lane.rs`, and `cycle_orchestrator.rs` extracted).
-- `[~]` Queue persistence decomposition advanced (`job_queue.rs` split into focused DB/lifecycle/download/upload/activity/issue-throttle store modules).
-- `[~]` Remote pipeline decomposition advanced (`remote_changes.rs` now delegates to extracted producer/worker/dispatcher/page-processor modules and shared loop owner module).
-- `[~]` Initial planner tests added (`planner_*` transition coverage).
-- `[x]` Roadmap document created in `temp/`.
+1. `[~]` Single-writer lifecycle contract closure
+   - Owner modules: `src-tauri/src/app/sync_engine/lifecycle_writer.rs`, `src-tauri/src/app/sync_engine/job_queue_activity_projection.rs`, `src-tauri/src/app/sync_engine/job_queue_lifecycle_store.rs`, `src-tauri/src/app/sync_engine/job_queue_issue_throttle_store.rs`.
+   - Verify all phase/activity/issue writes route through canonical writer APIs only.
+   - Ensure activity payload writes always include deterministic contract fields (`stage`, `progress_mode`, `updated_at`, `cycle_id`, current/total/unit/detail when applicable) and reject invalid write combinations at persist time.
+   - Verification: `cargo test -- sync_engine::tests::lifecycle*` and targeted grep/guard checks.
 
-### Remaining Work (Strict Close List)
+2. `[~]` Reliability hardening for queue/lease/watchdog/retry
+    - Owner modules: `src-tauri/src/app/sync_engine/job_queue.rs`, `src-tauri/src/app/sync_engine/download_lane.rs`, `src-tauri/src/app/sync_engine/upload_lane.rs`, `src-tauri/src/app/sync_engine/runtime_watchdog.rs`.
+    - Validate bounded backpressure behavior and deterministic lease recovery across both lanes.
+    - Complete retry lifecycle audit for `retry_wait`, terminal failure, and retry-all behavior.
+    - Lease/retry determinism tests now cover upload stale-lease recovery, action stale-lease recovery, and upload `retry_wait` due/not-due claim gating.
+    - Verification: targeted integration tests + `cargo test`.
 
-1. Finish DB authority for operational state
-   - `[x]` Move `delta_link` and `active_delta_next_link` to DB-only authority.
-   - `[x]` Move two-way/bootstrap gate authority to DB-only paths.
-   - `[x]` Remove flow-critical planning reads from `PersistedSyncState`.
-- `[x]` Ensure restart reconstruction reads lifecycle/planner/jobs only (startup now rebuilds persisted cache maps from `sync_files` authority).
+3. `[~]` Determinism matrix completion
+    - Owner modules: `src-tauri/src/app/sync_engine/tests/*`, `src-tauri/src/app/commands/sync_runtime.rs`.
+    - Finish lifecycle-vs-runtime payload consistency checks and end-to-end multi-cycle flow coverage.
+    - Add remaining large-delete guard and conflict-backup integration scenarios (guard resolution path and safe-backup behavior coverage added in `local_changes_tests`).
+    - Verification: `cargo test -- sync_engine::tests::*`.
 
-2. Make planner the only action authority
-   - `[x]` Finalize explicit planner action set (`download`, `upload`, `delete_remote`, `delete_local`, `conflict`, `none`).
-   - `[x]` Centralize all transition rules in one planner transitions owner.
-   - `[x]` Implement full job materialization from planner output to `sync_jobs` (download/upload and delete/conflict durable job materialization with claim/run execution transitions).
-   - `[~]` Ensure materialization is idempotent across repeated cycles.
-   - `[x]` Remove remaining direct apply-path decision branches that bypass planner.
-   - `[x]` Route delete and conflict execution through planner/materializer flow.
+### Next (Queued)
 
-3. Complete module ownership decomposition
-   - `[x]` Extract lifecycle writer into `lifecycle_writer.rs`.
-   - `[x]` Extract sync_files DB primitives into `planner_index.rs`.
-   - `[x]` Extract transition rules into `planner_transitions.rs`.
-   - `[~]` Extract action enqueue/update to `job_materializer.rs`.
-    - `[x]` Extract remote lane mechanics to `download_lane.rs`.
-    - `[x]` Extract upload lane mechanics to `upload_lane.rs`.
-    - `[x]` Keep cycle orchestration thin in `cycle_orchestrator.rs`.
-    - `[~]` Reduce oversized files (`job_queue.rs`, `remote_changes.rs`) below target scope (`job_queue.rs` split; `remote_changes.rs` orchestration thinned with producer/worker/dispatcher/page-processor extraction, continue trimming loop owner). 
+1. `[~]` Planner/materializer final reconciliation pass
+   - Owner modules: `src-tauri/src/app/sync_engine/job_materializer.rs`, `src-tauri/src/app/sync_engine/planner_transitions.rs`.
+   - Close remaining idempotency `[~]` items across repeated cycles.
+   - Promote planner-vs-jobs reconciliation by action/direction from diagnostics to hard invariants where safe (materializer now fails fast on desired/materialized count drift for download/upload/delete/conflict lanes).
+   - Verification: `cargo test -- sync_engine::tests::materializer*`.
 
-4. Enforce single writer contract
-    - `[~]` Extend guard scripts to block unauthorized lifecycle/planner side writes (lifecycle direct-write guard added for phase/activity/scan-complete entry points).
-   - `[ ]` Verify all phase/activity/issue writes route through one writer API.
-   - `[~]` Add hard invariant checks for illegal lifecycle combinations.
-   - `[ ]` Ensure all activity writes carry deterministic contract fields.
+2. `[x]` Hybrid-authority dead-path removal and obsolete state cleanup
+    - Owner modules: `src-tauri/src/app/sync_engine/path_state.rs`, `src-tauri/src/app/sync_engine/preamble.rs`, `src-tauri/src/app/sync_engine/cycle_orchestrator.rs`.
+    - Remove dead hybrid authority paths and obsolete non-authoritative fields once parity checks pass (legacy JSON authority fields removed from `PersistedSyncState`; cache-only payload narrowed; remote delete candidate/id resolution now reads `sync_files` authority instead of cache maps; planned upload execution no longer re-decides via cache timestamp comparisons; large-delete guard state moved to lifecycle DB columns).
+    - Keep `PersistedSyncState` as transport/cache only where unavoidable during final cutover.
+    - Verification: guard script + targeted sync restart tests.
 
-5. Reliability hardening
-   - `[ ]` Validate bounded backpressure behavior after full materializer rollout.
-   - `[ ]` Ensure watchdog uses durable counters correctly.
-   - `[ ]` Verify deterministic lease recovery on both lanes.
-    - `[~]` Verify pause drain/resume leaves no orphan running jobs (startup resume integration now covers mixed running/claimed rows + idempotent repeated restart drains + cache rebuild).
-   - `[ ]` Audit retry lifecycle (`retry_wait`, terminal fail, retry-all) for both lanes.
+3. `[ ]` Module/structure closeout
+   - Owner modules: `src-tauri/src/app/sync_engine/remote_changes.rs`, `src-tauri/src/app/sync_engine/remote_pipeline_loop.rs`.
+   - Finish remaining decomposition trims to keep one-owner responsibilities crisp.
+   - Verification: file-size/ownership review + `cargo check`.
 
-6. Determinism invariants and diagnostics
-    - `[~]` Add planner-vs-jobs reconciliation checks by action/direction.
-   - `[ ]` Add lifecycle-vs-runtime payload consistency checks.
-   - `[x]` Add startup DB consistency summary logs for lifecycle/planner/jobs.
+4. `[ ]` Final acceptance and documentation closeout
+   - Run full validation: `cargo check`, `cargo test`, `npm run typecheck`, sync guard scripts.
+   - Update architecture docs and this tracker with final ownership model and completion markers.
 
-7. Test matrix completion
-   - `[x]` Planner transition tests (remote-only/local-only/overlap/conflict/shared refs/delete lanes covered).
-   - `[x]` Materializer tests (idempotent + enqueue/prune durable coverage includes download/upload/delete/conflict action rows).
-   - `[~]` Lifecycle writer invariant tests.
-    - `[~]` Pause/resume/restart determinism tests (added startup resume integration + retry-all terminal-failure requeue coverage + idempotent repeated restart drain test + multi-cycle queued/retry-wait progression test + full-cycle resume/claim/complete coverage across download/upload/action lanes + lifecycle phase flow assertions through bootstrap blocked/retry/ready; broader end-to-end flow matrix still pending).
-   - `[ ]` Bootstrap gate tests (blocked -> retried -> two-way ready).
-   - `[ ]` Integration scenarios for large-delete guard and conflict backup paths.
+### Done (Completed)
 
-8. Final cleanup and closeout
-   - `[ ]` Remove dead hybrid-authority code paths.
-   - `[ ]` Remove obsolete state fields/struct usage after DB parity.
-   - `[ ]` Update architecture docs to match final ownership model.
-   - `[ ]` Re-run full acceptance checklist and mark completion.
+- `[x]` Planner action ownership centralized with explicit action set (`download`, `upload`, `delete_remote`, `delete_local`, `conflict`, `none`).
+- `[x]` Planner transition rules isolated under dedicated transition owner module.
+- `[x]` Durable job materialization for download/upload/delete/conflict actions wired through planner output.
+- `[x]` Flow-critical planner reads removed from `PersistedSyncState` authority paths.
+- `[x]` DB-only authority migration for `delta_link`, `active_delta_next_link`, and bootstrap/two-way gate state.
+- `[x]` Startup reconstruction rehydrated from lifecycle/planner/jobs authorities.
+- `[x]` Legacy file fallback removed for sync-state loading.
+- `[x]` Major module decomposition completed (`lifecycle_writer`, `planner_index`, `planner_transitions`, `download_lane`, `upload_lane`, `cycle_orchestrator`, split queue stores).
+- `[x]` Planner transition and core materializer tests added.
+- `[x]` Startup DB consistency summary diagnostics added for lifecycle/planner/job authorities.
+- `[x]` Lifecycle write-path guard expanded to include issue persistence entry points and lifecycle persist-time invariants (`phase` vs `progress_mode`, determinate field completeness).
+- `[x]` Lifecycle invariant coverage extended with persist-time rejection tests for paused/non-hidden activity and invalid determinate progress writes.
+- `[x]` Guardrails extended to enforce ownership of operational lifecycle state writes (`persist_sync_lifecycle_operational_state`).
+- `[x]` Obsolete JSON authority fields removed from `PersistedSyncState` (`delta_link`, `active_delta_next_link`, bootstrap/two-way flags, `last_cycle_at`).
+- `[x]` Reliability tests expanded for lease and retry determinism across non-download lanes (`claim_upload_job_recovers_expired_lease_and_claims`, `claim_action_jobs_respects_retry_schedule_and_recovers_stale_leases`, `upload_retry_wait_is_not_claimed_until_due`).
+- `[x]` Planner/materializer reconciliation promoted to hard invariants in materialization path with targeted invariant coverage (`planner_materialization_invariant_rejects_upload_count_mismatch`).
+- `[x]` Large-delete guard and conflict-safe-backup determinism coverage added in dedicated local-change tests (`resolve_large_delete_guard_*`, `create_safe_backup_*`, safe-backup artifact detection).
+- `[x]` Remote delete guard/execution flow now derives remote presence/item IDs from `sync_files` DB authority (`read_remote_item_id_for_path`) with dedicated authority test coverage.
+- `[x]` Planned upload execution no longer depends on cache-derived remote timestamps; planner-selected upload paths execute directly after claim/cooldown checks.
+- `[x]` Large-delete guard pending/approval state migrated from JSON cache to lifecycle DB authority (`large_delete_guard_approved`, `large_delete_pending_paths_json`) with commands and runtime flow using lifecycle store accessors.
+- `[x]` Upload retry cooldown behavior migrated off JSON maps to durable upload job retry scheduling (`retry_wait` + `next_retry_at`) with attempt-based backoff and terminal failure thresholding.
 
 ### Definition of Fully Done (Close Criteria)
 
-- `[ ]` No flow-critical sync decision depends on JSON/in-memory mirrors.
+- `[x]` No flow-critical sync decision depends on JSON/in-memory mirrors (delete gating, upload retry gating, and large-delete approval now DB-authoritative).
 - `[x]` Planner actions materialize to jobs for all relevant action types.
-- `[ ]` One lifecycle writer path is enforced by guardrails.
-- `[~]` Restart/pause/resume/retry deterministic from DB state (startup cache reconstruction now rebuilt from DB authorities; full retry matrix still pending).
-- `[ ]` `cargo check`, `cargo test`, `npm run typecheck`, and sync guard scripts all pass.
+- `[~]` One lifecycle writer path is fully enforced by guardrails and invariants (phase/activity/scan-complete/issue persist entry points guarded; continue auditing operational-state writes and remaining legacy call sites).
+- `[~]` Restart/pause/resume/retry deterministic from DB state (broad coverage added; remaining matrix gaps tracked above).
+- `[x]` `cargo check`, `cargo test`, `npm run typecheck`, and sync guard scripts all pass (current branch snapshot).
 
 ## Phase 0: Guardrails and Instrumentation Baseline
 

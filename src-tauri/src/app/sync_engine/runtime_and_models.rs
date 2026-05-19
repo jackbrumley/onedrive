@@ -220,6 +220,10 @@ fn resolve_large_delete_guard_threshold() -> usize {
         .unwrap_or(10)
 }
 
+fn current_unix_seconds() -> i64 {
+    chrono::Utc::now().timestamp()
+}
+
 fn graph_http_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .connect_timeout(resolve_connect_timeout())
@@ -509,19 +513,9 @@ struct RemoteKnownItem {
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 struct PersistedSyncState {
-    delta_link: Option<String>,
-    active_delta_next_link: Option<String>,
     remote_by_id: HashMap<String, RemoteKnownItem>,
     remote_path_to_id: HashMap<String, String>,
     local_snapshot: HashMap<String, LocalSnapshotEntry>,
-    upload_failure_counts_by_path: HashMap<String, u32>,
-    upload_retry_after_by_path: HashMap<String, i64>,
-    two_way_ready: bool,
-    bootstrap_scan_initialized: bool,
-    bootstrap_full_scan_completed: bool,
-    large_delete_guard_approved: bool,
-    large_delete_pending_paths: Vec<String>,
-    last_cycle_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

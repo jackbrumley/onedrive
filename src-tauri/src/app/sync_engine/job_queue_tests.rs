@@ -95,6 +95,46 @@ mod job_queue_tests {
             .expect("insert download job with state");
     }
 
+    fn insert_job_with_state_and_lease(
+        profile_id: &str,
+        direction: &str,
+        item_id: &str,
+        state: &str,
+        run_state: &str,
+        next_retry_at: Option<i64>,
+        lease_owner: Option<&str>,
+        lease_until: Option<i64>,
+    ) {
+        let connection = open_sync_jobs_connection(profile_id).expect("open sync jobs db");
+        let now = current_unix_seconds();
+        connection
+            .execute(
+                "INSERT INTO sync_jobs (
+                    profile_id, direction, item_id, path, remote_size, remote_modified_ts,
+                    state, run_state, attempt_count, last_error, next_retry_at,
+                    lease_owner, lease_until, bytes_done, bytes_total, progress_updated_at,
+                    created_at, updated_at, started_at, finished_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?3, 10, 10,
+                    ?4, ?5, 1, NULL, ?6,
+                    ?7, ?8, 0, 10, ?9,
+                    ?9, ?9, NULL, NULL
+                )",
+                params![
+                    profile_id,
+                    direction,
+                    item_id,
+                    state,
+                    run_state,
+                    next_retry_at,
+                    lease_owner,
+                    lease_until,
+                    now
+                ],
+            )
+            .expect("insert job with state and lease");
+    }
+
     #[test]
     fn reset_running_jobs_for_pause_requeues_all_directions() {
         let profile_id = test_profile_id("pause-reset");
@@ -542,5 +582,167 @@ mod job_queue_tests {
         assert_eq!(final_row.activity_stage, "idle");
         assert_eq!(final_row.activity_progress_mode, "hidden");
         assert!(final_row.two_way_ready);
+    }
+
+    #[test]
+    fn claim_upload_job_recovers_expired_lease_and_claims() {
+        let profile_id = test_profile_id("upload-lease-recovery");
+        clear_profile_rows(&profile_id);
+
+        let expired_lease = current_unix_seconds().saturating_sub(30);
+        insert_job_with_state_and_lease(
+            &profile_id,
+            UPLOAD_JOB_DIRECTION,
+            "docs/upload-expired-lease.txt",
+            DOWNLOAD_JOB_STATE_IN_PROGRESS,
+            JOB_RUN_STATE_RUNNING,
+            None,
+            Some("old-cycle"),
+            Some(expired_lease),
+        );
+
+        let claimed = claim_upload_job_path(
+            &profile_id,
+            "docs/upload-expired-lease.txt",
+            "new-cycle",
+        )
+        .expect("claim upload job after stale lease recovery");
+        assert!(claimed);
+
+        let connection = open_sync_jobs_connection(&profile_id).expect("open sync jobs db");
+        let (state, run_state, lease_owner): (String, String, Option<String>) = connection
+            .query_row(
+                "SELECT state, run_state, lease_owner
+                 FROM sync_jobs
+                 WHERE profile_id = ?1
+                   AND direction = ?2
+                   AND item_id = ?3",
+                params![
+                    &profile_id,
+                    UPLOAD_JOB_DIRECTION,
+                    "docs/upload-expired-lease.txt"
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("read recovered upload lease row");
+        assert_eq!(state, DOWNLOAD_JOB_STATE_IN_PROGRESS);
+        assert_eq!(run_state, JOB_RUN_STATE_CLAIMED);
+        assert_eq!(lease_owner.as_deref(), Some("new-cycle"));
+    }
+
+    #[test]
+    fn claim_action_jobs_respects_retry_schedule_and_recovers_stale_leases() {
+        let profile_id = test_profile_id("action-claim-retry-and-lease");
+        clear_profile_rows(&profile_id);
+
+        let now = current_unix_seconds();
+        insert_job_with_state_and_lease(
+            &profile_id,
+            DELETE_REMOTE_JOB_DIRECTION,
+            "docs/delete-queued.txt",
+            DOWNLOAD_JOB_STATE_QUEUED,
+            JOB_RUN_STATE_IDLE,
+            None,
+            None,
+            None,
+        );
+        insert_job_with_state_and_lease(
+            &profile_id,
+            DELETE_REMOTE_JOB_DIRECTION,
+            "docs/delete-retry-due.txt",
+            DOWNLOAD_JOB_STATE_RETRY_WAIT,
+            JOB_RUN_STATE_IDLE,
+            Some(now.saturating_sub(1)),
+            None,
+            None,
+        );
+        insert_job_with_state_and_lease(
+            &profile_id,
+            DELETE_REMOTE_JOB_DIRECTION,
+            "docs/delete-retry-future.txt",
+            DOWNLOAD_JOB_STATE_RETRY_WAIT,
+            JOB_RUN_STATE_IDLE,
+            Some(now.saturating_add(3600)),
+            None,
+            None,
+        );
+        insert_job_with_state_and_lease(
+            &profile_id,
+            DELETE_REMOTE_JOB_DIRECTION,
+            "docs/delete-expired-lease.txt",
+            DOWNLOAD_JOB_STATE_IN_PROGRESS,
+            JOB_RUN_STATE_RUNNING,
+            None,
+            Some("old-cycle"),
+            Some(now.saturating_sub(60)),
+        );
+
+        let claimed = claim_action_job_paths(&profile_id, DELETE_REMOTE_JOB_DIRECTION, "cycle-action")
+            .expect("claim action jobs");
+
+        assert!(claimed.contains("docs/delete-queued.txt"));
+        assert!(claimed.contains("docs/delete-retry-due.txt"));
+        assert!(claimed.contains("docs/delete-expired-lease.txt"));
+        assert!(!claimed.contains("docs/delete-retry-future.txt"));
+
+        let connection = open_sync_jobs_connection(&profile_id).expect("open sync jobs db");
+        let future_state: String = connection
+            .query_row(
+                "SELECT state
+                 FROM sync_jobs
+                 WHERE profile_id = ?1
+                   AND direction = ?2
+                   AND item_id = ?3",
+                params![
+                    &profile_id,
+                    DELETE_REMOTE_JOB_DIRECTION,
+                    "docs/delete-retry-future.txt"
+                ],
+                |row| row.get(0),
+            )
+            .expect("read future retry action state");
+        assert_eq!(future_state, DOWNLOAD_JOB_STATE_RETRY_WAIT);
+    }
+
+    #[test]
+    fn upload_retry_wait_is_not_claimed_until_due() {
+        let profile_id = test_profile_id("upload-retry-wait-schedule");
+        clear_profile_rows(&profile_id);
+
+        upsert_upload_job_queued(&profile_id, "docs/retry-upload.txt", 100, 42)
+            .expect("queue upload job");
+        let claimed = claim_upload_job_path(&profile_id, "docs/retry-upload.txt", "cycle-1")
+            .expect("claim upload job for retry wait test");
+        assert!(claimed);
+
+        let job_id = begin_upload_job(&profile_id, "docs/retry-upload.txt", 100, 42, "cycle-1")
+            .expect("begin upload job for retry wait test");
+        mark_upload_job_retry_wait(
+            &profile_id,
+            job_id,
+            "temporary network issue",
+            Duration::from_secs(3600),
+        )
+        .expect("mark upload job retry wait");
+
+        let not_due = claim_upload_job_path(&profile_id, "docs/retry-upload.txt", "cycle-2")
+            .expect("claim upload retry-wait not due");
+        assert!(!not_due);
+
+        let connection = open_sync_jobs_connection(&profile_id).expect("open sync jobs db");
+        connection
+            .execute(
+                "UPDATE sync_jobs
+                 SET next_retry_at = ?1,
+                     updated_at = ?1,
+                     progress_updated_at = ?1
+                 WHERE id = ?2",
+                params![current_unix_seconds().saturating_sub(1), job_id],
+            )
+            .expect("force retry wait job due");
+
+        let due = claim_upload_job_path(&profile_id, "docs/retry-upload.txt", "cycle-2")
+            .expect("claim upload retry-wait due");
+        assert!(due);
     }
 }

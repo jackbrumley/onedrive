@@ -22,10 +22,12 @@ fn upsert_sync_lifecycle_row(profile_id: &str, row: &SyncLifecycleStateRow) -> R
                  activity_detail,
                  activity_cycle_id,
                  activity_updated_at,
+                 large_delete_guard_approved,
+                 large_delete_pending_paths_json,
                  agent_state,
                  last_sync_at,
                  updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
              ON CONFLICT(profile_id)
              DO UPDATE SET
                  two_way_ready = excluded.two_way_ready,
@@ -45,6 +47,8 @@ fn upsert_sync_lifecycle_row(profile_id: &str, row: &SyncLifecycleStateRow) -> R
                  activity_detail = excluded.activity_detail,
                  activity_cycle_id = excluded.activity_cycle_id,
                  activity_updated_at = excluded.activity_updated_at,
+                 large_delete_guard_approved = excluded.large_delete_guard_approved,
+                 large_delete_pending_paths_json = excluded.large_delete_pending_paths_json,
                  agent_state = excluded.agent_state,
                  last_sync_at = excluded.last_sync_at,
                  updated_at = excluded.updated_at",
@@ -67,6 +71,8 @@ fn upsert_sync_lifecycle_row(profile_id: &str, row: &SyncLifecycleStateRow) -> R
                 row.activity_detail,
                 row.activity_cycle_id,
                 row.activity_updated_at,
+                bool_to_sql(row.large_delete_guard_approved),
+                row.large_delete_pending_paths_json,
                 row.agent_state,
                 row.last_sync_at,
                 now,
@@ -97,6 +103,8 @@ fn read_sync_lifecycle_row(profile_id: &str) -> Result<Option<SyncLifecycleState
                     activity_detail,
                     activity_cycle_id,
                     activity_updated_at,
+                    large_delete_guard_approved,
+                    large_delete_pending_paths_json,
                     agent_state,
                     last_sync_at
              FROM sync_lifecycle_state
@@ -121,8 +129,10 @@ fn read_sync_lifecycle_row(profile_id: &str) -> Result<Option<SyncLifecycleState
                     activity_detail: row.get(14)?,
                     activity_cycle_id: row.get(15)?,
                     activity_updated_at: row.get(16)?,
-                    agent_state: row.get(17)?,
-                    last_sync_at: row.get(18)?,
+                    large_delete_guard_approved: sql_to_bool(row.get::<_, i64>(17)?),
+                    large_delete_pending_paths_json: row.get(18)?,
+                    agent_state: row.get(19)?,
+                    last_sync_at: row.get(20)?,
                 })
             },
         )
@@ -194,6 +204,16 @@ fn persist_sync_lifecycle_activity(
     cycle_id: Option<&str>,
 ) -> Result<(), String> {
     let mut row = read_sync_lifecycle_row(profile_id)?.unwrap_or_default();
+    validate_sync_lifecycle_activity_write(
+        profile_id,
+        &row.phase,
+        stage,
+        progress_mode,
+        current,
+        total,
+        unit,
+        cycle_id,
+    )?;
     row.activity_stage = stage.to_string();
     row.activity_progress_mode = progress_mode.to_string();
     row.activity_current = current;
@@ -203,6 +223,85 @@ fn persist_sync_lifecycle_activity(
     row.activity_cycle_id = cycle_id.map(ToString::to_string);
     row.activity_updated_at = current_unix_seconds();
     upsert_sync_lifecycle_row(profile_id, &row)
+}
+
+fn validate_sync_lifecycle_activity_write(
+    profile_id: &str,
+    phase: &str,
+    stage: &str,
+    progress_mode: &str,
+    current: Option<usize>,
+    total: Option<usize>,
+    unit: Option<&str>,
+    cycle_id: Option<&str>,
+) -> Result<(), String> {
+    if stage.trim().is_empty() {
+        return Err(format!(
+            "Invalid lifecycle activity write for profile '{}': stage cannot be empty.",
+            profile_id
+        ));
+    }
+    if cycle_id.is_some_and(|value| value.trim().is_empty()) {
+        return Err(format!(
+            "Invalid lifecycle activity write for profile '{}': cycle_id cannot be blank when provided.",
+            profile_id
+        ));
+    }
+
+    match progress_mode {
+        "hidden" => {
+            if current.is_some() || total.is_some() || unit.is_some() {
+                return Err(format!(
+                    "Invalid lifecycle activity write for profile '{}': hidden progress cannot include current/total/unit.",
+                    profile_id
+                ));
+            }
+        }
+        "indeterminate" => {}
+        "determinate" => {
+            let current_value = current.ok_or_else(|| {
+                format!(
+                    "Invalid lifecycle activity write for profile '{}': determinate progress requires current.",
+                    profile_id
+                )
+            })?;
+            let total_value = total.ok_or_else(|| {
+                format!(
+                    "Invalid lifecycle activity write for profile '{}': determinate progress requires total.",
+                    profile_id
+                )
+            })?;
+            if current_value > total_value {
+                return Err(format!(
+                    "Invalid lifecycle activity write for profile '{}': determinate progress current ({}) exceeds total ({}).",
+                    profile_id,
+                    current_value,
+                    total_value
+                ));
+            }
+            if unit.is_none() {
+                return Err(format!(
+                    "Invalid lifecycle activity write for profile '{}': determinate progress requires unit.",
+                    profile_id
+                ));
+            }
+        }
+        _ => {
+            return Err(format!(
+                "Invalid lifecycle activity write for profile '{}': unsupported progress_mode '{}'.",
+                profile_id, progress_mode
+            ));
+        }
+    }
+
+    if matches!(phase, "paused" | "idle" | "error") && progress_mode != "hidden" {
+        return Err(format!(
+            "Invalid lifecycle activity write for profile '{}': phase '{}' requires hidden progress mode, found '{}'.",
+            profile_id, phase, progress_mode
+        ));
+    }
+
+    Ok(())
 }
 
 pub(crate) fn persist_sync_lifecycle_agent_state(profile_id: &str, agent_state: &str) -> Result<(), String> {
@@ -224,6 +323,27 @@ pub(crate) fn read_sync_lifecycle_profile_metadata(
     profile_id: &str,
 ) -> Result<Option<(String, Option<String>)>, String> {
     Ok(read_sync_lifecycle_row(profile_id)?.map(|row| (row.agent_state, row.last_sync_at)))
+}
+
+fn read_large_delete_guard_state(profile_id: &str) -> Result<LargeDeleteGuardState, String> {
+    let row = read_sync_lifecycle_row(profile_id)?.unwrap_or_default();
+    let pending_paths = serde_json::from_str::<Vec<String>>(&row.large_delete_pending_paths_json)
+        .map_err(|error| format!("Failed decoding large delete pending paths JSON: {error}"))?;
+    Ok(LargeDeleteGuardState {
+        approved: row.large_delete_guard_approved,
+        pending_paths,
+    })
+}
+
+fn persist_large_delete_guard_state(
+    profile_id: &str,
+    guard_state: &LargeDeleteGuardState,
+) -> Result<(), String> {
+    let mut row = read_sync_lifecycle_row(profile_id)?.unwrap_or_default();
+    row.large_delete_guard_approved = guard_state.approved;
+    row.large_delete_pending_paths_json = serde_json::to_string(&guard_state.pending_paths)
+        .map_err(|error| format!("Failed encoding large delete pending paths JSON: {error}"))?;
+    upsert_sync_lifecycle_row(profile_id, &row)
 }
 
 pub(crate) fn read_sync_authority_row_counts(

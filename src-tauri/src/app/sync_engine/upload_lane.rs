@@ -72,7 +72,22 @@ async fn upload_file_by_path(
                     Duration::from_secs(1),
                 );
             } else {
-                let _ = mark_upload_job_failed(&graph.profile_id, upload_job_id, error);
+                match read_upload_job_attempt_count(&graph.profile_id, upload_job_id) {
+                    Ok(attempt_count) if attempt_count >= MAX_DOWNLOAD_RETRIES => {
+                        let _ = mark_upload_job_failed(&graph.profile_id, upload_job_id, error);
+                    }
+                    Ok(attempt_count) => {
+                        let _ = mark_upload_job_retry_wait(
+                            &graph.profile_id,
+                            upload_job_id,
+                            error,
+                            resolve_upload_retry_delay(attempt_count),
+                        );
+                    }
+                    Err(_) => {
+                        let _ = mark_upload_job_failed(&graph.profile_id, upload_job_id, error);
+                    }
+                }
             }
         } else {
             let _ = mark_upload_job_done(&graph.profile_id, upload_job_id);
@@ -100,7 +115,22 @@ async fn upload_file_by_path(
                 Duration::from_secs(1),
             );
         } else {
-            let _ = mark_upload_job_failed(&graph.profile_id, upload_job_id, error);
+            match read_upload_job_attempt_count(&graph.profile_id, upload_job_id) {
+                Ok(attempt_count) if attempt_count >= MAX_DOWNLOAD_RETRIES => {
+                    let _ = mark_upload_job_failed(&graph.profile_id, upload_job_id, error);
+                }
+                Ok(attempt_count) => {
+                    let _ = mark_upload_job_retry_wait(
+                        &graph.profile_id,
+                        upload_job_id,
+                        error,
+                        resolve_upload_retry_delay(attempt_count),
+                    );
+                }
+                Err(_) => {
+                    let _ = mark_upload_job_failed(&graph.profile_id, upload_job_id, error);
+                }
+            }
         }
     } else {
         let _ = mark_upload_job_done(&graph.profile_id, upload_job_id);
@@ -128,6 +158,12 @@ fn sync_upload_counters_from_db(graph: &GraphContext) {
             );
         }
     }
+}
+
+fn resolve_upload_retry_delay(attempt_count: u32) -> Duration {
+    let exponent = attempt_count.saturating_sub(1).min(10);
+    let retry_seconds = 2_u64.saturating_pow(exponent).min(MAX_RETRY_DELAY_SECONDS);
+    Duration::from_secs(retry_seconds.max(1))
 }
 
 async fn upload_small_file_simple(

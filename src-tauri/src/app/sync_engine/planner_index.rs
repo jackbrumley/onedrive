@@ -116,6 +116,25 @@ fn list_sync_file_paths_by_desired_action(
     Ok(paths)
 }
 
+fn read_remote_item_id_for_path(profile_id: &str, path: &str) -> Result<Option<String>, String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    connection
+        .query_row(
+            "SELECT remote_item_id
+             FROM sync_files
+             WHERE profile_id = ?1
+               AND path = ?2
+               AND remote_present = 1
+               AND remote_item_id IS NOT NULL
+             LIMIT 1",
+            params![profile_id, path],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(|error| format!("Failed reading remote item id for path: {error}"))
+        .map(|value| value.flatten())
+}
+
 fn list_sync_file_download_candidates(profile_id: &str) -> Result<Vec<PlannerDownloadCandidate>, String> {
     let connection = open_sync_jobs_connection(profile_id)?;
     let mut statement = connection

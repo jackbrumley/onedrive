@@ -111,8 +111,16 @@ struct SyncLifecycleStateRow {
     activity_detail: Option<String>,
     activity_cycle_id: Option<String>,
     activity_updated_at: i64,
+    large_delete_guard_approved: bool,
+    large_delete_pending_paths_json: String,
     agent_state: String,
     last_sync_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct LargeDeleteGuardState {
+    approved: bool,
+    pending_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -145,6 +153,8 @@ impl Default for SyncLifecycleStateRow {
             activity_detail: Some("Idle".to_string()),
             activity_cycle_id: None,
             activity_updated_at: 0,
+            large_delete_guard_approved: false,
+            large_delete_pending_paths_json: "[]".to_string(),
             agent_state: "idle".to_string(),
             last_sync_at: None,
         }

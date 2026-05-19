@@ -125,6 +125,8 @@ fn open_sync_jobs_connection(profile_id: &str) -> Result<Connection, String> {
                  activity_detail TEXT,
                  activity_cycle_id TEXT,
                  activity_updated_at INTEGER NOT NULL DEFAULT 0,
+                 large_delete_guard_approved INTEGER NOT NULL DEFAULT 0,
+                 large_delete_pending_paths_json TEXT NOT NULL DEFAULT '[]',
                  agent_state TEXT NOT NULL DEFAULT 'idle',
                  last_sync_at TEXT,
                  updated_at INTEGER NOT NULL
@@ -295,6 +297,25 @@ fn run_sync_jobs_migrations(connection: &Connection) -> Result<(), String> {
         connection
             .execute_batch("PRAGMA user_version = 5;")
             .map_err(|error| format!("Failed applying sync_jobs schema migration v5: {error}"))?;
+    }
+
+    let current_version = connection
+        .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+        .map_err(|error| format!("Failed re-reading sync_jobs schema version: {error}"))?;
+    if current_version < 6 {
+        add_sync_lifecycle_column_if_missing(
+            connection,
+            "large_delete_guard_approved",
+            "ALTER TABLE sync_lifecycle_state ADD COLUMN large_delete_guard_approved INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_sync_lifecycle_column_if_missing(
+            connection,
+            "large_delete_pending_paths_json",
+            "ALTER TABLE sync_lifecycle_state ADD COLUMN large_delete_pending_paths_json TEXT NOT NULL DEFAULT '[]'",
+        )?;
+        connection
+            .execute_batch("PRAGMA user_version = 6;")
+            .map_err(|error| format!("Failed applying sync_jobs schema migration v6: {error}"))?;
     }
 
     Ok(())

@@ -96,7 +96,7 @@ fn materialize_planner_actions(
         active_download_jobs,
         active_upload_jobs,
     );
-    Ok(PlannerMaterializationSummary {
+    let summary = PlannerMaterializationSummary {
         upload_paths,
         delete_remote_paths,
         delete_local_paths,
@@ -108,7 +108,64 @@ fn materialize_planner_actions(
         desired_conflict_paths: desired_conflict_paths_count,
         active_download_jobs,
         active_upload_jobs,
-    })
+    };
+    enforce_planner_materialization_invariants(profile_id, &summary)?;
+    Ok(summary)
+}
+
+fn enforce_planner_materialization_invariants(
+    profile_id: &str,
+    summary: &PlannerMaterializationSummary,
+) -> Result<(), String> {
+    if summary.upload_paths.len() != summary.desired_upload_paths {
+        return Err(format!(
+            "Planner materialization invariant failed for profile '{}': desired_upload_paths={} but materialized_upload_paths={}",
+            profile_id,
+            summary.desired_upload_paths,
+            summary.upload_paths.len()
+        ));
+    }
+    if summary.delete_remote_paths.len() != summary.desired_delete_remote_paths {
+        return Err(format!(
+            "Planner materialization invariant failed for profile '{}': desired_delete_remote_paths={} but materialized_delete_remote_paths={}",
+            profile_id,
+            summary.desired_delete_remote_paths,
+            summary.delete_remote_paths.len()
+        ));
+    }
+    if summary.delete_local_paths.len() != summary.desired_delete_local_paths {
+        return Err(format!(
+            "Planner materialization invariant failed for profile '{}': desired_delete_local_paths={} but materialized_delete_local_paths={}",
+            profile_id,
+            summary.desired_delete_local_paths,
+            summary.delete_local_paths.len()
+        ));
+    }
+    if summary.conflict_paths.len() != summary.desired_conflict_paths {
+        return Err(format!(
+            "Planner materialization invariant failed for profile '{}': desired_conflict_paths={} but materialized_conflict_paths={}",
+            profile_id,
+            summary.desired_conflict_paths,
+            summary.conflict_paths.len()
+        ));
+    }
+    if summary.active_download_jobs != summary.desired_download_paths {
+        return Err(format!(
+            "Planner materialization invariant failed for profile '{}': desired_download_paths={} but active_download_jobs={}",
+            profile_id,
+            summary.desired_download_paths,
+            summary.active_download_jobs
+        ));
+    }
+    if summary.active_upload_jobs != summary.desired_upload_paths {
+        return Err(format!(
+            "Planner materialization invariant failed for profile '{}': desired_upload_paths={} but active_upload_jobs={}",
+            profile_id,
+            summary.desired_upload_paths,
+            summary.active_upload_jobs
+        ));
+    }
+    Ok(())
 }
 
 fn materialize_action_jobs(
@@ -580,5 +637,26 @@ mod job_materializer_tests {
             )
             .expect("count active jobs");
         assert_eq!(active_count, 5);
+    }
+
+    #[test]
+    fn planner_materialization_invariant_rejects_upload_count_mismatch() {
+        let summary = PlannerMaterializationSummary {
+            upload_paths: std::collections::HashSet::new(),
+            delete_remote_paths: std::collections::HashSet::new(),
+            delete_local_paths: std::collections::HashSet::new(),
+            conflict_paths: Vec::new(),
+            desired_download_paths: 0,
+            desired_upload_paths: 1,
+            desired_delete_remote_paths: 0,
+            desired_delete_local_paths: 0,
+            desired_conflict_paths: 0,
+            active_download_jobs: 0,
+            active_upload_jobs: 1,
+        };
+
+        let error = enforce_planner_materialization_invariants("profile-test", &summary)
+            .expect_err("mismatched upload materialization counts must fail");
+        assert!(error.contains("desired_upload_paths=1"));
     }
 }

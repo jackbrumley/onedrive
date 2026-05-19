@@ -348,17 +348,18 @@ mod lifecycle_writer_tests {
         let profile_id = test_profile_id("lifecycle-invariant");
         persist_sync_lifecycle_phase(&profile_id, "paused", "Synchronization paused")
             .expect("persist paused phase");
-        persist_sync_lifecycle_activity(
-            &profile_id,
-            "paused",
-            "determinate",
-            Some(1),
-            Some(2),
-            Some("items"),
-            Some("invalid paused progress"),
-            None,
-        )
-        .expect("persist invalid lifecycle activity");
+        let mut lifecycle_row = read_sync_lifecycle_row(&profile_id)
+            .expect("read lifecycle row")
+            .expect("lifecycle row exists");
+        lifecycle_row.activity_stage = "paused".to_string();
+        lifecycle_row.activity_progress_mode = "determinate".to_string();
+        lifecycle_row.activity_current = Some(1);
+        lifecycle_row.activity_total = Some(2);
+        lifecycle_row.activity_unit = Some("items".to_string());
+        lifecycle_row.activity_detail = Some("invalid paused progress".to_string());
+        lifecycle_row.activity_cycle_id = Some("legacy-cycle".to_string());
+        upsert_sync_lifecycle_row(&profile_id, &lifecycle_row)
+            .expect("persist invalid lifecycle activity");
 
         let mut runtime_map = SyncRuntimeMap::new();
         sync_runtime::set_phase(
@@ -374,5 +375,51 @@ mod lifecycle_writer_tests {
         let error = hydrate_runtime_status_from_db(&mut status)
             .expect_err("paused phase with determinate progress must fail");
         assert!(error.contains("requires hidden progress mode"));
+    }
+
+    #[test]
+    fn persist_activity_rejects_non_hidden_progress_for_paused_phase() {
+        let profile_id = test_profile_id("activity-write-paused");
+        persist_sync_lifecycle_phase(&profile_id, "paused", "Synchronization paused")
+            .expect("persist paused phase");
+
+        let error = persist_sync_lifecycle_activity(
+            &profile_id,
+            "paused",
+            "determinate",
+            Some(1),
+            Some(2),
+            Some("items"),
+            Some("invalid paused write"),
+            Some("cycle-1"),
+        )
+        .expect_err("paused phase must reject non-hidden progress writes");
+
+        assert!(error.contains("requires hidden progress mode"));
+    }
+
+    #[test]
+    fn persist_activity_rejects_invalid_determinate_progress_fields() {
+        let profile_id = test_profile_id("activity-write-determinate");
+        persist_sync_lifecycle_phase(
+            &profile_id,
+            "planning_actions",
+            "Planning synchronization actions",
+        )
+        .expect("persist planning phase");
+
+        let error = persist_sync_lifecycle_activity(
+            &profile_id,
+            "planning_actions",
+            "determinate",
+            Some(3),
+            None,
+            Some("items"),
+            Some("invalid determinate write"),
+            Some("cycle-2"),
+        )
+        .expect_err("determinate progress without total must fail");
+
+        assert!(error.contains("determinate progress requires total"));
     }
 }

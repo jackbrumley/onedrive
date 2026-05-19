@@ -418,6 +418,22 @@ fn mark_upload_job_retry_wait(
     Ok(())
 }
 
+fn read_upload_job_attempt_count(profile_id: &str, job_id: i64) -> Result<u32, String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    connection
+        .query_row(
+            "SELECT attempt_count
+             FROM sync_jobs
+             WHERE profile_id = ?1
+               AND direction = ?2
+               AND id = ?3",
+            params![profile_id, UPLOAD_JOB_DIRECTION, job_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| format!("Failed reading upload job attempt count: {error}"))
+        .map(|value| value.max(0) as u32)
+}
+
 fn update_upload_job_progress(
     profile_id: &str,
     job_id: i64,

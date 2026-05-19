@@ -104,12 +104,12 @@ pub fn confirm_large_delete_guard(
     state: &tauri::State<'_, AppState>,
     profile_id: &str,
 ) -> Result<(), String> {
-    let mut sync_state = load_sync_state(profile_id)?;
-    if sync_state.large_delete_pending_paths.is_empty() {
+    let mut guard_state = read_large_delete_guard_state(profile_id)?;
+    if guard_state.pending_paths.is_empty() {
         return Err("No pending large deletion to confirm".to_string());
     }
-    sync_state.large_delete_guard_approved = true;
-    save_sync_state(profile_id, &sync_state)?;
+    guard_state.approved = true;
+    persist_large_delete_guard_state(profile_id, &guard_state)?;
 
     runtime_clear_issue(&state.sync_runtime, profile_id);
     runtime_set_phase(
@@ -125,10 +125,10 @@ pub fn keep_cloud_files_after_large_delete(
     state: &tauri::State<'_, AppState>,
     profile_id: &str,
 ) -> Result<(), String> {
-    let mut sync_state = load_sync_state(profile_id)?;
-    sync_state.large_delete_guard_approved = false;
-    sync_state.large_delete_pending_paths.clear();
-    save_sync_state(profile_id, &sync_state)?;
+    let mut guard_state = read_large_delete_guard_state(profile_id)?;
+    guard_state.approved = false;
+    guard_state.pending_paths.clear();
+    persist_large_delete_guard_state(profile_id, &guard_state)?;
 
     let mut lifecycle_state = read_sync_lifecycle_operational_state(profile_id)?;
     lifecycle_state.two_way_ready = false;
@@ -149,8 +149,8 @@ pub fn keep_cloud_files_after_large_delete(
 }
 
 pub fn get_large_delete_pending_paths(profile_id: &str) -> Result<Vec<String>, String> {
-    let sync_state = load_sync_state(profile_id)?;
-    Ok(sync_state.large_delete_pending_paths)
+    let guard_state = read_large_delete_guard_state(profile_id)?;
+    Ok(guard_state.pending_paths)
 }
 
 #[cfg(test)]

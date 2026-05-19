@@ -75,10 +75,9 @@ async fn apply_local_changes(
         let Some(local_entry) = current_local_snapshot.get(&path) else {
             continue;
         };
-        let remote_id = sync_state.remote_path_to_id.get(&path).cloned();
 
         if local_entry.is_dir {
-            if remote_id.is_none() {
+            if read_remote_item_id_for_path(&graph.profile_id, &path)?.is_none() {
                 log::info!(
                     "{} [cycle:{}] REMOTE_DIR_CREATE_START path={}",
                     graph.account_prefix,
@@ -117,138 +116,38 @@ async fn apply_local_changes(
             local_entry.modified_ts
         );
 
-        if let Some(existing_id) = remote_id {
-            let remote_modified = sync_state
-                .remote_by_id
-                .get(&existing_id)
-                .map(|item| item.modified_ts)
-                .unwrap_or(0);
-            if local_entry.modified_ts > remote_modified {
-                let now = current_unix_seconds();
-                if let Some(remaining_seconds) =
-                    upload_cooldown_remaining_seconds(sync_state, &path, now)
-                {
-                    stats.upload_cooldown_skips += 1;
-                    runtime_set_phase(
-                        &graph.sync_runtime,
-                        &graph.profile_id,
-                        "applying_local",
-                        &format!(
-                            "Upload retry delayed for '{}' (retry in {})",
-                            path,
-                            format_retry_in_text(remaining_seconds)
-                        ),
-                    );
-                    log::info!(
-                        "{} [cycle:{}] LOCAL_UPLOAD_COOLDOWN_SKIP path={} retry_in={}s",
-                        graph.account_prefix,
-                        graph.cycle_id,
-                        path,
-                        remaining_seconds
-                    );
-                    continue;
-                }
-                log::info!(
-                    "{} [cycle:{}] LOCAL_UPLOAD_EXISTING path={} remote_id={} local_ts={} remote_ts={}",
-                    graph.account_prefix,
-                    graph.cycle_id,
-                    path,
-                    existing_id,
-                    local_entry.modified_ts,
-                    remote_modified
-                );
-                if !claim_upload_job_path(&graph.profile_id, &path, &graph.cycle_id)? {
-                    log::info!(
-                        "{} [cycle:{}] LOCAL_UPLOAD_SKIPPED_NOT_CLAIMED path={}",
-                        graph.account_prefix,
-                        graph.cycle_id,
-                        path
-                    );
-                    continue;
-                }
-                match upload_file_by_path(graph, sync_root, &path, cancel_flag).await {
-                    Ok(uploaded) => {
-                        let known = remote_known_item_from_drive_item(uploaded, &path)?;
-                        upsert_remote_known_item(sync_state, known);
-                        clear_upload_failure_cooldown(sync_state, &path);
-                        stats.uploaded_files += 1;
-                    }
-                    Err(error) => {
-                        let (failure_count, cooldown_seconds) =
-                            record_upload_failure_cooldown(sync_state, &path, now);
-                        stats.upload_failures += 1;
-                        log::warn!(
-                            "{} [cycle:{}] LOCAL_UPLOAD_FAILED path={} reason={} failures={} cooldown={}s",
-                            graph.account_prefix,
-                            graph.cycle_id,
-                            path,
-                            error,
-                            failure_count,
-                            cooldown_seconds
-                        );
-                    }
-                }
-            }
-        } else {
-            let now = current_unix_seconds();
-            if let Some(remaining_seconds) = upload_cooldown_remaining_seconds(sync_state, &path, now)
-            {
-                stats.upload_cooldown_skips += 1;
-                runtime_set_phase(
-                    &graph.sync_runtime,
-                    &graph.profile_id,
-                    "applying_local",
-                    &format!(
-                        "Upload retry delayed for '{}' (retry in {})",
-                        path,
-                        format_retry_in_text(remaining_seconds)
-                    ),
-                );
-                log::info!(
-                    "{} [cycle:{}] LOCAL_UPLOAD_COOLDOWN_SKIP path={} retry_in={}s",
-                    graph.account_prefix,
-                    graph.cycle_id,
-                    path,
-                    remaining_seconds
-                );
-                continue;
-            }
+        log::info!(
+            "{} [cycle:{}] LOCAL_UPLOAD_PLANNED path={} local_size={} local_modified_ts={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            path,
+            local_entry.size,
+            local_entry.modified_ts
+        );
+        if !claim_upload_job_path(&graph.profile_id, &path, &graph.cycle_id)? {
             log::info!(
-                "{} [cycle:{}] LOCAL_UPLOAD_NEW path={}",
+                "{} [cycle:{}] LOCAL_UPLOAD_SKIPPED_NOT_CLAIMED path={}",
                 graph.account_prefix,
                 graph.cycle_id,
                 path
             );
-            if !claim_upload_job_path(&graph.profile_id, &path, &graph.cycle_id)? {
-                log::info!(
-                    "{} [cycle:{}] LOCAL_UPLOAD_SKIPPED_NOT_CLAIMED path={}",
+            continue;
+        }
+        match upload_file_by_path(graph, sync_root, &path, cancel_flag).await {
+            Ok(uploaded) => {
+                let known = remote_known_item_from_drive_item(uploaded, &path)?;
+                upsert_remote_known_item(sync_state, known);
+                stats.uploaded_files += 1;
+            }
+            Err(error) => {
+                stats.upload_failures += 1;
+                log::warn!(
+                    "{} [cycle:{}] LOCAL_UPLOAD_FAILED path={} reason={}",
                     graph.account_prefix,
                     graph.cycle_id,
-                    path
+                    path,
+                    error
                 );
-                continue;
-            }
-            match upload_file_by_path(graph, sync_root, &path, cancel_flag).await {
-                Ok(uploaded) => {
-                    let known = remote_known_item_from_drive_item(uploaded, &path)?;
-                    upsert_remote_known_item(sync_state, known);
-                    clear_upload_failure_cooldown(sync_state, &path);
-                    stats.uploaded_files += 1;
-                }
-                Err(error) => {
-                    let (failure_count, cooldown_seconds) =
-                        record_upload_failure_cooldown(sync_state, &path, now);
-                    stats.upload_failures += 1;
-                    log::warn!(
-                        "{} [cycle:{}] LOCAL_UPLOAD_FAILED path={} reason={} failures={} cooldown={}s",
-                        graph.account_prefix,
-                        graph.cycle_id,
-                        path,
-                        error,
-                        failure_count,
-                        cooldown_seconds
-                    );
-                }
             }
         }
     }
@@ -263,16 +162,21 @@ async fn apply_local_changes(
         .cloned()
         .collect();
 
-    if sync_state.large_delete_guard_approved && !sync_state.large_delete_pending_paths.is_empty() {
-        deleted_paths = sync_state.large_delete_pending_paths.clone();
+    let mut guard_state = read_large_delete_guard_state(&graph.profile_id)?;
+    let remote_deleted_paths = collect_remote_delete_candidate_paths(&graph.profile_id, &deleted_paths)?;
+    let large_delete_guard_threshold = resolve_large_delete_guard_threshold();
+    let large_delete_guard = resolve_large_delete_guard(
+        &mut guard_state,
+        deleted_paths,
+        remote_deleted_paths,
+        large_delete_guard_threshold,
+    );
+    persist_large_delete_guard_state(&graph.profile_id, &guard_state)?;
+    if large_delete_guard.clear_issue {
+        runtime_clear_issue(&graph.sync_runtime, &graph.profile_id);
     }
-
-    if !sync_state.large_delete_guard_approved && !sync_state.large_delete_pending_paths.is_empty() {
-        let pending_count = sync_state.large_delete_pending_paths.len();
-        let issue_message = format!(
-            "Large deletion detected: {} items. Review before deleting from cloud.",
-            pending_count
-        );
+    if let Some(pending_count) = large_delete_guard.blocked_pending_count {
+        let issue_message = large_delete_guard_issue_message(pending_count);
         runtime_set_issue(
             &graph.sync_runtime,
             &graph.profile_id,
@@ -293,50 +197,7 @@ async fn apply_local_changes(
             "paused",
             "Large deletion detected - review required",
         );
-        log::warn!(
-            "{} [cycle:{}] LARGE_DELETE_GUARD_BLOCKING pending_count={}",
-            graph.account_prefix,
-            graph.cycle_id,
-            pending_count
-        );
-        return Ok(());
-    }
-
-    let remote_deleted_paths: Vec<String> = deleted_paths
-        .iter()
-        .filter(|path| sync_state.remote_path_to_id.contains_key(path.as_str()))
-        .cloned()
-        .collect();
-
-    let large_delete_guard_threshold = resolve_large_delete_guard_threshold();
-    if remote_deleted_paths.len() >= large_delete_guard_threshold {
-        if !sync_state.large_delete_guard_approved {
-            sync_state.large_delete_pending_paths = remote_deleted_paths;
-            let pending_count = sync_state.large_delete_pending_paths.len();
-            let issue_message = format!(
-                "Large deletion detected: {} items. Review before deleting from cloud.",
-                pending_count
-            );
-            runtime_set_issue(
-                &graph.sync_runtime,
-                &graph.profile_id,
-                "large_delete_guard",
-                &issue_message,
-                &[
-                    "confirm_large_delete",
-                    "keep_cloud_files",
-                    "open_sync_root",
-                    "retry_sync",
-                ],
-                None,
-                None,
-            );
-            runtime_set_phase(
-                &graph.sync_runtime,
-                &graph.profile_id,
-                "paused",
-                "Large deletion detected - review required",
-            );
+        if large_delete_guard.triggered_by_threshold {
             log::warn!(
                 "{} [cycle:{}] LARGE_DELETE_GUARD_TRIGGERED count={} threshold={}",
                 graph.account_prefix,
@@ -344,24 +205,28 @@ async fn apply_local_changes(
                 pending_count,
                 large_delete_guard_threshold
             );
-            return Ok(());
+        } else {
+            log::warn!(
+                "{} [cycle:{}] LARGE_DELETE_GUARD_BLOCKING pending_count={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                pending_count
+            );
         }
+        return Ok(());
+    }
 
+    if large_delete_guard.confirmed_by_threshold {
         log::warn!(
             "{} [cycle:{}] LARGE_DELETE_GUARD_CONFIRMED count={} threshold={}",
             graph.account_prefix,
             graph.cycle_id,
-            remote_deleted_paths.len(),
+            large_delete_guard.remote_deleted_count,
             large_delete_guard_threshold
         );
-        sync_state.large_delete_guard_approved = false;
-        sync_state.large_delete_pending_paths.clear();
-        runtime_clear_issue(&graph.sync_runtime, &graph.profile_id);
-    } else if sync_state.large_delete_guard_approved {
-        sync_state.large_delete_guard_approved = false;
-        sync_state.large_delete_pending_paths.clear();
-        runtime_clear_issue(&graph.sync_runtime, &graph.profile_id);
     }
+
+    deleted_paths = large_delete_guard.deleted_paths;
 
     deleted_paths.sort_by_key(|path| std::cmp::Reverse(path.matches('/').count()));
     let total_deleted_paths = deleted_paths.len();
@@ -409,7 +274,7 @@ async fn apply_local_changes(
             );
             last_heartbeat_at = std::time::Instant::now();
         }
-        if let Some(remote_id) = sync_state.remote_path_to_id.get(&deleted_path).cloned() {
+        if let Some(remote_id) = read_remote_item_id_for_path(&graph.profile_id, &deleted_path)? {
             log::info!(
                 "{} [cycle:{}] REMOTE_DELETE_START path={} remote_id={}",
                 graph.account_prefix,
@@ -768,50 +633,102 @@ fn create_safe_backup(local_path: &Path) -> Result<Option<PathBuf>, String> {
     }
 }
 
-fn current_unix_seconds() -> i64 {
-    chrono::Utc::now().timestamp()
+fn large_delete_guard_issue_message(pending_count: usize) -> String {
+    format!(
+        "Large deletion detected: {} items. Review before deleting from cloud.",
+        pending_count
+    )
 }
 
-fn upload_cooldown_remaining_seconds(sync_state: &PersistedSyncState, path: &str, now: i64) -> Option<i64> {
-    let retry_after = *sync_state.upload_retry_after_by_path.get(path)?;
-    if retry_after <= now {
-        return None;
+struct LargeDeleteGuardResolution {
+    deleted_paths: Vec<String>,
+    blocked_pending_count: Option<usize>,
+    triggered_by_threshold: bool,
+    confirmed_by_threshold: bool,
+    clear_issue: bool,
+    remote_deleted_count: usize,
+}
+
+fn resolve_large_delete_guard(
+    guard_state: &mut LargeDeleteGuardState,
+    mut deleted_paths: Vec<String>,
+    remote_deleted_paths: Vec<String>,
+    threshold: usize,
+) -> LargeDeleteGuardResolution {
+    if guard_state.approved && !guard_state.pending_paths.is_empty() {
+        deleted_paths = guard_state.pending_paths.clone();
     }
-    Some(retry_after - now)
-}
 
-fn format_retry_in_text(remaining_seconds: i64) -> String {
-    if remaining_seconds < 60 {
-        return format!("{}s", remaining_seconds);
+    if !guard_state.approved && !guard_state.pending_paths.is_empty() {
+        return LargeDeleteGuardResolution {
+            deleted_paths,
+            blocked_pending_count: Some(guard_state.pending_paths.len()),
+            triggered_by_threshold: false,
+            confirmed_by_threshold: false,
+            clear_issue: false,
+            remote_deleted_count: 0,
+        };
     }
-    let minutes = remaining_seconds / 60;
-    let seconds = remaining_seconds % 60;
-    if minutes < 60 {
-        return format!("{}m {}s", minutes, seconds);
+
+    if remote_deleted_paths.len() >= threshold {
+        if !guard_state.approved {
+            guard_state.pending_paths = remote_deleted_paths;
+            return LargeDeleteGuardResolution {
+                deleted_paths,
+                blocked_pending_count: Some(guard_state.pending_paths.len()),
+                triggered_by_threshold: true,
+                confirmed_by_threshold: false,
+                clear_issue: false,
+                remote_deleted_count: 0,
+            };
+        }
+
+        guard_state.approved = false;
+        guard_state.pending_paths.clear();
+        return LargeDeleteGuardResolution {
+            deleted_paths,
+            blocked_pending_count: None,
+            triggered_by_threshold: false,
+            confirmed_by_threshold: true,
+            clear_issue: true,
+            remote_deleted_count: remote_deleted_paths.len(),
+        };
     }
-    let hours = minutes / 60;
-    let rem_minutes = minutes % 60;
-    format!("{}h {}m", hours, rem_minutes)
+
+    if guard_state.approved {
+        guard_state.approved = false;
+        guard_state.pending_paths.clear();
+        return LargeDeleteGuardResolution {
+            deleted_paths,
+            blocked_pending_count: None,
+            triggered_by_threshold: false,
+            confirmed_by_threshold: false,
+            clear_issue: true,
+            remote_deleted_count: remote_deleted_paths.len(),
+        };
+    }
+
+    LargeDeleteGuardResolution {
+        deleted_paths,
+        blocked_pending_count: None,
+        triggered_by_threshold: false,
+        confirmed_by_threshold: false,
+        clear_issue: false,
+        remote_deleted_count: remote_deleted_paths.len(),
+    }
 }
 
-fn clear_upload_failure_cooldown(sync_state: &mut PersistedSyncState, path: &str) {
-    sync_state.upload_failure_counts_by_path.remove(path);
-    sync_state.upload_retry_after_by_path.remove(path);
-}
-
-fn record_upload_failure_cooldown(sync_state: &mut PersistedSyncState, path: &str, now: i64) -> (u32, i64) {
-    let failure_count = sync_state
-        .upload_failure_counts_by_path
-        .entry(path.to_string())
-        .and_modify(|value| *value = value.saturating_add(1))
-        .or_insert(1);
-    let exponent = failure_count.saturating_sub(1).min(10);
-    let cooldown_seconds = 2_i64.saturating_pow(exponent).min(1800);
-    let retry_after = now.saturating_add(cooldown_seconds);
-    sync_state
-        .upload_retry_after_by_path
-        .insert(path.to_string(), retry_after);
-    (*failure_count, cooldown_seconds)
+fn collect_remote_delete_candidate_paths(
+    profile_id: &str,
+    deleted_paths: &[String],
+) -> Result<Vec<String>, String> {
+    let mut remote_deleted_paths: Vec<String> = Vec::new();
+    for path in deleted_paths {
+        if read_remote_item_id_for_path(profile_id, path)?.is_some() {
+            remote_deleted_paths.push(path.clone());
+        }
+    }
+    Ok(remote_deleted_paths)
 }
 
 fn remove_local_path(sync_root: &Path, relative_path: &str) -> Result<(), String> {
