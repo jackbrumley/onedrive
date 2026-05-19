@@ -367,3 +367,13 @@ pub fn hydrate_runtime_status_from_db(
 
     Ok(())
 }
+
+pub fn build_authoritative_runtime_status(
+    profile_id: &str,
+    auth_ready: bool,
+) -> Result<sync_runtime::SyncRuntimeAccountStatus, String> {
+    let mut status = sync_runtime::SyncRuntimeAccountStatus::canonical_seed(profile_id, auth_ready);
+    hydrate_runtime_status_from_db(&mut status)?;
+    sync_runtime::recompute_authority_fields(&mut status);
+    Ok(status)
+}

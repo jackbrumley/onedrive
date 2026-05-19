@@ -7,8 +7,11 @@ use tauri::{AppHandle, Emitter};
 
 const RECENT_COMPLETED_LIMIT: usize = 120;
 const RECENT_FAILED_LIMIT: usize = 120;
+const STATUS_EVENT_THROTTLE_MS: i64 = 1000;
 static SYNC_RUNTIME_REVISION: AtomicU64 = AtomicU64::new(0);
 static SYNC_STATUS_EVENT_SEQUENCE: LazyLock<Mutex<HashMap<String, u64>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static SYNC_STATUS_LAST_EMIT_MS_BY_ACCOUNT: LazyLock<Mutex<HashMap<String, i64>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static SYNC_STATUS_APP_HANDLE: LazyLock<Mutex<Option<AppHandle>>> =
     LazyLock::new(|| Mutex::new(None));
@@ -214,6 +217,12 @@ impl SyncRuntimeAccountStatus {
             remote_session_failed_ids: HashSet::new(),
         }
     }
+
+    pub fn canonical_seed(profile_id: &str, auth_ready: bool) -> Self {
+        let mut status = Self::new(profile_id);
+        status.auth_ready = auth_ready;
+        status
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -280,7 +289,7 @@ pub fn set_auth_ready(runtime_map: &mut SyncRuntimeMap, profile_id: &str, auth_r
         previous_auth_ready,
         auth_ready
     );
-    emit_status_event_for_account(runtime_map, profile_id);
+    emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Immediate);
 }
 
 pub fn set_engine_state(runtime_map: &mut SyncRuntimeMap, profile_id: &str, engine_state: &str) {
@@ -288,7 +297,7 @@ pub fn set_engine_state(runtime_map: &mut SyncRuntimeMap, profile_id: &str, engi
     status.engine_state = engine_state.to_string();
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
-    emit_status_event_for_account(runtime_map, profile_id);
+    emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Immediate);
 }
 
 pub fn set_phase(
@@ -319,7 +328,7 @@ pub fn set_phase(
     }
     status.updated_at = now;
     bump_runtime_revision();
-    emit_status_event_for_account(runtime_map, profile_id);
+    emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Immediate);
 }
 
 pub fn set_local_scan_progress(
@@ -349,7 +358,7 @@ pub fn set_local_scan_progress(
     status.current_activity.updated_at = now.clone();
     status.updated_at = now;
     bump_runtime_revision();
-    emit_status_event_for_account(runtime_map, profile_id);
+    emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Throttled);
 }
 
 pub fn set_current_activity(
@@ -375,7 +384,7 @@ pub fn set_current_activity(
     status.current_activity.updated_at = now.clone();
     status.updated_at = now;
     bump_runtime_revision();
-    emit_status_event_for_account(runtime_map, profile_id);
+    emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Throttled);
 }
 
 pub fn set_issue(
@@ -401,7 +410,7 @@ pub fn set_issue(
     }
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
-    emit_status_event_for_account(runtime_map, profile_id);
+    emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Immediate);
 }
 
 pub fn clear_issue(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
@@ -413,7 +422,7 @@ pub fn clear_issue(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
     status.issue_secondary_path = None;
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
-    emit_status_event_for_account(runtime_map, profile_id);
+    emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Immediate);
 }
 
 pub fn reset_transfer_activity(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
@@ -423,7 +432,7 @@ pub fn reset_transfer_activity(runtime_map: &mut SyncRuntimeMap, profile_id: &st
     reset_upload_session_progress(status);
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
-    emit_status_event_for_account(runtime_map, profile_id);
+    emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Immediate);
 }
 
 pub fn set_remote_scan_complete(
@@ -435,7 +444,7 @@ pub fn set_remote_scan_complete(
     status.remote_scan_complete = complete;
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
-    emit_status_event_for_account(runtime_map, profile_id);
+    emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Immediate);
 }
 
 pub fn record_remote_discovered(runtime_map: &mut SyncRuntimeMap, profile_id: &str, item_id: &str) {
@@ -447,7 +456,7 @@ pub fn record_remote_discovered(runtime_map: &mut SyncRuntimeMap, profile_id: &s
         status.remote_discovered_total += 1;
         status.updated_at = now_rfc3339();
         bump_runtime_revision();
-        emit_status_event_for_account(runtime_map, profile_id);
+        emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Throttled);
     }
 }
 
@@ -468,7 +477,7 @@ pub fn record_remote_download_completed(
     }
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
-    emit_status_event_for_account(runtime_map, profile_id);
+    emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Throttled);
 }
 
 pub fn record_remote_download_failed(
@@ -481,7 +490,7 @@ pub fn record_remote_download_failed(
         status.remote_download_failed_total += 1;
         status.updated_at = now_rfc3339();
         bump_runtime_revision();
-        emit_status_event_for_account(runtime_map, profile_id);
+        emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Immediate);
     }
 }
 
@@ -502,7 +511,7 @@ pub fn set_remote_download_counters(
     status.remote_download_retry_waiting = retry_waiting;
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
-    emit_status_event_for_account(runtime_map, profile_id);
+    emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Throttled);
 }
 
 pub fn set_upload_counters(
@@ -520,7 +529,7 @@ pub fn set_upload_counters(
     status.upload_in_flight = in_flight;
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
-    emit_status_event_for_account(runtime_map, profile_id);
+    emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Throttled);
 }
 
 pub fn set_upload_planned_total(
@@ -532,7 +541,7 @@ pub fn set_upload_planned_total(
     status.upload_planned_total = planned_total;
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
-    emit_status_event_for_account(runtime_map, profile_id);
+    emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Throttled);
 }
 
 pub fn start_transfer(
@@ -561,7 +570,7 @@ pub fn start_transfer(
     }
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
-    emit_status_event_for_account(runtime_map, profile_id);
+    emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Immediate);
     transfer_id
 }
 
@@ -586,7 +595,7 @@ pub fn update_transfer_progress(
     }
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
-    emit_status_event_for_account(runtime_map, profile_id);
+    emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Throttled);
 }
 
 pub fn finish_transfer_success(
@@ -617,7 +626,7 @@ pub fn finish_transfer_success(
         sync_upload_in_flight(status);
         status.updated_at = now_rfc3339();
         bump_runtime_revision();
-        emit_status_event_for_account(runtime_map, profile_id);
+        emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Immediate);
     }
 }
 
@@ -650,17 +659,53 @@ pub fn finish_transfer_error(
         sync_upload_in_flight(status);
         status.updated_at = now_rfc3339();
         bump_runtime_revision();
-        emit_status_event_for_account(runtime_map, profile_id);
+        emit_status_event_for_account(runtime_map, profile_id, StatusEventEmitMode::Immediate);
     }
 }
 
 pub fn remove_account(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
     runtime_map.remove(profile_id);
     bump_runtime_revision();
+    if let Ok(mut last_emit_map) = SYNC_STATUS_LAST_EMIT_MS_BY_ACCOUNT.lock() {
+        last_emit_map.remove(profile_id);
+    }
     emit_removed_status_event(profile_id);
 }
 
-fn emit_status_event_for_account(runtime_map: &SyncRuntimeMap, profile_id: &str) {
+enum StatusEventEmitMode {
+    Immediate,
+    Throttled,
+}
+
+fn emit_status_event_for_account(
+    runtime_map: &SyncRuntimeMap,
+    profile_id: &str,
+    emit_mode: StatusEventEmitMode,
+) {
+    let should_emit_now = match emit_mode {
+        StatusEventEmitMode::Immediate => true,
+        StatusEventEmitMode::Throttled => {
+            let now_ms = chrono::Utc::now().timestamp_millis();
+            if let Ok(mut last_emit_map) = SYNC_STATUS_LAST_EMIT_MS_BY_ACCOUNT.lock() {
+                let last_emit_ms = *last_emit_map.get(profile_id).unwrap_or(&0);
+                if now_ms - last_emit_ms < STATUS_EVENT_THROTTLE_MS {
+                    false
+                } else {
+                    last_emit_map.insert(profile_id.to_string(), now_ms);
+                    true
+                }
+            } else {
+                true
+            }
+        }
+    };
+    if !should_emit_now {
+        return;
+    }
+
+    if let Ok(mut last_emit_map) = SYNC_STATUS_LAST_EMIT_MS_BY_ACCOUNT.lock() {
+        last_emit_map.insert(profile_id.to_string(), chrono::Utc::now().timestamp_millis());
+    }
     if let Some(status) = runtime_map.get(profile_id) {
         let mut normalized = status.clone();
         recompute_authority_fields(&mut normalized);

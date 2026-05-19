@@ -1,6 +1,6 @@
 use crate::app::account_profiles::load_profiles;
 use crate::app::state::AppState;
-use crate::app::sync_engine::hydrate_runtime_status_from_db;
+use crate::app::sync_engine::build_authoritative_runtime_status;
 use crate::app::sync_runtime::{
     emit_sync_status_snapshot_accounts, recompute_authority_fields, snapshot, SyncRuntimeSnapshot,
 };
@@ -20,11 +20,25 @@ fn build_authoritative_sync_runtime_snapshot(
         .map(|profile| (profile.id, profile.auth_configured))
         .collect();
 
+    let runtime_auth_by_id: std::collections::HashMap<String, bool> = runtime_snapshot
+        .accounts
+        .iter()
+        .map(|account| (account.profile_id.clone(), account.auth_ready))
+        .collect();
+
+    let mut authoritative_accounts = Vec::with_capacity(runtime_snapshot.accounts.len());
+    for account in &runtime_snapshot.accounts {
+        let auth_ready = profile_auth_by_id
+            .get(&account.profile_id)
+            .copied()
+            .unwrap_or_else(|| runtime_auth_by_id.get(&account.profile_id).copied().unwrap_or(false));
+        let authoritative = build_authoritative_runtime_status(&account.profile_id, auth_ready)?;
+        authoritative_accounts.push(authoritative);
+    }
+
+    runtime_snapshot.accounts = authoritative_accounts;
+
     for account in &mut runtime_snapshot.accounts {
-        hydrate_runtime_status_from_db(account)?;
-        if let Some(auth_ready) = profile_auth_by_id.get(&account.profile_id) {
-            account.auth_ready = *auth_ready;
-        }
         recompute_authority_fields(account);
     }
 
