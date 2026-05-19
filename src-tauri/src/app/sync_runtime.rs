@@ -1001,4 +1001,30 @@ mod tests {
         ));
         assert!(status.consistency.ok);
     }
+
+    #[test]
+    fn download_overcommit_sets_consistency_violation() {
+        let mut status = SyncRuntimeAccountStatus::new("sync-runtime-test-download-overcommit");
+        status.remote_download_planned_total = 10;
+        status.remote_download_completed_total = 7;
+        status.remote_download_failed_total = 2;
+        status.remote_download_in_flight = 3;
+
+        recompute_authority_fields(&mut status);
+
+        assert!(has_violation(&status, "download_lane_overcommitted"));
+        assert!(!status.consistency.ok);
+    }
+
+    #[test]
+    fn in_flight_counter_without_active_rows_sets_consistency_violation() {
+        let mut status = SyncRuntimeAccountStatus::new("sync-runtime-test-inflight-no-rows");
+        status.remote_download_in_flight = 1;
+        status.upload_in_flight = 1;
+
+        recompute_authority_fields(&mut status);
+
+        assert!(has_violation(&status, "in_flight_counter_without_active_rows"));
+        assert!(!status.consistency.ok);
+    }
 }

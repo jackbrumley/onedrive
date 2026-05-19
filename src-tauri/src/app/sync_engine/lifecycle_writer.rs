@@ -341,6 +341,7 @@ fn classify_sync_issue(error: &str) -> (&'static str, &'static [&'static str]) {
 #[cfg(test)]
 mod lifecycle_writer_tests {
     use super::*;
+    use crate::app::sync_runtime::SyncRuntimeAccountStatus;
 
     fn test_profile_id(label: &str) -> String {
         format!(
@@ -427,5 +428,46 @@ mod lifecycle_writer_tests {
         .expect_err("determinate progress without total must fail");
 
         assert!(error.contains("determinate progress requires total"));
+    }
+
+    #[test]
+    fn canonical_builder_matches_hydrated_status_for_same_profile() {
+        let profile_id = test_profile_id("canonical-builder-equivalence");
+        persist_sync_lifecycle_phase(&profile_id, "syncing", "Initial sync in progress")
+            .expect("persist syncing phase");
+        persist_sync_lifecycle_activity(
+            &profile_id,
+            "scanning_remote",
+            "indeterminate",
+            None,
+            None,
+            Some("items"),
+            Some("Fetching remote files"),
+            Some("cycle-equivalence"),
+        )
+        .expect("persist remote scan activity");
+
+        let mut hydrated = SyncRuntimeAccountStatus::canonical_seed(&profile_id, true);
+        hydrate_runtime_status_from_db(&mut hydrated).expect("hydrate runtime status");
+        sync_runtime::recompute_authority_fields(&mut hydrated);
+
+        let built = build_authoritative_runtime_status(&profile_id, true)
+            .expect("build authoritative runtime status");
+
+        assert_eq!(hydrated.profile_id, built.profile_id);
+        assert_eq!(hydrated.phase, built.phase);
+        assert_eq!(hydrated.phase_message, built.phase_message);
+        assert_eq!(hydrated.current_activity.stage, built.current_activity.stage);
+        assert_eq!(
+            hydrated.current_activity.progress_mode,
+            built.current_activity.progress_mode
+        );
+        assert_eq!(hydrated.remote_scan_complete, built.remote_scan_complete);
+        assert_eq!(hydrated.two_way_ready, built.two_way_ready);
+        assert_eq!(
+            hydrated.remote_download_planned_total,
+            built.remote_download_planned_total
+        );
+        assert_eq!(hydrated.upload_planned_total, built.upload_planned_total);
     }
 }
