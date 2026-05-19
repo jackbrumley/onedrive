@@ -223,16 +223,6 @@ fn runtime_record_remote_discovered(
     }
 }
 
-fn runtime_record_remote_download_planned(
-    runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
-    profile_id: &str,
-    item_id: &str,
-) {
-    if let Ok(mut runtime_map) = runtime.lock() {
-        sync_runtime::record_remote_download_planned(&mut runtime_map, profile_id, item_id);
-    }
-}
-
 fn runtime_record_remote_download_completed(
     runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
     profile_id: &str,
@@ -340,24 +330,6 @@ fn classify_sync_issue(error: &str) -> (&'static str, &'static [&'static str]) {
         return ("network_unavailable", &["retry_sync"]);
     }
     ("unknown_error", &["retry_sync"])
-}
-
-fn relative_path_for_issue(sync_root: &Path, candidate: &Path) -> Option<String> {
-    let relative = candidate.strip_prefix(sync_root).ok()?;
-    let mut output = String::new();
-    for component in relative.components() {
-        if let std::path::Component::Normal(segment) = component {
-            if !output.is_empty() {
-                output.push('/');
-            }
-            output.push_str(&segment.to_string_lossy());
-        }
-    }
-    if output.is_empty() {
-        None
-    } else {
-        Some(output)
-    }
 }
 
 #[cfg(test)]

@@ -115,3 +115,101 @@ fn list_sync_file_paths_by_desired_action(
     }
     Ok(paths)
 }
+
+fn list_sync_file_download_candidates(profile_id: &str) -> Result<Vec<PlannerDownloadCandidate>, String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let mut statement = connection
+        .prepare(
+            "SELECT remote_item_id, path, remote_size, remote_modified_ts
+             FROM sync_files
+             WHERE profile_id = ?1
+               AND desired_action = ?2
+               AND is_dir = 0
+               AND is_shared_reference = 0
+               AND remote_present = 1
+             ORDER BY path ASC",
+        )
+        .map_err(|error| format!("Failed preparing download candidate query: {error}"))?;
+
+    let rows = statement
+        .query_map(params![profile_id, PLANNER_ACTION_DOWNLOAD], |row| {
+            let remote_item_id: Option<String> = row.get(0)?;
+            Ok((
+                remote_item_id,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?.max(0) as u64,
+                row.get::<_, i64>(3)?,
+            ))
+        })
+        .map_err(|error| format!("Failed querying download candidates: {error}"))?;
+
+    let mut candidates: Vec<PlannerDownloadCandidate> = Vec::new();
+    for row in rows {
+        let (remote_item_id, path, remote_size, remote_modified_ts) =
+            row.map_err(|error| format!("Failed reading download candidate: {error}"))?;
+        let item_id = remote_item_id
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                format!(
+                    "Download planner candidate missing remote_item_id path={}",
+                    path
+                )
+            })?;
+        candidates.push(PlannerDownloadCandidate {
+            item_id,
+            path,
+            remote_size,
+            remote_modified_ts,
+        });
+    }
+
+    Ok(candidates)
+}
+
+fn list_sync_file_upload_candidates(profile_id: &str) -> Result<Vec<PlannerUploadCandidate>, String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let mut statement = connection
+        .prepare(
+            "SELECT path, local_size, local_modified_ts
+             FROM sync_files
+             WHERE profile_id = ?1
+               AND desired_action = ?2
+               AND is_dir = 0
+               AND is_shared_reference = 0
+               AND local_present = 1
+             ORDER BY path ASC",
+        )
+        .map_err(|error| format!("Failed preparing upload candidate query: {error}"))?;
+
+    let rows = statement
+        .query_map(params![profile_id, PLANNER_ACTION_UPLOAD], |row| {
+            Ok(PlannerUploadCandidate {
+                path: row.get(0)?,
+                local_size: row.get::<_, i64>(1)?.max(0) as u64,
+                local_modified_ts: row.get(2)?,
+            })
+        })
+        .map_err(|error| format!("Failed querying upload candidates: {error}"))?;
+
+    let mut candidates: Vec<PlannerUploadCandidate> = Vec::new();
+    for row in rows {
+        candidates.push(row.map_err(|error| format!("Failed reading upload candidate: {error}"))?);
+    }
+
+    Ok(candidates)
+}
+#[derive(Debug, Clone)]
+struct PlannerDownloadCandidate {
+    item_id: String,
+    path: String,
+    remote_size: u64,
+    remote_modified_ts: i64,
+}
+
+#[derive(Debug, Clone)]
+struct PlannerUploadCandidate {
+    path: String,
+    local_size: u64,
+    local_modified_ts: i64,
+}

@@ -32,27 +32,29 @@ async fn fetch_and_apply_delta_changes(
         checkpoint_flush_step
     );
 
+    let mut lifecycle_state = read_sync_lifecycle_operational_state(&graph.profile_id)?;
     let bootstrap_requires_authoritative_scan =
-        !sync_state.two_way_ready && !sync_state.bootstrap_full_scan_completed;
+        !lifecycle_state.two_way_ready && !lifecycle_state.bootstrap_full_scan_completed;
     let start_url = if bootstrap_requires_authoritative_scan {
-        if let Some(active_next_link) = sync_state.active_delta_next_link.clone() {
+        if let Some(active_next_link) = lifecycle_state.active_delta_next_link.clone() {
             active_next_link
         } else {
-            if !sync_state.bootstrap_scan_initialized {
+            if !lifecycle_state.bootstrap_scan_initialized {
                 log::info!(
                     "{} [cycle:{}] BOOTSTRAP_SCAN_START mode=authoritative_root_delta",
                     graph.account_prefix,
                     graph.cycle_id
                 );
             }
-            sync_state.bootstrap_scan_initialized = true;
+            lifecycle_state.bootstrap_scan_initialized = true;
+            persist_sync_lifecycle_operational_state(&graph.profile_id, &lifecycle_state)?;
             format!("{GRAPH_ROOT}/me/drive/root/delta")
         }
     } else {
-        sync_state
+        lifecycle_state
             .active_delta_next_link
             .clone()
-            .or_else(|| sync_state.delta_link.clone())
+            .or_else(|| lifecycle_state.delta_link.clone())
             .unwrap_or_else(|| format!("{GRAPH_ROOT}/me/drive/root/delta"))
     };
     let scan_started_at = std::time::Instant::now();
@@ -593,7 +595,7 @@ async fn fetch_and_apply_delta_changes(
                     graph,
                     sync_root,
                     sync_state,
-                    stats,
+                    !lifecycle_state.two_way_ready,
                     &cycle_cancel_flag,
                     page_payload.items,
                 )
@@ -602,11 +604,13 @@ async fn fetch_and_apply_delta_changes(
                     terminal_error = Some(error);
                     break;
                 }
+                let _ = recompute_sync_file_actions(&graph.profile_id, lifecycle_state.two_way_ready)?;
+                let _ = materialize_planner_download_jobs(&graph.profile_id)?;
                 let _ = sync_download_counters_from_db(graph)?;
 
                 if let Some(next_link) = page_payload.next_link {
-                    sync_state.active_delta_next_link = Some(next_link);
-                    save_sync_state(&graph.profile_id, sync_state)?;
+                    lifecycle_state.active_delta_next_link = Some(next_link);
+                    persist_sync_lifecycle_operational_state(&graph.profile_id, &lifecycle_state)?;
                 } else {
                     deferred_delta_link = page_payload.delta_link;
                     producer_done = true;
@@ -631,13 +635,14 @@ async fn fetch_and_apply_delta_changes(
         sync_download_counters_from_db(graph)?.remaining
     );
     if let Some(delta_link) = deferred_delta_link {
-        sync_state.delta_link = Some(delta_link);
+        lifecycle_state.delta_link = Some(delta_link);
     }
-    sync_state.active_delta_next_link = None;
-    if !sync_state.two_way_ready {
-        sync_state.bootstrap_full_scan_completed = true;
-        sync_state.bootstrap_scan_initialized = true;
+    lifecycle_state.active_delta_next_link = None;
+    if !lifecycle_state.two_way_ready {
+        lifecycle_state.bootstrap_full_scan_completed = true;
+        lifecycle_state.bootstrap_scan_initialized = true;
     }
+    persist_sync_lifecycle_operational_state(&graph.profile_id, &lifecycle_state)?;
     save_sync_state(&graph.profile_id, sync_state)?;
     let _ = sync_download_counters_from_db(graph)?;
     runtime_set_remote_scan_complete(&graph.sync_runtime, &graph.profile_id, true);
@@ -725,11 +730,10 @@ async fn process_remote_page_items(
     graph: &mut GraphContext,
     sync_root: &Path,
     sync_state: &mut PersistedSyncState,
-    stats: &mut SyncCycleStats,
+    bootstrap_cloud_first: bool,
     cancel_flag: &Arc<AtomicBool>,
     items: Vec<DeltaItem>,
 ) -> Result<(), String> {
-    let bootstrap_cloud_first = !sync_state.two_way_ready;
     for item in items {
         ensure_not_cancelled(cancel_flag)?;
         runtime_record_remote_discovered(&graph.sync_runtime, &graph.profile_id, &item.id);
@@ -740,7 +744,6 @@ async fn process_remote_page_items(
                     sync_state.remote_by_id.remove(&item.id);
                     sync_state.remote_path_to_id.remove(&existing.path);
                     sync_state.local_snapshot.remove(&existing.path);
-                    let _ = remove_sync_file_entry(&graph.profile_id, &existing.path);
                 }
                 continue;
             }
@@ -753,82 +756,15 @@ async fn process_remote_page_items(
                     existing.path,
                     existing.is_dir
                 );
-                let local_abs = sync_root.join(path_to_local(&existing.path));
-                let local_current = read_local_entry(&local_abs)?;
-                let previous_local = sync_state.local_snapshot.get(&existing.path);
-                let local_changed = local_current
-                    .as_ref()
-                    .map(|entry| has_local_changed(entry, previous_local))
-                    .unwrap_or(false);
-
-                if local_changed && !existing.is_dir {
-                    let now = current_unix_seconds();
-                    if let Some(remaining_seconds) =
-                        upload_cooldown_remaining_seconds(sync_state, &existing.path, now)
-                    {
-                        stats.upload_cooldown_skips += 1;
-                        runtime_set_phase(
-                            &graph.sync_runtime,
-                            &graph.profile_id,
-                            "applying_remote",
-                            &format!(
-                                "Upload retry delayed for '{}' (retry in {})",
-                                existing.path,
-                                format_retry_in_text(remaining_seconds)
-                            ),
-                        );
-                        log::info!(
-                            "{} [cycle:{}] REMOTE_DELETE_LOCAL_UPLOAD_COOLDOWN_SKIP path={} retry_in={}s",
-                            graph.account_prefix,
-                            graph.cycle_id,
-                            existing.path,
-                            remaining_seconds
-                        );
-                        continue;
-                    }
-                    log::info!(
-                        "{} [cycle:{}] REMOTE_DELETE_LOCAL_CHANGED_UPLOAD path={}",
-                        graph.account_prefix,
-                        graph.cycle_id,
-                        existing.path
-                    );
-                    match upload_file_by_path(graph, sync_root, &existing.path, cancel_flag).await {
-                        Ok(uploaded) => {
-                            let known = remote_known_item_from_drive_item(uploaded, &existing.path)?;
-                            upsert_remote_known_item(sync_state, known);
-                            clear_upload_failure_cooldown(sync_state, &existing.path);
-                            stats.uploaded_files += 1;
-                        }
-                        Err(error) => {
-                            let (failure_count, cooldown_seconds) =
-                                record_upload_failure_cooldown(sync_state, &existing.path, now);
-                            stats.upload_failures += 1;
-                            log::warn!(
-                                "{} [cycle:{}] REMOTE_DELETE_LOCAL_UPLOAD_FAILED path={} reason={} failures={} cooldown={}s",
-                                graph.account_prefix,
-                                graph.cycle_id,
-                                existing.path,
-                                error,
-                                failure_count,
-                                cooldown_seconds
-                            );
-                        }
-                    }
-                    continue;
-                }
-
                 sync_state.remote_by_id.remove(&item.id);
                 sync_state.remote_path_to_id.remove(&existing.path);
-                sync_state.local_snapshot.remove(&existing.path);
-                let _ = remove_sync_file_entry(&graph.profile_id, &existing.path);
-                remove_local_path(sync_root, &existing.path)?;
                 log::info!(
-                    "{} [cycle:{}] LOCAL_DELETE_OK path={}",
+                    "{} [cycle:{}] REMOTE_DELETE_DEFERRED_TO_PLANNER path={} remote_id={}",
                     graph.account_prefix,
                     graph.cycle_id,
-                    existing.path
+                    existing.path,
+                    item.id
                 );
-                stats.deleted_local += 1;
             }
             continue;
         }
@@ -859,8 +795,8 @@ async fn process_remote_page_items(
             shared_item_id,
             shared_kind,
         };
-
         let local_abs = sync_root.join(path_to_local(&path));
+
         if remote_entry.is_dir {
             if !bootstrap_cloud_first {
                 log::info!(
@@ -885,128 +821,11 @@ async fn process_remote_page_items(
         if bootstrap_cloud_first {
             upsert_remote_known_item(sync_state, remote_entry.clone());
             upsert_sync_file_remote_presence(&graph.profile_id, &remote_entry)?;
-            let inserted = upsert_download_job(
-                &graph.profile_id,
-                &item.id,
-                &path,
-                remote_entry.size,
-                remote_entry.modified_ts,
-            )?;
-            if inserted {
-                runtime_record_remote_download_planned(
-                    &graph.sync_runtime,
-                    &graph.profile_id,
-                    &item.id,
-                );
-            }
             continue;
-        }
-
-        let local_current = read_local_entry(&local_abs)?;
-        let previous_local = sync_state.local_snapshot.get(&path);
-        let local_changed = local_current
-            .as_ref()
-            .map(|entry| has_local_changed(entry, previous_local))
-            .unwrap_or(false);
-
-            if local_changed {
-                let local_entry = local_current.expect("local_changed implies local entry exists");
-                if local_entry.modified_ts > remote_entry.modified_ts {
-                    let now = current_unix_seconds();
-                    if let Some(remaining_seconds) =
-                        upload_cooldown_remaining_seconds(sync_state, &path, now)
-                    {
-                        stats.upload_cooldown_skips += 1;
-                        runtime_set_phase(
-                            &graph.sync_runtime,
-                            &graph.profile_id,
-                            "applying_remote",
-                            &format!(
-                                "Upload retry delayed for '{}' (retry in {})",
-                                path,
-                                format_retry_in_text(remaining_seconds)
-                            ),
-                        );
-                        log::info!(
-                            "{} [cycle:{}] REMOTE_OLDER_UPLOAD_COOLDOWN_SKIP path={} retry_in={}s",
-                            graph.account_prefix,
-                            graph.cycle_id,
-                            path,
-                            remaining_seconds
-                        );
-                        continue;
-                    }
-                    log::info!(
-                        "{} [cycle:{}] REMOTE_OLDER_UPLOAD_LOCAL path={} local_ts={} remote_ts={}",
-                        graph.account_prefix,
-                        graph.cycle_id,
-                        path,
-                        local_entry.modified_ts,
-                        remote_entry.modified_ts
-                    );
-                    match upload_file_by_path(graph, sync_root, &path, cancel_flag).await {
-                        Ok(uploaded) => {
-                            let known = remote_known_item_from_drive_item(uploaded, &path)?;
-                            upsert_remote_known_item(sync_state, known);
-                            clear_upload_failure_cooldown(sync_state, &path);
-                            stats.uploaded_files += 1;
-                        }
-                        Err(error) => {
-                            let (failure_count, cooldown_seconds) =
-                                record_upload_failure_cooldown(sync_state, &path, now);
-                            stats.upload_failures += 1;
-                            log::warn!(
-                                "{} [cycle:{}] REMOTE_OLDER_UPLOAD_FAILED path={} reason={} failures={} cooldown={}s",
-                                graph.account_prefix,
-                                graph.cycle_id,
-                                path,
-                                error,
-                                failure_count,
-                                cooldown_seconds
-                            );
-                        }
-                    }
-                continue;
-            }
-
-            if let Some(backup_path) = create_safe_backup(&local_abs)? {
-                log::info!(
-                    "{} [cycle:{}] SAFE_BACKUP_CREATED source={} backup={}",
-                    graph.account_prefix,
-                    graph.cycle_id,
-                    local_abs.display(),
-                    backup_path.display()
-                );
-                let conflict_backup_relative = relative_path_for_issue(sync_root, &backup_path);
-                runtime_set_issue(
-                    &graph.sync_runtime,
-                    &graph.profile_id,
-                    "conflict_detected",
-                    "Conflict detected. A safe backup was created.",
-                    &["open_conflict", "open_sync_root", "retry_sync"],
-                    Some(&path),
-                    conflict_backup_relative.as_deref(),
-                );
-            }
         }
 
         upsert_remote_known_item(sync_state, remote_entry.clone());
         upsert_sync_file_remote_presence(&graph.profile_id, &remote_entry)?;
-
-        let inserted = upsert_download_job(
-            &graph.profile_id,
-            &item.id,
-            &path,
-            remote_entry.size,
-            remote_entry.modified_ts,
-        )?;
-        if inserted {
-            runtime_record_remote_download_planned(
-                &graph.sync_runtime,
-                &graph.profile_id,
-                &item.id,
-            );
-        }
     }
 
     Ok(())
@@ -1144,8 +963,6 @@ fn apply_remote_download_result(
                     sync_state
                         .remote_path_to_id
                         .remove(&result.remote_entry.path);
-                    sync_state.local_snapshot.remove(&result.remote_entry.path);
-                    let _ = remove_sync_file_entry(&graph.profile_id, &result.remote_entry.path);
                     stats.remote_items_skipped_missing += 1;
                     log::warn!(
                         "{} [cycle:{}] REMOTE_ITEM_SKIP_MISSING path={} id={}",

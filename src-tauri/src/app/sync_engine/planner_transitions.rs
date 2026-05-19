@@ -84,10 +84,28 @@ fn recompute_sync_file_actions(
                    AND is_shared_reference = 0
                    AND local_present = 1
                    AND remote_present = 0
-                   AND remote_modified_ts > 0",
+                   AND remote_modified_ts > 0
+                   AND local_modified_ts <= remote_modified_ts",
                 params![profile_id, PLANNER_ACTION_DELETE_LOCAL],
             )
             .map_err(|error| format!("Failed deriving local delete actions: {error}"))?;
+
+        connection
+            .execute(
+                "UPDATE sync_files
+                 SET desired_action = ?2
+                 WHERE profile_id = ?1
+                   AND is_dir = 0
+                   AND is_shared_reference = 0
+                   AND local_present = 1
+                   AND remote_present = 0
+                   AND remote_modified_ts > 0
+                   AND local_modified_ts > remote_modified_ts",
+                params![profile_id, PLANNER_ACTION_UPLOAD],
+            )
+            .map_err(|error| {
+                format!("Failed deriving upload actions for remote-deleted but local-newer files: {error}")
+            })?;
     }
 
     let local_dominates_action = if two_way_ready {

@@ -274,15 +274,27 @@ mod planner_tests {
             false,
             true,
             150,
-            200,
+            100,
             10,
             10,
             Some("remote-deleted-id"),
+        );
+        insert_sync_file_row(
+            &profile_id,
+            "remote-deleted-local-newer.txt",
+            false,
+            true,
+            150,
+            250,
+            10,
+            10,
+            Some("remote-deleted-local-newer-id"),
         );
 
         let counters = recompute_sync_file_actions(&profile_id, true).expect("recompute planner actions");
         assert_eq!(counters.need_delete_remote_total, 1);
         assert_eq!(counters.need_delete_local_total, 1);
+        assert_eq!(counters.need_upload_total, 1);
 
         let connection = open_sync_jobs_connection(&profile_id).expect("open sync jobs db");
         let action_for_path = |path: &str| -> String {
@@ -297,5 +309,9 @@ mod planner_tests {
 
         assert_eq!(action_for_path("local-deleted.txt"), "delete_remote");
         assert_eq!(action_for_path("remote-deleted.txt"), "delete_local");
+        assert_eq!(
+            action_for_path("remote-deleted-local-newer.txt"),
+            "upload"
+        );
     }
 }

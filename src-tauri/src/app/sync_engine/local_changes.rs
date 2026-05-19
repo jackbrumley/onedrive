@@ -4,6 +4,9 @@ async fn apply_local_changes(
     current_local_snapshot: &HashMap<String, LocalSnapshotEntry>,
     remote_applied_paths: &std::collections::HashSet<String>,
     planned_upload_paths: &std::collections::HashSet<String>,
+    planned_delete_remote_paths: &std::collections::HashSet<String>,
+    planned_delete_local_paths: &std::collections::HashSet<String>,
+    planned_conflict_paths: &[String],
     sync_state: &mut PersistedSyncState,
     stats: &mut SyncCycleStats,
     cancel_flag: &Arc<AtomicBool>,
@@ -154,6 +157,15 @@ async fn apply_local_changes(
                     local_entry.modified_ts,
                     remote_modified
                 );
+                if !claim_upload_job_path(&graph.profile_id, &path, &graph.cycle_id)? {
+                    log::info!(
+                        "{} [cycle:{}] LOCAL_UPLOAD_SKIPPED_NOT_CLAIMED path={}",
+                        graph.account_prefix,
+                        graph.cycle_id,
+                        path
+                    );
+                    continue;
+                }
                 match upload_file_by_path(graph, sync_root, &path, cancel_flag).await {
                     Ok(uploaded) => {
                         let known = remote_known_item_from_drive_item(uploaded, &path)?;
@@ -207,6 +219,15 @@ async fn apply_local_changes(
                 graph.cycle_id,
                 path
             );
+            if !claim_upload_job_path(&graph.profile_id, &path, &graph.cycle_id)? {
+                log::info!(
+                    "{} [cycle:{}] LOCAL_UPLOAD_SKIPPED_NOT_CLAIMED path={}",
+                    graph.account_prefix,
+                    graph.cycle_id,
+                    path
+                );
+                continue;
+            }
             match upload_file_by_path(graph, sync_root, &path, cancel_flag).await {
                 Ok(uploaded) => {
                     let known = remote_known_item_from_drive_item(uploaded, &path)?;
@@ -232,8 +253,15 @@ async fn apply_local_changes(
         }
     }
 
-    let mut deleted_paths: Vec<String> =
-        list_sync_file_paths_by_desired_action(&graph.profile_id, PLANNER_ACTION_DELETE_REMOTE)?;
+    let claimed_delete_remote_paths = claim_action_job_paths(
+        &graph.profile_id,
+        DELETE_REMOTE_JOB_DIRECTION,
+        &graph.cycle_id,
+    )?;
+    let mut deleted_paths: Vec<String> = planned_delete_remote_paths
+        .intersection(&claimed_delete_remote_paths)
+        .cloned()
+        .collect();
 
     if sync_state.large_delete_guard_approved && !sync_state.large_delete_pending_paths.is_empty() {
         deleted_paths = sync_state.large_delete_pending_paths.clone();
@@ -354,6 +382,7 @@ async fn apply_local_changes(
     for deleted_path in deleted_paths {
         ensure_not_cancelled(cancel_flag)?;
         deleted_paths_seen += 1;
+        mark_action_job_running(&graph.profile_id, DELETE_REMOTE_JOB_DIRECTION, &deleted_path)?;
 
         if last_activity_emit_at.elapsed() >= ACTIVITY_EMIT_INTERVAL || deleted_paths_seen % 100 == 0 {
             runtime_set_current_activity(
@@ -388,7 +417,15 @@ async fn apply_local_changes(
                 deleted_path,
                 remote_id
             );
-            delete_remote_item(graph, &remote_id, cancel_flag).await?;
+            if let Err(error) = delete_remote_item(graph, &remote_id, cancel_flag).await {
+                mark_action_job_failed(
+                    &graph.profile_id,
+                    DELETE_REMOTE_JOB_DIRECTION,
+                    &deleted_path,
+                    &error,
+                )?;
+                return Err(error);
+            }
             sync_state.remote_path_to_id.remove(&deleted_path);
             sync_state.remote_by_id.remove(&remote_id);
             log::info!(
@@ -399,6 +436,181 @@ async fn apply_local_changes(
                 remote_id
             );
             stats.deleted_remote += 1;
+        }
+        mark_action_job_done(
+            &graph.profile_id,
+            DELETE_REMOTE_JOB_DIRECTION,
+            &deleted_path,
+        )?;
+    }
+
+    let claimed_delete_local_paths = claim_action_job_paths(
+        &graph.profile_id,
+        DELETE_LOCAL_JOB_DIRECTION,
+        &graph.cycle_id,
+    )?;
+    let mut local_delete_paths: Vec<String> = planned_delete_local_paths
+        .intersection(&claimed_delete_local_paths)
+        .cloned()
+        .collect();
+    local_delete_paths.sort_by_key(|path| std::cmp::Reverse(path.matches('/').count()));
+    let total_local_delete_paths = local_delete_paths.len();
+    let mut local_delete_paths_seen: usize = 0;
+
+    runtime_set_current_activity(
+        &graph.sync_runtime,
+        &graph.profile_id,
+        "applying_local",
+        "determinate",
+        Some(0),
+        Some(total_local_delete_paths),
+        Some("paths"),
+        Some("Reconciling local deletions"),
+        Some(&graph.cycle_id),
+    );
+
+    for local_delete_path in local_delete_paths {
+        ensure_not_cancelled(cancel_flag)?;
+        local_delete_paths_seen = local_delete_paths_seen.saturating_add(1);
+        mark_action_job_running(&graph.profile_id, DELETE_LOCAL_JOB_DIRECTION, &local_delete_path)?;
+        if last_activity_emit_at.elapsed() >= ACTIVITY_EMIT_INTERVAL || local_delete_paths_seen % 100 == 0 {
+            runtime_set_current_activity(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                "applying_local",
+                "determinate",
+                Some(local_delete_paths_seen),
+                Some(total_local_delete_paths),
+                Some("paths"),
+                Some("Reconciling local deletions"),
+                Some(&graph.cycle_id),
+            );
+            last_activity_emit_at = std::time::Instant::now();
+        }
+
+        if last_heartbeat_at.elapsed() >= HEARTBEAT_INTERVAL {
+            log::info!(
+                "{} [cycle:{}] SYNC_HEARTBEAT phase=applying_local local_delete_paths_seen={} remote_deleted={} local_deleted={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                local_delete_paths_seen,
+                stats.deleted_remote,
+                stats.deleted_local
+            );
+            last_heartbeat_at = std::time::Instant::now();
+        }
+
+        log::info!(
+            "{} [cycle:{}] LOCAL_DELETE_START path={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            local_delete_path
+        );
+        if let Err(error) = remove_local_path(sync_root, &local_delete_path) {
+            mark_action_job_failed(
+                &graph.profile_id,
+                DELETE_LOCAL_JOB_DIRECTION,
+                &local_delete_path,
+                &error,
+            )?;
+            return Err(error);
+        }
+        sync_state.local_snapshot.remove(&local_delete_path);
+        log::info!(
+            "{} [cycle:{}] LOCAL_DELETE_OK path={}",
+            graph.account_prefix,
+            graph.cycle_id,
+            local_delete_path
+        );
+        stats.deleted_local += 1;
+        mark_action_job_done(
+            &graph.profile_id,
+            DELETE_LOCAL_JOB_DIRECTION,
+            &local_delete_path,
+        )?;
+    }
+
+    if !planned_conflict_paths.is_empty() {
+        let claimed_conflict_paths = claim_action_job_paths(
+            &graph.profile_id,
+            CONFLICT_JOB_DIRECTION,
+            &graph.cycle_id,
+        )?;
+        let mut conflict_paths: Vec<String> = planned_conflict_paths
+            .iter()
+            .filter(|path| claimed_conflict_paths.contains(path.as_str()))
+            .cloned()
+            .collect();
+        conflict_paths.sort();
+        let total_conflict_paths = conflict_paths.len();
+        let mut conflict_paths_seen: usize = 0;
+        runtime_set_current_activity(
+            &graph.sync_runtime,
+            &graph.profile_id,
+            "applying_local",
+            "determinate",
+            Some(0),
+            Some(total_conflict_paths),
+            Some("paths"),
+            Some("Resolving conflict backups"),
+            Some(&graph.cycle_id),
+        );
+
+        for conflict_path in conflict_paths {
+            ensure_not_cancelled(cancel_flag)?;
+            conflict_paths_seen = conflict_paths_seen.saturating_add(1);
+            mark_action_job_running(&graph.profile_id, CONFLICT_JOB_DIRECTION, &conflict_path)?;
+            if last_activity_emit_at.elapsed() >= ACTIVITY_EMIT_INTERVAL || conflict_paths_seen % 100 == 0 {
+                runtime_set_current_activity(
+                    &graph.sync_runtime,
+                    &graph.profile_id,
+                    "applying_local",
+                    "determinate",
+                    Some(conflict_paths_seen),
+                    Some(total_conflict_paths),
+                    Some("paths"),
+                    Some("Resolving conflict backups"),
+                    Some(&graph.cycle_id),
+                );
+                last_activity_emit_at = std::time::Instant::now();
+            }
+
+            let local_abs = sync_root.join(path_to_local(&conflict_path));
+            let backup_result = create_safe_backup(&local_abs);
+            let Some(backup_path) = (match backup_result {
+                Ok(value) => value,
+                Err(error) => {
+                    mark_action_job_failed(
+                        &graph.profile_id,
+                        CONFLICT_JOB_DIRECTION,
+                        &conflict_path,
+                        &error,
+                    )?;
+                    return Err(error);
+                }
+            }) else {
+                mark_action_job_done(&graph.profile_id, CONFLICT_JOB_DIRECTION, &conflict_path)?;
+                continue;
+            };
+            log::warn!(
+                "{} [cycle:{}] CONFLICT_SAFE_BACKUP_CREATED path={} source={} backup={}",
+                graph.account_prefix,
+                graph.cycle_id,
+                conflict_path,
+                local_abs.display(),
+                backup_path.display(),
+            );
+            let conflict_backup_relative = relative_path_for_issue(sync_root, &backup_path);
+            runtime_set_issue(
+                &graph.sync_runtime,
+                &graph.profile_id,
+                "conflict_detected",
+                "Conflict detected. A safe backup was created.",
+                &["open_conflict", "open_sync_root", "retry_sync"],
+                Some(&conflict_path),
+                conflict_backup_relative.as_deref(),
+            );
+            mark_action_job_done(&graph.profile_id, CONFLICT_JOB_DIRECTION, &conflict_path)?;
         }
     }
 
@@ -514,15 +726,46 @@ fn upsert_remote_known_item(sync_state: &mut PersistedSyncState, item: RemoteKno
     sync_state.remote_by_id.insert(item.id.clone(), item);
 }
 
-fn has_local_changed(current: &LocalSnapshotEntry, previous: Option<&LocalSnapshotEntry>) -> bool {
-    match previous {
-        Some(entry) => entry != current,
-        None => true,
-    }
-}
-
 fn is_safe_backup_artifact(path: &str) -> bool {
     path.rsplit('/').next().is_some_and(|name| name.contains("-safeBackup-"))
+}
+
+fn create_safe_backup(local_path: &Path) -> Result<Option<PathBuf>, String> {
+    if !local_path.exists() {
+        return Ok(None);
+    }
+    let metadata = std::fs::metadata(local_path).map_err(|error| error.to_string())?;
+    if !metadata.is_file() {
+        return Ok(None);
+    }
+
+    let parent = local_path
+        .parent()
+        .ok_or_else(|| "Local backup path has no parent".to_string())?;
+    let file_name = local_path
+        .file_name()
+        .ok_or_else(|| "Local backup path has no filename".to_string())?
+        .to_string_lossy()
+        .to_string();
+
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    let mut index = 1_u32;
+    loop {
+        let backup_name = format!("{}-safeBackup-{}-{:04}", file_name, stamp, index);
+        let backup_path = parent.join(backup_name);
+        if !backup_path.exists() {
+            std::fs::copy(local_path, &backup_path).map_err(|error| {
+                format!(
+                    "Failed creating safe backup '{}' from '{}': {}",
+                    backup_path.display(),
+                    local_path.display(),
+                    error
+                )
+            })?;
+            return Ok(Some(backup_path));
+        }
+        index += 1;
+    }
 }
 
 fn current_unix_seconds() -> i64 {
@@ -591,41 +834,21 @@ fn remove_local_path(sync_root: &Path, relative_path: &str) -> Result<(), String
     }
 }
 
-fn create_safe_backup(local_path: &Path) -> Result<Option<PathBuf>, String> {
-    if !local_path.exists() {
-        return Ok(None);
-    }
-    let metadata = std::fs::metadata(local_path).map_err(|error| error.to_string())?;
-    if !metadata.is_file() {
-        return Ok(None);
-    }
-
-    let parent = local_path
-        .parent()
-        .ok_or_else(|| "Local backup path has no parent".to_string())?;
-    let file_name = local_path
-        .file_name()
-        .ok_or_else(|| "Local backup path has no filename".to_string())?
-        .to_string_lossy()
-        .to_string();
-
-    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
-    let mut index = 1_u32;
-    loop {
-        let backup_name = format!("{}-safeBackup-{}-{:04}", file_name, stamp, index);
-        let backup_path = parent.join(backup_name);
-        if !backup_path.exists() {
-            std::fs::copy(local_path, &backup_path).map_err(|error| {
-                format!(
-                    "Failed creating safe backup '{}' from '{}': {}",
-                    backup_path.display(),
-                    local_path.display(),
-                    error
-                )
-            })?;
-            return Ok(Some(backup_path));
+fn relative_path_for_issue(sync_root: &Path, candidate: &Path) -> Option<String> {
+    let relative = candidate.strip_prefix(sync_root).ok()?;
+    let mut output = String::new();
+    for component in relative.components() {
+        if let std::path::Component::Normal(segment) = component {
+            if !output.is_empty() {
+                output.push('/');
+            }
+            output.push_str(&segment.to_string_lossy());
         }
-        index += 1;
+    }
+    if output.is_empty() {
+        None
+    } else {
+        Some(output)
     }
 }
 

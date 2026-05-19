@@ -127,12 +127,15 @@ pub fn keep_cloud_files_after_large_delete(
     let mut sync_state = load_sync_state(profile_id)?;
     sync_state.large_delete_guard_approved = false;
     sync_state.large_delete_pending_paths.clear();
-    sync_state.two_way_ready = false;
-    sync_state.bootstrap_scan_initialized = false;
-    sync_state.bootstrap_full_scan_completed = false;
-    sync_state.delta_link = None;
-    sync_state.active_delta_next_link = None;
     save_sync_state(profile_id, &sync_state)?;
+
+    let mut lifecycle_state = read_sync_lifecycle_operational_state(profile_id)?;
+    lifecycle_state.two_way_ready = false;
+    lifecycle_state.bootstrap_scan_initialized = false;
+    lifecycle_state.bootstrap_full_scan_completed = false;
+    lifecycle_state.delta_link = None;
+    lifecycle_state.active_delta_next_link = None;
+    persist_sync_lifecycle_operational_state(profile_id, &lifecycle_state)?;
 
     runtime_clear_issue(&state.sync_runtime, profile_id);
     runtime_set_phase(

@@ -39,7 +39,8 @@ async fn tick_sync_cycle(
     );
 
     let mut sync_state = load_sync_state(profile_id)?;
-    let started_two_way_ready = sync_state.two_way_ready;
+    let mut lifecycle_state = read_sync_lifecycle_operational_state(profile_id)?;
+    let started_two_way_ready = lifecycle_state.two_way_ready;
     let mut stats = SyncCycleStats {
         account_prefix: account_prefix.clone(),
         cycle_id: cycle_id.clone(),
@@ -67,7 +68,9 @@ async fn tick_sync_cycle(
     )
     .await?;
 
-    if sync_state.two_way_ready {
+    lifecycle_state = read_sync_lifecycle_operational_state(profile_id)?;
+
+    if lifecycle_state.two_way_ready {
         runtime_set_phase(
             &graph.sync_runtime,
             profile_id,
@@ -140,9 +143,10 @@ async fn tick_sync_cycle(
             "{} [cycle:{}] STAGE_START stage=planner two_way_ready={}",
             account_prefix,
             cycle_id,
-            sync_state.two_way_ready
+            lifecycle_state.two_way_ready
         );
-        let planner_counters = recompute_sync_file_actions(profile_id, sync_state.two_way_ready)?;
+        let planner_counters =
+            recompute_sync_file_actions(profile_id, lifecycle_state.two_way_ready)?;
         let materialized = materialize_planner_actions(profile_id, &account_prefix, &cycle_id)?;
         log::info!(
             "{} [cycle:{}] STAGE_COMPLETE stage=planner duration_ms={} need_download={} need_upload={} conflicts={}",
@@ -159,7 +163,7 @@ async fn tick_sync_cycle(
             planner_counters.need_upload_total,
         );
         log::info!(
-            "{} [cycle:{}] SYNC_PLANNER_SUMMARY cloud_discovered={} local_discovered={} need_download={} need_upload={} need_delete_remote={} need_delete_local={} conflicts={} shared_references_excluded={} active_download_jobs={} active_upload_jobs={}",
+            "{} [cycle:{}] SYNC_PLANNER_SUMMARY cloud_discovered={} local_discovered={} need_download={} need_upload={} need_delete_remote={} need_delete_local={} conflicts={} shared_references_excluded={} desired_download_jobs={} desired_upload_jobs={} desired_delete_remote_paths={} desired_delete_local_paths={} desired_conflict_paths={} active_download_jobs={} active_upload_jobs={}",
             account_prefix,
             cycle_id,
             planner_counters.cloud_discovered_total,
@@ -170,6 +174,11 @@ async fn tick_sync_cycle(
             planner_counters.need_delete_local_total,
             planner_counters.conflict_total,
             planner_counters.shared_reference_total,
+            materialized.desired_download_paths,
+            materialized.desired_upload_paths,
+            materialized.desired_delete_remote_paths,
+            materialized.desired_delete_local_paths,
+            materialized.desired_conflict_paths,
             materialized.active_download_jobs,
             materialized.active_upload_jobs,
         );
@@ -189,6 +198,26 @@ async fn tick_sync_cycle(
                 cycle_id,
                 planner_counters.need_upload_total,
                 materialized.upload_paths.len(),
+            );
+        }
+        if !materialized.conflict_paths.is_empty() {
+            let conflict_sample = materialized
+                .conflict_paths
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" | ");
+            log::warn!(
+                "{} [cycle:{}] PLANNER_CONFLICT_PATHS count={} sample_paths={}",
+                account_prefix,
+                cycle_id,
+                materialized.conflict_paths.len(),
+                if conflict_sample.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    conflict_sample
+                }
             );
         }
         stats.local_items_seen = local_snapshot.len();
@@ -211,6 +240,9 @@ async fn tick_sync_cycle(
             &local_snapshot,
             &remote_applied_paths,
             &materialized.upload_paths,
+            &materialized.delete_remote_paths,
+            &materialized.delete_local_paths,
+            &materialized.conflict_paths,
             &mut sync_state,
             &mut stats,
             cancel_flag,
@@ -219,8 +251,8 @@ async fn tick_sync_cycle(
     } else {
         let download_counters = read_download_job_counters(profile_id)?;
         runtime_set_upload_planned_total(&graph.sync_runtime, profile_id, 0);
-        let bootstrap_ready_for_two_way = sync_state.active_delta_next_link.is_none()
-            && sync_state.bootstrap_full_scan_completed
+        let bootstrap_ready_for_two_way = lifecycle_state.active_delta_next_link.is_none()
+            && lifecycle_state.bootstrap_full_scan_completed
             && download_counters.remaining == 0
             && download_counters.failed_terminal == 0;
 
@@ -240,7 +272,8 @@ async fn tick_sync_cycle(
                 cancel_flag,
             )
             .await?;
-            sync_state.two_way_ready = true;
+            lifecycle_state.two_way_ready = true;
+            persist_sync_lifecycle_operational_state(profile_id, &lifecycle_state)?;
         } else {
             let blocked_message = if download_counters.failed_terminal > 0 {
                 format!(
@@ -276,8 +309,8 @@ async fn tick_sync_cycle(
                 "{} [cycle:{}] BOOTSTRAP_TWO_WAY_BLOCKED cursor_active={} bootstrap_full_scan_completed={} queue_remaining={} failed_terminal={}",
                 account_prefix,
                 cycle_id,
-                sync_state.active_delta_next_link.is_some(),
-                sync_state.bootstrap_full_scan_completed,
+                lifecycle_state.active_delta_next_link.is_some(),
+                lifecycle_state.bootstrap_full_scan_completed,
                 download_counters.remaining,
                 download_counters.failed_terminal
             );
@@ -287,7 +320,8 @@ async fn tick_sync_cycle(
     if started_two_way_ready {
         sync_state.local_snapshot = collect_local_snapshot(&sync_root)?;
     }
-    sync_state.last_cycle_at = Some(chrono::Local::now().to_rfc3339());
+    lifecycle_state.last_cycle_at = Some(chrono::Local::now().to_rfc3339());
+    persist_sync_lifecycle_operational_state(profile_id, &lifecycle_state)?;
     save_sync_state(profile_id, &sync_state)?;
 
     update_profile_last_sync(profiles_lock, profile_id)?;
@@ -671,8 +705,8 @@ fn new_cycle_id() -> String {
 }
 
 fn remaining_until_next_cycle(profile_id: &str, interval: Duration) -> Option<Duration> {
-    let state = load_sync_state(profile_id).ok()?;
-    let last_cycle_at = state.last_cycle_at?;
+    let lifecycle_state = read_sync_lifecycle_operational_state(profile_id).ok()?;
+    let last_cycle_at = lifecycle_state.last_cycle_at?;
     let timestamp = chrono::DateTime::parse_from_rfc3339(&last_cycle_at).ok()?;
     let elapsed = chrono::Utc::now().signed_duration_since(timestamp.with_timezone(&chrono::Utc));
     if elapsed.num_milliseconds() <= 0 {

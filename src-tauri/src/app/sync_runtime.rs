@@ -440,24 +440,6 @@ pub fn record_remote_discovered(runtime_map: &mut SyncRuntimeMap, profile_id: &s
     }
 }
 
-pub fn record_remote_download_planned(
-    runtime_map: &mut SyncRuntimeMap,
-    profile_id: &str,
-    item_id: &str,
-) {
-    let status = ensure_account_status(runtime_map, profile_id);
-    if status
-        .remote_session_planned_ids
-        .insert(item_id.to_string())
-    {
-        status.remote_download_planned_total += 1;
-        sync_legacy_remote_progress_fields(status);
-        status.updated_at = now_rfc3339();
-        bump_runtime_revision();
-        emit_status_event_for_account(runtime_map, profile_id);
-    }
-}
-
 pub fn record_remote_download_completed(
     runtime_map: &mut SyncRuntimeMap,
     profile_id: &str,

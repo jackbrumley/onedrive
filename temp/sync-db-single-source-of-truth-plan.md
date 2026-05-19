@@ -84,18 +84,18 @@ Legend:
 ### Remaining Work (Strict Close List)
 
 1. Finish DB authority for operational state
-   - `[ ]` Move `delta_link` and `active_delta_next_link` to DB-only authority.
-   - `[ ]` Move two-way/bootstrap gate authority to DB-only paths.
-   - `[ ]` Remove flow-critical planning reads from `PersistedSyncState`.
-   - `[ ]` Ensure restart reconstruction reads lifecycle/planner/jobs only.
+   - `[x]` Move `delta_link` and `active_delta_next_link` to DB-only authority.
+   - `[x]` Move two-way/bootstrap gate authority to DB-only paths.
+   - `[x]` Remove flow-critical planning reads from `PersistedSyncState`.
+   - `[~]` Ensure restart reconstruction reads lifecycle/planner/jobs only.
 
 2. Make planner the only action authority
    - `[x]` Finalize explicit planner action set (`download`, `upload`, `delete_remote`, `delete_local`, `conflict`, `none`).
    - `[x]` Centralize all transition rules in one planner transitions owner.
-   - `[~]` Implement full job materialization from planner output to `sync_jobs` (summary materializer added; download/upload enqueue full convergence still pending).
+   - `[x]` Implement full job materialization from planner output to `sync_jobs` (download/upload and delete/conflict durable job materialization with claim/run execution transitions).
    - `[~]` Ensure materialization is idempotent across repeated cycles.
-   - `[ ]` Remove remaining direct apply-path decision branches that bypass planner.
-   - `[~]` Route delete and conflict execution through planner/materializer flow.
+   - `[x]` Remove remaining direct apply-path decision branches that bypass planner.
+   - `[x]` Route delete and conflict execution through planner/materializer flow.
 
 3. Complete module ownership decomposition
    - `[x]` Extract lifecycle writer into `lifecycle_writer.rs`.
@@ -127,7 +127,7 @@ Legend:
 
 7. Test matrix completion
    - `[x]` Planner transition tests (remote-only/local-only/overlap/conflict/shared refs/delete lanes covered).
-   - `[~]` Materializer tests (idempotent planner materialization path coverage added; durable enqueue/update path tests pending).
+   - `[x]` Materializer tests (idempotent + enqueue/prune durable coverage includes download/upload/delete/conflict action rows).
    - `[~]` Lifecycle writer invariant tests.
    - `[~]` Pause/resume/restart determinism tests.
    - `[ ]` Bootstrap gate tests (blocked -> retried -> two-way ready).
@@ -142,7 +142,7 @@ Legend:
 ### Definition of Fully Done (Close Criteria)
 
 - `[ ]` No flow-critical sync decision depends on JSON/in-memory mirrors.
-- `[ ]` Planner actions materialize to jobs for all relevant action types.
+- `[x]` Planner actions materialize to jobs for all relevant action types.
 - `[ ]` One lifecycle writer path is enforced by guardrails.
 - `[ ]` Restart/pause/resume/retry deterministic from DB state.
 - `[ ]` `cargo check`, `cargo test`, `npm run typecheck`, and sync guard scripts all pass.

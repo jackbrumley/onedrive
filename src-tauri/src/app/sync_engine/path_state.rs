@@ -180,28 +180,17 @@ fn read_local_entry(path: &Path) -> Result<Option<LocalSnapshotEntry>, String> {
 }
 
 fn load_sync_state(profile_id: &str) -> Result<PersistedSyncState, String> {
-    let mut state = if let Some(state_json) = read_sync_state_store(profile_id)? {
-        serde_json::from_str::<PersistedSyncState>(&state_json)
-            .map_err(|error| format!("Failed decoding persisted sync state: {error}"))?
+    if let Some(state_json) = read_sync_state_store(profile_id)? {
+        Ok(serde_json::from_str::<PersistedSyncState>(&state_json)
+            .map_err(|error| format!("Failed decoding persisted sync state: {error}"))?)
     } else {
-        PersistedSyncState::default()
-    };
-
-    let _ = hydrate_sync_state_from_lifecycle(profile_id, &mut state)?;
-    persist_sync_lifecycle_from_state(profile_id, &state)?;
-
-    let state_json = serde_json::to_string_pretty(&state)
-        .map_err(|error| format!("Failed encoding sync state JSON: {error}"))?;
-    write_sync_state_store(profile_id, &state_json)?;
-
-    Ok(state)
+        Ok(PersistedSyncState::default())
+    }
 }
 
 fn save_sync_state(profile_id: &str, state: &PersistedSyncState) -> Result<(), String> {
     let text = serde_json::to_string_pretty(state)
         .map_err(|error| format!("Failed encoding sync state JSON: {error}"))?;
     write_sync_state_store(profile_id, &text)?;
-
-    persist_sync_lifecycle_from_state(profile_id, state)?;
     Ok(())
 }
