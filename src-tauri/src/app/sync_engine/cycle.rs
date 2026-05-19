@@ -187,6 +187,7 @@ async fn tick_sync_cycle(
             &sync_root,
             &local_snapshot,
             &remote_applied_paths,
+            planner_counters.need_upload_total,
             &mut sync_state,
             &mut stats,
             cancel_flag,
