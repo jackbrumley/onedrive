@@ -67,6 +67,34 @@ mod job_queue_tests {
             .expect("insert failed download job");
     }
 
+    fn insert_download_job_with_state(
+        profile_id: &str,
+        item_id: &str,
+        path: &str,
+        state: &str,
+        run_state: &str,
+        next_retry_at: Option<i64>,
+    ) {
+        let connection = open_sync_jobs_connection(profile_id).expect("open sync jobs db");
+        let now = current_unix_seconds();
+        connection
+            .execute(
+                "INSERT INTO sync_jobs (
+                    profile_id, direction, item_id, path, remote_size, remote_modified_ts,
+                    state, run_state, attempt_count, last_error, next_retry_at,
+                    lease_owner, lease_until, bytes_done, bytes_total, progress_updated_at,
+                    created_at, updated_at, started_at, finished_at
+                ) VALUES (
+                    ?1, 'download', ?2, ?3, 10, 10,
+                    ?4, ?5, 1, NULL, ?6,
+                    NULL, NULL, 0, 10, ?7,
+                    ?7, ?7, NULL, NULL
+                )",
+                params![profile_id, item_id, path, state, run_state, next_retry_at, now],
+            )
+            .expect("insert download job with state");
+    }
+
     #[test]
     fn reset_running_jobs_for_pause_requeues_all_directions() {
         let profile_id = test_profile_id("pause-reset");
@@ -310,6 +338,7 @@ mod job_queue_tests {
 
         let lifecycle = read_sync_lifecycle_operational_state(&profile_id)
             .expect("read lifecycle gate state");
+        assert!(!lifecycle.two_way_ready);
         let blocked_counters =
             read_download_job_counters(&profile_id).expect("read blocked download counters");
         assert!(!bootstrap_ready_for_two_way(&lifecycle, &blocked_counters));
@@ -340,5 +369,178 @@ mod job_queue_tests {
         let ready_counters =
             read_download_job_counters(&profile_id).expect("read ready download counters");
         assert!(bootstrap_ready_for_two_way(&lifecycle, &ready_counters));
+
+        let mut transitioned_lifecycle = lifecycle;
+        transitioned_lifecycle.two_way_ready = true;
+        persist_sync_lifecycle_operational_state(&profile_id, &transitioned_lifecycle)
+            .expect("persist two-way-ready lifecycle state");
+        let ready_lifecycle = read_sync_lifecycle_operational_state(&profile_id)
+            .expect("read two-way-ready lifecycle state");
+        assert!(ready_lifecycle.two_way_ready);
+    }
+
+    #[test]
+    fn multi_cycle_download_claims_progress_queued_and_retry_wait_jobs() {
+        let profile_id = test_profile_id("multi-cycle-claim-progression");
+        clear_profile_rows(&profile_id);
+
+        let now = current_unix_seconds();
+        insert_download_job_with_state(
+            &profile_id,
+            "queued-1",
+            "docs/queued-1.txt",
+            DOWNLOAD_JOB_STATE_QUEUED,
+            JOB_RUN_STATE_IDLE,
+            None,
+        );
+        insert_download_job_with_state(
+            &profile_id,
+            "retry-due-now",
+            "docs/retry-due-now.txt",
+            DOWNLOAD_JOB_STATE_RETRY_WAIT,
+            JOB_RUN_STATE_IDLE,
+            Some(now.saturating_sub(1)),
+        );
+        insert_download_job_with_state(
+            &profile_id,
+            "retry-future",
+            "docs/retry-future.txt",
+            DOWNLOAD_JOB_STATE_RETRY_WAIT,
+            JOB_RUN_STATE_IDLE,
+            Some(now.saturating_add(3600)),
+        );
+
+        let first_cycle_claimed =
+            claim_download_jobs(&profile_id, "cycle-1", 10).expect("claim first cycle jobs");
+        assert_eq!(first_cycle_claimed.len(), 2);
+
+        for job in &first_cycle_claimed {
+            mark_download_job_done(&profile_id, job.job_id, false)
+                .expect("mark first-cycle claimed job done");
+        }
+
+        let after_first_cycle =
+            read_download_job_counters(&profile_id).expect("read counters after first cycle");
+        assert_eq!(after_first_cycle.completed, 2);
+        assert_eq!(after_first_cycle.remaining, 1);
+        assert_eq!(after_first_cycle.retry_waiting, 1);
+
+        let connection = open_sync_jobs_connection(&profile_id).expect("open sync jobs db");
+        connection
+            .execute(
+                "UPDATE sync_jobs
+                 SET next_retry_at = ?1,
+                     updated_at = ?1,
+                     progress_updated_at = ?1
+                 WHERE profile_id = ?2
+                   AND direction = 'download'
+                   AND item_id = 'retry-future'",
+                params![current_unix_seconds().saturating_sub(1), &profile_id],
+            )
+            .expect("expire retry-future job for second cycle");
+
+        let second_cycle_claimed =
+            claim_download_jobs(&profile_id, "cycle-2", 10).expect("claim second cycle jobs");
+        assert_eq!(second_cycle_claimed.len(), 1);
+        assert_eq!(second_cycle_claimed[0].item_id, "retry-future");
+
+        mark_download_job_done(&profile_id, second_cycle_claimed[0].job_id, false)
+            .expect("mark second-cycle claimed job done");
+
+        let after_second_cycle =
+            read_download_job_counters(&profile_id).expect("read counters after second cycle");
+        assert_eq!(after_second_cycle.completed, 3);
+        assert_eq!(after_second_cycle.remaining, 0);
+        assert_eq!(after_second_cycle.retry_waiting, 0);
+    }
+
+    #[test]
+    fn lifecycle_phase_flow_tracks_bootstrap_blocked_retry_and_two_way_ready() {
+        let profile_id = test_profile_id("lifecycle-bootstrap-phase-flow");
+        clear_profile_rows(&profile_id);
+
+        let lifecycle = SyncLifecycleOperationalState {
+            two_way_ready: false,
+            bootstrap_scan_initialized: true,
+            bootstrap_full_scan_completed: true,
+            delta_link: Some("https://example.test/delta".to_string()),
+            active_delta_next_link: None,
+            last_cycle_at: None,
+        };
+        persist_sync_lifecycle_operational_state(&profile_id, &lifecycle)
+            .expect("persist initial bootstrap lifecycle state");
+
+        persist_sync_lifecycle_phase(
+            &profile_id,
+            "syncing",
+            "Initial sync in progress - downloading cloud files only",
+        )
+        .expect("persist blocked syncing phase");
+
+        let blocked_row = read_sync_lifecycle_row(&profile_id)
+            .expect("read blocked lifecycle row")
+            .expect("blocked lifecycle row exists");
+        assert_eq!(blocked_row.phase, "syncing");
+        assert_eq!(
+            blocked_row.phase_message,
+            "Initial sync in progress - downloading cloud files only"
+        );
+        assert_eq!(blocked_row.activity_stage, "syncing");
+        assert_eq!(blocked_row.activity_progress_mode, "indeterminate");
+        assert!(!blocked_row.two_way_ready);
+
+        insert_failed_download_job(&profile_id, "phase-flow-failed", "docs/phase-flow-failed.txt");
+
+        let blocked_counters =
+            read_download_job_counters(&profile_id).expect("read blocked counters");
+        assert!(!bootstrap_ready_for_two_way(&lifecycle, &blocked_counters));
+
+        let retry_report = retry_all_failed_download_jobs(&profile_id)
+            .expect("retry failed terminal jobs in phase flow");
+        assert_eq!(retry_report.retried, 1);
+
+        let queued_counters = read_download_job_counters(&profile_id).expect("read queued counters");
+        assert!(!bootstrap_ready_for_two_way(&lifecycle, &queued_counters));
+
+        let connection = open_sync_jobs_connection(&profile_id).expect("open sync jobs db");
+        let retried_job_id: i64 = connection
+            .query_row(
+                "SELECT id
+                 FROM sync_jobs
+                 WHERE profile_id = ?1
+                   AND direction = 'download'
+                   AND item_id = 'phase-flow-failed'",
+                params![&profile_id],
+                |row| row.get(0),
+            )
+            .expect("read retried job id");
+        mark_download_job_done(&profile_id, retried_job_id, false)
+            .expect("mark retried phase-flow job done");
+
+        let ready_counters = read_download_job_counters(&profile_id).expect("read ready counters");
+        assert!(bootstrap_ready_for_two_way(&lifecycle, &ready_counters));
+
+        persist_sync_lifecycle_phase(
+            &profile_id,
+            "preparing_two_way_baseline",
+            "Preparing two-way sync - building your local baseline",
+        )
+        .expect("persist preparing baseline phase");
+
+        let mut ready_lifecycle = lifecycle;
+        ready_lifecycle.two_way_ready = true;
+        persist_sync_lifecycle_operational_state(&profile_id, &ready_lifecycle)
+            .expect("persist two-way-ready operational state");
+        persist_sync_lifecycle_phase(&profile_id, "idle", "Idle - waiting for next sync cycle")
+            .expect("persist idle phase after readiness");
+
+        let final_row = read_sync_lifecycle_row(&profile_id)
+            .expect("read final lifecycle row")
+            .expect("final lifecycle row exists");
+        assert_eq!(final_row.phase, "idle");
+        assert_eq!(final_row.phase_message, "Idle - waiting for next sync cycle");
+        assert_eq!(final_row.activity_stage, "idle");
+        assert_eq!(final_row.activity_progress_mode, "hidden");
+        assert!(final_row.two_way_ready);
     }
 }

@@ -130,7 +130,7 @@ Legend:
    - `[x]` Planner transition tests (remote-only/local-only/overlap/conflict/shared refs/delete lanes covered).
    - `[x]` Materializer tests (idempotent + enqueue/prune durable coverage includes download/upload/delete/conflict action rows).
    - `[~]` Lifecycle writer invariant tests.
-    - `[~]` Pause/resume/restart determinism tests (added startup resume integration + retry-all terminal-failure requeue coverage + idempotent repeated restart drain test + multi-cycle queued/retry-wait progression test + full-cycle resume/claim/complete coverage across download/upload/action lanes; broader end-to-end flow matrix still pending).
+    - `[~]` Pause/resume/restart determinism tests (added startup resume integration + retry-all terminal-failure requeue coverage + idempotent repeated restart drain test + multi-cycle queued/retry-wait progression test + full-cycle resume/claim/complete coverage across download/upload/action lanes + lifecycle phase flow assertions through bootstrap blocked/retry/ready; broader end-to-end flow matrix still pending).
    - `[ ]` Bootstrap gate tests (blocked -> retried -> two-way ready).
    - `[ ]` Integration scenarios for large-delete guard and conflict backup paths.
 
