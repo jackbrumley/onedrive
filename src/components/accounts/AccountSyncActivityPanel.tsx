@@ -73,10 +73,6 @@ function transferProgressPercent(bytesDone: number, bytesTotal: number | null): 
   return Math.min(100, Math.max(0, (bytesDone / bytesTotal) * 100));
 }
 
-function shouldShowTransferBytes(bytesDone: number, bytesTotal: number | null): boolean {
-  return bytesTotal !== null || bytesDone > 0;
-}
-
 interface CurrentActivityState {
   title: string;
   detail: string;
@@ -830,19 +826,9 @@ export function AccountSyncActivityPanel({
                               <p class="account-sync-terminal-line">
                                 <span class="account-sync-terminal-time">{new Date(item.when).toLocaleTimeString()}</span>
                                 <span class="account-sync-terminal-path">{item.path}</span>
-                              </p>
-                              <p class="account-sync-preview-meta">
-                                {isQueued ? (
-                                  <span>Queued for retry</span>
-                                ) : shouldShowTransferBytes(item.bytesDone ?? 0, item.bytesTotal) ? (
-                                  <span>
-                                    {formatBytes(item.bytesDone ?? 0)}
-                                    {item.bytesTotal ? ` / ${formatBytes(item.bytesTotal)}` : ""}
-                                  </span>
-                                ) : (
-                                  <span />
-                                )}
-                                <span>{item.bytesTotal ? formatBytes(item.bytesTotal) : "size unknown"}</span>
+                                <span class="account-sync-terminal-size">
+                                  {item.bytesTotal ? formatBytes(item.bytesTotal) : "size unknown"}
+                                </span>
                               </p>
                               {showLargeProgressBar && (
                                 <div class="sync-runtime-progress-track-compact">
@@ -881,10 +867,7 @@ export function AccountSyncActivityPanel({
                             <p class="account-sync-terminal-line">
                               <span class="account-sync-terminal-time">{new Date(item.when).toLocaleTimeString()}</span>
                               <span class="account-sync-terminal-path">{item.path}</span>
-                            </p>
-                            <p class="account-sync-preview-meta">
-                              <span>{formatBytes(item.bytesTotal)}</span>
-                              <span>done</span>
+                              <span class="account-sync-terminal-size">{formatBytes(item.bytesTotal)}</span>
                             </p>
                           </div>
                           {activityStatusChip(item.direction, "completed")}

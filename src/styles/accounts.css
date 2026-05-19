@@ -851,8 +851,9 @@
 
 .account-sync-terminal-line {
   margin: 0;
-  display: flex;
-  align-items: baseline;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
   gap: 8px;
   font-size: 0.71rem;
   line-height: 1.2;
@@ -869,6 +870,12 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.account-sync-terminal-size {
+  color: #5d728b;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .account-sync-status-chip {
