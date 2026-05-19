@@ -294,12 +294,23 @@ export function AccountSyncActivityPanel({
       id: transfer.id,
       direction: transfer.direction,
       path: transfer.path,
+      startedAt: transfer.startedAt,
       transferState: transfer.state ?? "in_progress",
       when: transfer.updatedAt,
       bytesDone: transfer.bytesDone,
       bytesTotal: transfer.bytesTotal,
     }))
-    .sort((left, right) => new Date(right.when).getTime() - new Date(left.when).getTime());
+    .sort((left, right) => {
+      const startedDelta = new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime();
+      if (startedDelta !== 0) {
+        return startedDelta;
+      }
+      const pathDelta = left.path.localeCompare(right.path);
+      if (pathDelta !== 0) {
+        return pathDelta;
+      }
+      return left.id.localeCompare(right.id);
+    });
 
   const visibleCompletedItems = [...recentCompleted]
     .sort((left, right) => new Date(right.finishedAt).getTime() - new Date(left.finishedAt).getTime())
