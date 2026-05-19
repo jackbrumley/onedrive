@@ -22,6 +22,17 @@ export function SettingsPage({
   onGoDebug,
   onBack,
 }: SettingsPageProps) {
+  const downloadConcurrencyMin = 8;
+  const downloadConcurrencyMax = 128;
+  const concurrencyProgress = Math.min(
+    1,
+    Math.max(
+      0,
+      (syncDownloadConcurrency - downloadConcurrencyMin) /
+        (downloadConcurrencyMax - downloadConcurrencyMin)
+    )
+  );
+
   return (
     <section class="page">
       <div class="page-chrome">
@@ -66,10 +77,13 @@ export function SettingsPage({
                 <input
                   id="download-concurrency-slider"
                   type="range"
-                  min={8}
-                  max={32}
+                  min={downloadConcurrencyMin}
+                  max={downloadConcurrencyMax}
                   step={1}
                   value={syncDownloadConcurrency}
+                  style={{
+                    "--settings-range-progress": String(concurrencyProgress),
+                  } as Record<string, string>}
                   onChange={(event) => {
                     const input = event.currentTarget as HTMLInputElement;
                     void onChangeSyncDownloadConcurrency(Number.parseInt(input.value, 10));
@@ -79,7 +93,7 @@ export function SettingsPage({
                   {syncDownloadConcurrency}
                 </output>
               </div>
-              <span class="settings-range-description">Range: 8 to 32. Changes apply to subsequent sync cycles.</span>
+              <span class="settings-range-description">Range: 8 to 128. Changes apply to subsequent sync cycles.</span>
             </label>
           </div>
         </article>

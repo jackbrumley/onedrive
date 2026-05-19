@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 const DEFAULT_DOWNLOAD_CONCURRENCY: usize = 12;
 const MIN_DOWNLOAD_CONCURRENCY: usize = 8;
-const MAX_DOWNLOAD_CONCURRENCY: usize = 32;
+const MAX_DOWNLOAD_CONCURRENCY: usize = 128;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
