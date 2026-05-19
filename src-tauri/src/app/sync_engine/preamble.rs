@@ -443,4 +443,147 @@ mod preamble_tests {
             }
         }
     }
+
+    #[test]
+    fn full_cycle_resume_claim_and_complete_across_all_lanes() {
+        let profile_id = test_profile_id("full-cycle-all-lanes");
+        clear_profile_rows(&profile_id);
+
+        insert_job_row(
+            &profile_id,
+            DOWNLOAD_JOB_DIRECTION,
+            "docs/download-running.txt",
+            DOWNLOAD_JOB_STATE_IN_PROGRESS,
+            JOB_RUN_STATE_RUNNING,
+            Some("lease-download"),
+        );
+        insert_job_row(
+            &profile_id,
+            UPLOAD_JOB_DIRECTION,
+            "docs/upload-claimed.txt",
+            DOWNLOAD_JOB_STATE_IN_PROGRESS,
+            JOB_RUN_STATE_CLAIMED,
+            Some("lease-upload"),
+        );
+        insert_job_row(
+            &profile_id,
+            DELETE_REMOTE_JOB_DIRECTION,
+            "docs/delete-remote-claimed.txt",
+            DOWNLOAD_JOB_STATE_IN_PROGRESS,
+            JOB_RUN_STATE_CLAIMED,
+            Some("lease-delete-remote"),
+        );
+        insert_job_row(
+            &profile_id,
+            DELETE_LOCAL_JOB_DIRECTION,
+            "docs/delete-local-running.txt",
+            DOWNLOAD_JOB_STATE_IN_PROGRESS,
+            JOB_RUN_STATE_RUNNING,
+            Some("lease-delete-local"),
+        );
+        insert_job_row(
+            &profile_id,
+            CONFLICT_JOB_DIRECTION,
+            "docs/conflict-running.txt",
+            DOWNLOAD_JOB_STATE_IN_PROGRESS,
+            JOB_RUN_STATE_RUNNING,
+            Some("lease-conflict"),
+        );
+
+        let drained = prepare_startup_sync_resume(&profile_id).expect("prepare startup sync resume");
+        assert_eq!(drained, 5);
+
+        let claimed_downloads =
+            claim_download_jobs(&profile_id, "cycle-all-lanes", 8).expect("claim download jobs");
+        assert_eq!(claimed_downloads.len(), 1);
+        mark_download_job_done(&profile_id, claimed_downloads[0].job_id, false)
+            .expect("complete claimed download");
+
+        let claimed_upload = claim_upload_job_path(&profile_id, "docs/upload-claimed.txt", "cycle-all-lanes")
+            .expect("claim upload path after resume");
+        assert!(claimed_upload);
+        let upload_job_id = begin_upload_job(
+            &profile_id,
+            "docs/upload-claimed.txt",
+            10,
+            10,
+            "cycle-all-lanes",
+        )
+        .expect("begin upload job after claim");
+        mark_upload_job_done(&profile_id, upload_job_id).expect("complete upload job");
+
+        let claimed_delete_remote = claim_action_job_paths(
+            &profile_id,
+            DELETE_REMOTE_JOB_DIRECTION,
+            "cycle-all-lanes",
+        )
+        .expect("claim delete_remote action jobs");
+        assert!(claimed_delete_remote.contains("docs/delete-remote-claimed.txt"));
+        mark_action_job_running(
+            &profile_id,
+            DELETE_REMOTE_JOB_DIRECTION,
+            "docs/delete-remote-claimed.txt",
+        )
+        .expect("mark delete_remote action running");
+        mark_action_job_done(
+            &profile_id,
+            DELETE_REMOTE_JOB_DIRECTION,
+            "docs/delete-remote-claimed.txt",
+        )
+        .expect("mark delete_remote action done");
+
+        let claimed_delete_local =
+            claim_action_job_paths(&profile_id, DELETE_LOCAL_JOB_DIRECTION, "cycle-all-lanes")
+                .expect("claim delete_local action jobs");
+        assert!(claimed_delete_local.contains("docs/delete-local-running.txt"));
+        mark_action_job_running(
+            &profile_id,
+            DELETE_LOCAL_JOB_DIRECTION,
+            "docs/delete-local-running.txt",
+        )
+        .expect("mark delete_local action running");
+        mark_action_job_done(
+            &profile_id,
+            DELETE_LOCAL_JOB_DIRECTION,
+            "docs/delete-local-running.txt",
+        )
+        .expect("mark delete_local action done");
+
+        let claimed_conflict =
+            claim_action_job_paths(&profile_id, CONFLICT_JOB_DIRECTION, "cycle-all-lanes")
+                .expect("claim conflict action jobs");
+        assert!(claimed_conflict.contains("docs/conflict-running.txt"));
+        mark_action_job_running(
+            &profile_id,
+            CONFLICT_JOB_DIRECTION,
+            "docs/conflict-running.txt",
+        )
+        .expect("mark conflict action running");
+        mark_action_job_done(&profile_id, CONFLICT_JOB_DIRECTION, "docs/conflict-running.txt")
+            .expect("mark conflict action done");
+
+        let download_counters =
+            read_download_job_counters(&profile_id).expect("read final download counters");
+        assert_eq!(download_counters.completed, 1);
+        assert_eq!(download_counters.remaining, 0);
+
+        let upload_counters = read_upload_job_counters(&profile_id).expect("read final upload counters");
+        assert_eq!(upload_counters.completed, 1);
+
+        assert!(
+            list_pending_action_job_paths(&profile_id, DELETE_REMOTE_JOB_DIRECTION)
+                .expect("list pending delete_remote actions")
+                .is_empty()
+        );
+        assert!(
+            list_pending_action_job_paths(&profile_id, DELETE_LOCAL_JOB_DIRECTION)
+                .expect("list pending delete_local actions")
+                .is_empty()
+        );
+        assert!(
+            list_pending_action_job_paths(&profile_id, CONFLICT_JOB_DIRECTION)
+                .expect("list pending conflict actions")
+                .is_empty()
+        );
+    }
 }
