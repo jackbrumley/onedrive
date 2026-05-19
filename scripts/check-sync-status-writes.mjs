@@ -23,12 +23,19 @@ const forbiddenLifecycleWritePattern = /persist_sync_lifecycle_(?:phase|activity
 const plannerAllowedFiles = new Set([
   path.join(appRoot, "sync_engine", "cycle_orchestrator.rs"),
   path.join(appRoot, "sync_engine", "remote_changes.rs"),
+  path.join(appRoot, "sync_engine", "remote_pipeline_loop.rs"),
   path.join(appRoot, "sync_engine", "planner.rs"),
   path.join(appRoot, "sync_engine", "planner_transitions.rs"),
   path.join(appRoot, "sync_engine", "job_materializer.rs"),
 ]);
 
 const forbiddenPlannerTransitionPattern = /(recompute_sync_file_actions\(|materialize_planner_actions\(|materialize_planner_download_jobs\()/g;
+
+const plannerWriteAllowedFiles = new Set([
+  path.join(appRoot, "sync_engine", "planner_transitions.rs"),
+]);
+
+const forbiddenPlannerWritePattern = /SET\s+desired_action\s*=|desired_action\s*=\s*CASE/g;
 
 async function collectRustFiles(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
@@ -104,6 +111,26 @@ async function main() {
   if (plannerViolations.length > 0) {
     console.error("Forbidden planner transition/materialization calls found outside orchestrator/planner owners:");
     for (const violation of plannerViolations) {
+      console.error(` - ${violation}`);
+    }
+    process.exit(1);
+  }
+
+  const plannerWriteViolations = [];
+  for (const rustFile of rustFiles) {
+    if (plannerWriteAllowedFiles.has(rustFile) || rustFile.endsWith("_tests.rs")) {
+      continue;
+    }
+    const content = await readFile(rustFile, "utf8");
+    const match = content.match(forbiddenPlannerWritePattern);
+    if (match && match.length > 0) {
+      plannerWriteViolations.push(path.relative(repoRoot, rustFile));
+    }
+  }
+
+  if (plannerWriteViolations.length > 0) {
+    console.error("Forbidden planner desired_action writes found outside planner transitions owner:");
+    for (const violation of plannerWriteViolations) {
       console.error(` - ${violation}`);
     }
     process.exit(1);

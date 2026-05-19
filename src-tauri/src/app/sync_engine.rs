@@ -11,6 +11,7 @@ include!("sync_engine/planner.rs");
 include!("sync_engine/cycle.rs");
 include!("sync_engine/cycle_orchestrator.rs");
 include!("sync_engine/remote_changes.rs");
+include!("sync_engine/remote_pipeline_loop.rs");
 include!("sync_engine/remote_delta_producer.rs");
 include!("sync_engine/remote_download_workers.rs");
 include!("sync_engine/remote_download_dispatcher.rs");

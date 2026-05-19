@@ -78,7 +78,7 @@ Legend:
 - `[x]` Legacy file fallback for sync state load removed (DB-backed state store only).
 - `[~]` Module decomposition advanced (`lifecycle_writer.rs`, `planner_index.rs`, `planner_transitions.rs`, `download_lane.rs`, `upload_lane.rs`, and `cycle_orchestrator.rs` extracted).
 - `[~]` Queue persistence decomposition advanced (`job_queue.rs` split into focused DB/lifecycle/download/upload/activity/issue-throttle store modules).
-- `[~]` Remote pipeline decomposition advanced (`remote_changes.rs` now delegates to extracted producer/worker/dispatcher/page-processor modules).
+- `[~]` Remote pipeline decomposition advanced (`remote_changes.rs` now delegates to extracted producer/worker/dispatcher/page-processor modules and shared loop owner module).
 - `[~]` Initial planner tests added (`planner_*` transition coverage).
 - `[x]` Roadmap document created in `temp/`.
 
@@ -118,7 +118,7 @@ Legend:
    - `[ ]` Validate bounded backpressure behavior after full materializer rollout.
    - `[ ]` Ensure watchdog uses durable counters correctly.
    - `[ ]` Verify deterministic lease recovery on both lanes.
-   - `[~]` Verify pause drain/resume leaves no orphan running jobs.
+    - `[~]` Verify pause drain/resume leaves no orphan running jobs (startup resume integration now covers mixed running/claimed rows + cache rebuild).
    - `[ ]` Audit retry lifecycle (`retry_wait`, terminal fail, retry-all) for both lanes.
 
 6. Determinism invariants and diagnostics
@@ -130,7 +130,7 @@ Legend:
    - `[x]` Planner transition tests (remote-only/local-only/overlap/conflict/shared refs/delete lanes covered).
    - `[x]` Materializer tests (idempotent + enqueue/prune durable coverage includes download/upload/delete/conflict action rows).
    - `[~]` Lifecycle writer invariant tests.
-   - `[~]` Pause/resume/restart determinism tests.
+    - `[~]` Pause/resume/restart determinism tests (added startup resume integration + retry-all terminal-failure requeue coverage; broader end-to-end flow matrix still pending).
    - `[ ]` Bootstrap gate tests (blocked -> retried -> two-way ready).
    - `[ ]` Integration scenarios for large-delete guard and conflict backup paths.
 

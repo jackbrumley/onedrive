@@ -152,3 +152,193 @@ pub fn get_large_delete_pending_paths(profile_id: &str) -> Result<Vec<String>, S
     let sync_state = load_sync_state(profile_id)?;
     Ok(sync_state.large_delete_pending_paths)
 }
+
+#[cfg(test)]
+mod preamble_tests {
+    use super::*;
+    use rusqlite::params;
+
+    fn test_profile_id(label: &str) -> String {
+        format!(
+            "preamble-test-{label}-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        )
+    }
+
+    fn clear_profile_rows(profile_id: &str) {
+        let connection = open_sync_jobs_connection(profile_id).expect("open sync jobs db");
+        connection
+            .execute("DELETE FROM sync_jobs WHERE profile_id = ?1", params![profile_id])
+            .expect("clear sync_jobs");
+        connection
+            .execute("DELETE FROM sync_files WHERE profile_id = ?1", params![profile_id])
+            .expect("clear sync_files");
+    }
+
+    fn insert_job_row(
+        profile_id: &str,
+        direction: &str,
+        item_id: &str,
+        state: &str,
+        run_state: &str,
+        lease_owner: Option<&str>,
+    ) {
+        let connection = open_sync_jobs_connection(profile_id).expect("open sync jobs db");
+        let now = current_unix_seconds();
+        connection
+            .execute(
+                "INSERT INTO sync_jobs (
+                    profile_id, direction, item_id, path, remote_size, remote_modified_ts,
+                    state, run_state, attempt_count, last_error, next_retry_at,
+                    lease_owner, lease_until, bytes_done, bytes_total, progress_updated_at,
+                    created_at, updated_at, started_at, finished_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?3, 1, 1,
+                    ?4, ?5, 1, NULL, NULL,
+                    ?6, ?7, 0, 1, ?8,
+                    ?8, ?8, ?8, NULL
+                )",
+                params![
+                    profile_id,
+                    direction,
+                    item_id,
+                    state,
+                    run_state,
+                    lease_owner,
+                    lease_owner.map(|_| now + 600),
+                    now,
+                ],
+            )
+            .expect("insert sync job row");
+    }
+
+    #[test]
+    fn prepare_startup_sync_resume_resets_running_jobs_and_rebuilds_caches() {
+        let profile_id = test_profile_id("startup-resume");
+        clear_profile_rows(&profile_id);
+
+        let connection = open_sync_jobs_connection(&profile_id).expect("open sync jobs db");
+        let now = current_unix_seconds();
+        connection
+            .execute(
+                "INSERT INTO sync_files (
+                    profile_id, path, is_dir, is_shared_reference,
+                    shared_drive_id, shared_item_id, shared_kind,
+                    remote_item_id, remote_present, local_present,
+                    remote_size, local_size, remote_modified_ts, local_modified_ts,
+                    desired_action, conflict_state, updated_at
+                ) VALUES (
+                    ?1, 'docs/resume.txt', 0, 0,
+                    NULL, NULL, NULL,
+                    'remote-resume', 1, 1,
+                    10, 10, 100, 100,
+                    'none', NULL, ?2
+                )",
+                params![&profile_id, now],
+            )
+            .expect("insert sync_files seed row");
+
+        let stale_state = PersistedSyncState {
+            remote_by_id: HashMap::from([(
+                "stale".to_string(),
+                RemoteKnownItem {
+                    id: "stale".to_string(),
+                    path: "stale/path.txt".to_string(),
+                    is_dir: false,
+                    size: 1,
+                    modified_ts: 1,
+                    is_shared_reference: false,
+                    shared_drive_id: None,
+                    shared_item_id: None,
+                    shared_kind: None,
+                },
+            )]),
+            remote_path_to_id: HashMap::from([("stale/path.txt".to_string(), "stale".to_string())]),
+            local_snapshot: HashMap::from([(
+                "stale/path.txt".to_string(),
+                LocalSnapshotEntry {
+                    is_dir: false,
+                    size: 1,
+                    modified_ts: 1,
+                },
+            )]),
+            ..PersistedSyncState::default()
+        };
+        save_sync_state(&profile_id, &stale_state).expect("write stale sync state");
+
+        insert_job_row(
+            &profile_id,
+            DOWNLOAD_JOB_DIRECTION,
+            "docs/dl-running.txt",
+            DOWNLOAD_JOB_STATE_IN_PROGRESS,
+            JOB_RUN_STATE_RUNNING,
+            Some("lease-dl"),
+        );
+        insert_job_row(
+            &profile_id,
+            UPLOAD_JOB_DIRECTION,
+            "docs/up-claimed.txt",
+            DOWNLOAD_JOB_STATE_IN_PROGRESS,
+            JOB_RUN_STATE_CLAIMED,
+            Some("lease-up"),
+        );
+        insert_job_row(
+            &profile_id,
+            DELETE_LOCAL_JOB_DIRECTION,
+            "docs/delete-local-claimed.txt",
+            DOWNLOAD_JOB_STATE_IN_PROGRESS,
+            JOB_RUN_STATE_CLAIMED,
+            Some("lease-action"),
+        );
+        insert_job_row(
+            &profile_id,
+            DOWNLOAD_JOB_DIRECTION,
+            "docs/retry-wait.txt",
+            DOWNLOAD_JOB_STATE_RETRY_WAIT,
+            JOB_RUN_STATE_IDLE,
+            None,
+        );
+
+        let drained = prepare_startup_sync_resume(&profile_id).expect("prepare startup sync resume");
+        assert_eq!(drained, 3);
+
+        let mut statement = connection
+            .prepare(
+                "SELECT item_id, state, run_state
+                 FROM sync_jobs
+                 WHERE profile_id = ?1
+                 ORDER BY item_id",
+            )
+            .expect("prepare read sync jobs state query");
+        let rows = statement
+            .query_map(params![&profile_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .expect("query sync job rows");
+        let collected: Vec<(String, String, String)> =
+            rows.map(|row| row.expect("read sync job row")).collect();
+
+        for (item_id, state, run_state) in collected {
+            if item_id == "docs/retry-wait.txt" {
+                assert_eq!(state, DOWNLOAD_JOB_STATE_RETRY_WAIT);
+                assert_eq!(run_state, JOB_RUN_STATE_IDLE);
+            } else {
+                assert_eq!(state, DOWNLOAD_JOB_STATE_QUEUED);
+                assert_eq!(run_state, JOB_RUN_STATE_IDLE);
+            }
+        }
+
+        let rebuilt = load_sync_state(&profile_id).expect("reload rebuilt state");
+        assert!(rebuilt.remote_by_id.contains_key("remote-resume"));
+        assert_eq!(
+            rebuilt.remote_path_to_id.get("docs/resume.txt"),
+            Some(&"remote-resume".to_string())
+        );
+        assert!(rebuilt.local_snapshot.contains_key("docs/resume.txt"));
+        assert!(!rebuilt.remote_by_id.contains_key("stale"));
+    }
+}
