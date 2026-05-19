@@ -127,7 +127,7 @@ Legend:
 
 7. Test matrix completion
    - `[x]` Planner transition tests (remote-only/local-only/overlap/conflict/shared refs/delete lanes covered).
-   - `[ ]` Materializer tests (idempotent enqueue/update behavior).
+   - `[~]` Materializer tests (idempotent planner materialization path coverage added; durable enqueue/update path tests pending).
    - `[~]` Lifecycle writer invariant tests.
    - `[ ]` Pause/resume/restart determinism tests.
    - `[ ]` Bootstrap gate tests (blocked -> retried -> two-way ready).
