@@ -337,7 +337,7 @@ async fn run_local_scan_with_runtime_updates(
         cycle_id,
         sync_root.display()
     );
-    runtime_set_local_scan_progress(sync_runtime, profile_id, 0, estimated_total, None);
+    runtime_set_local_scan_progress(sync_runtime, profile_id, 0, estimated_total, None, Some(cycle_id));
 
     loop {
         ensure_not_cancelled(cancel_flag)?;
@@ -358,6 +358,7 @@ async fn run_local_scan_with_runtime_updates(
                     local_snapshot.len(),
                     Some(local_snapshot.len()),
                     None,
+                    Some(cycle_id),
                 );
                 return Ok(local_snapshot);
             }
@@ -375,6 +376,7 @@ async fn run_local_scan_with_runtime_updates(
                         scanned,
                         estimated_total,
                         path.as_deref(),
+                        Some(cycle_id),
                     );
                     last_emit_at = std::time::Instant::now();
                 }
@@ -513,6 +515,7 @@ fn rebuild_sync_file_index(
         Some(total_entries),
         Some("entries"),
         Some("Indexing remote snapshot"),
+        Some(cycle_id),
     );
 
     for remote_item in sync_state.remote_by_id.values() {
@@ -542,6 +545,7 @@ fn rebuild_sync_file_index(
                 Some(total_entries),
                 Some("entries"),
                 Some("Indexing remote snapshot"),
+                Some(cycle_id),
             );
             log::info!(
                 "{} [cycle:{}] INDEX_PROGRESS phase=remote current={} total={}",
@@ -563,6 +567,7 @@ fn rebuild_sync_file_index(
         Some(total_entries),
         Some("entries"),
         Some("Indexing local snapshot"),
+        Some(cycle_id),
     );
 
     for (path, local_entry) in local_snapshot {
@@ -587,6 +592,7 @@ fn rebuild_sync_file_index(
                 Some(total_entries),
                 Some("entries"),
                 Some("Indexing local snapshot"),
+                Some(cycle_id),
             );
             log::info!(
                 "{} [cycle:{}] INDEX_PROGRESS phase=local current={} total={}",
@@ -615,6 +621,7 @@ fn rebuild_sync_file_index(
         Some(total_entries),
         Some("entries"),
         Some("Index rebuild complete"),
+        Some(cycle_id),
     );
 
     Ok(())

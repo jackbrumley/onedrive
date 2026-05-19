@@ -105,6 +105,7 @@ struct SyncLifecycleStateRow {
     activity_total: Option<usize>,
     activity_unit: Option<String>,
     activity_detail: Option<String>,
+    activity_cycle_id: Option<String>,
     activity_updated_at: i64,
     agent_state: String,
     last_sync_at: Option<String>,
@@ -128,6 +129,7 @@ impl Default for SyncLifecycleStateRow {
             activity_total: None,
             activity_unit: None,
             activity_detail: Some("Idle".to_string()),
+            activity_cycle_id: None,
             activity_updated_at: 0,
             agent_state: "idle".to_string(),
             last_sync_at: None,
@@ -257,6 +259,7 @@ fn open_sync_jobs_connection(profile_id: &str) -> Result<Connection, String> {
                  activity_total INTEGER,
                  activity_unit TEXT,
                  activity_detail TEXT,
+                 activity_cycle_id TEXT,
                  activity_updated_at INTEGER NOT NULL DEFAULT 0,
                  agent_state TEXT NOT NULL DEFAULT 'idle',
                  last_sync_at TEXT,
@@ -412,12 +415,31 @@ fn run_sync_jobs_migrations(connection: &Connection) -> Result<(), String> {
         )?;
         add_sync_lifecycle_column_if_missing(
             connection,
+            "activity_cycle_id",
+            "ALTER TABLE sync_lifecycle_state ADD COLUMN activity_cycle_id TEXT",
+        )?;
+        add_sync_lifecycle_column_if_missing(
+            connection,
             "activity_updated_at",
             "ALTER TABLE sync_lifecycle_state ADD COLUMN activity_updated_at INTEGER NOT NULL DEFAULT 0",
         )?;
         connection
             .execute_batch("PRAGMA user_version = 4;")
             .map_err(|error| format!("Failed applying sync_jobs schema migration v4: {error}"))?;
+    }
+
+    let current_version = connection
+        .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+        .map_err(|error| format!("Failed re-reading sync_jobs schema version: {error}"))?;
+    if current_version < 5 {
+        add_sync_lifecycle_column_if_missing(
+            connection,
+            "activity_cycle_id",
+            "ALTER TABLE sync_lifecycle_state ADD COLUMN activity_cycle_id TEXT",
+        )?;
+        connection
+            .execute_batch("PRAGMA user_version = 5;")
+            .map_err(|error| format!("Failed applying sync_jobs schema migration v5: {error}"))?;
     }
 
     Ok(())
@@ -454,13 +476,14 @@ fn upsert_sync_lifecycle_row(
                  activity_progress_mode,
                  activity_current,
                  activity_total,
-                 activity_unit,
-                 activity_detail,
-                 activity_updated_at,
-                 agent_state,
-                 last_sync_at,
-                 updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+                activity_unit,
+                activity_detail,
+                activity_cycle_id,
+                activity_updated_at,
+                agent_state,
+                last_sync_at,
+                updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
              ON CONFLICT(profile_id)
              DO UPDATE SET
                  two_way_ready = excluded.two_way_ready,
@@ -478,6 +501,7 @@ fn upsert_sync_lifecycle_row(
                  activity_total = excluded.activity_total,
                  activity_unit = excluded.activity_unit,
                  activity_detail = excluded.activity_detail,
+                 activity_cycle_id = excluded.activity_cycle_id,
                  activity_updated_at = excluded.activity_updated_at,
                  agent_state = excluded.agent_state,
                  last_sync_at = excluded.last_sync_at,
@@ -499,6 +523,7 @@ fn upsert_sync_lifecycle_row(
                 row.activity_total.map(|value| value as i64),
                 row.activity_unit,
                 row.activity_detail,
+                row.activity_cycle_id,
                 row.activity_updated_at,
                 row.agent_state,
                 row.last_sync_at,
@@ -528,6 +553,7 @@ fn read_sync_lifecycle_row(profile_id: &str) -> Result<Option<SyncLifecycleState
                     activity_total,
                     activity_unit,
                     activity_detail,
+                    activity_cycle_id,
                     activity_updated_at,
                     agent_state,
                     last_sync_at
@@ -551,9 +577,10 @@ fn read_sync_lifecycle_row(profile_id: &str) -> Result<Option<SyncLifecycleState
                     activity_total: row.get::<_, Option<i64>>(12)?.map(|value| value.max(0) as usize),
                     activity_unit: row.get(13)?,
                     activity_detail: row.get(14)?,
-                    activity_updated_at: row.get(15)?,
-                    agent_state: row.get(16)?,
-                    last_sync_at: row.get(17)?,
+                    activity_cycle_id: row.get(15)?,
+                    activity_updated_at: row.get(16)?,
+                    agent_state: row.get(17)?,
+                    last_sync_at: row.get(18)?,
                 })
             },
         )
@@ -605,6 +632,7 @@ fn persist_sync_lifecycle_phase(profile_id: &str, phase: &str, phase_message: &s
     row.activity_total = None;
     row.activity_unit = None;
     row.activity_detail = Some(phase_message.to_string());
+    row.activity_cycle_id = None;
     row.activity_updated_at = current_unix_seconds();
     upsert_sync_lifecycle_row(profile_id, &row)
 }
@@ -623,6 +651,7 @@ fn persist_sync_lifecycle_activity(
     total: Option<usize>,
     unit: Option<&str>,
     detail: Option<&str>,
+    cycle_id: Option<&str>,
 ) -> Result<(), String> {
     let mut row = read_sync_lifecycle_row(profile_id)?.unwrap_or_default();
     row.activity_stage = stage.to_string();
@@ -631,6 +660,7 @@ fn persist_sync_lifecycle_activity(
     row.activity_total = total;
     row.activity_unit = unit.map(ToString::to_string);
     row.activity_detail = detail.map(ToString::to_string);
+    row.activity_cycle_id = cycle_id.map(ToString::to_string);
     row.activity_updated_at = current_unix_seconds();
     upsert_sync_lifecycle_row(profile_id, &row)
 }
@@ -2091,6 +2121,8 @@ pub fn hydrate_runtime_status_from_db(
     status.current_activity.total = lifecycle.activity_total;
     status.current_activity.unit = lifecycle.activity_unit;
     status.current_activity.detail = lifecycle.activity_detail;
+    status.current_activity.cycle_id = lifecycle.activity_cycle_id;
+    status.current_activity.updated_at = unix_seconds_to_rfc3339(lifecycle.activity_updated_at);
     if status.current_activity.stage == "scanning_local" {
         let scanned_count = status.current_activity.current.ok_or_else(|| {
             format!(

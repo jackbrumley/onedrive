@@ -58,6 +58,8 @@ pub struct SyncRuntimeCurrentActivity {
     pub total: Option<usize>,
     pub unit: Option<String>,
     pub detail: Option<String>,
+    pub cycle_id: Option<String>,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -180,6 +182,8 @@ impl SyncRuntimeAccountStatus {
                 total: None,
                 unit: None,
                 detail: Some("Idle".to_string()),
+                cycle_id: None,
+                updated_at: now.clone(),
             },
             updated_at: now,
             remote_session_discovered_ids: HashSet::new(),
@@ -271,6 +275,7 @@ pub fn set_phase(
     phase: &str,
     phase_message: &str,
 ) {
+    let now = now_rfc3339();
     let status = ensure_account_status(runtime_map, profile_id);
     status.phase = phase.to_string();
     status.phase_message = phase_message.to_string();
@@ -283,12 +288,14 @@ pub fn set_phase(
     status.current_activity.total = None;
     status.current_activity.unit = None;
     status.current_activity.detail = Some(phase_message.to_string());
+    status.current_activity.cycle_id = None;
+    status.current_activity.updated_at = now.clone();
     if phase != "scanning_local" {
         status.local_scan_scanned_count = 0;
         status.local_scan_estimated_total = None;
         status.local_scan_current_path = None;
     }
-    status.updated_at = now_rfc3339();
+    status.updated_at = now;
     bump_runtime_revision();
     emit_status_event_for_account(runtime_map, profile_id);
 }
@@ -299,7 +306,9 @@ pub fn set_local_scan_progress(
     scanned_count: usize,
     estimated_total: Option<usize>,
     current_path: Option<&str>,
+    cycle_id: Option<&str>,
 ) {
+    let now = now_rfc3339();
     let status = ensure_account_status(runtime_map, profile_id);
     status.local_scan_scanned_count = scanned_count;
     status.local_scan_estimated_total = estimated_total;
@@ -314,7 +323,9 @@ pub fn set_local_scan_progress(
     status.current_activity.total = estimated_total;
     status.current_activity.unit = Some("files".to_string());
     status.current_activity.detail = status.local_scan_current_path.clone();
-    status.updated_at = now_rfc3339();
+    status.current_activity.cycle_id = cycle_id.map(ToString::to_string);
+    status.current_activity.updated_at = now.clone();
+    status.updated_at = now;
     bump_runtime_revision();
     emit_status_event_for_account(runtime_map, profile_id);
 }
@@ -328,7 +339,9 @@ pub fn set_current_activity(
     total: Option<usize>,
     unit: Option<&str>,
     detail: Option<&str>,
+    cycle_id: Option<&str>,
 ) {
+    let now = now_rfc3339();
     let status = ensure_account_status(runtime_map, profile_id);
     status.current_activity.stage = stage.to_string();
     status.current_activity.progress_mode = progress_mode.to_string();
@@ -336,7 +349,9 @@ pub fn set_current_activity(
     status.current_activity.total = total;
     status.current_activity.unit = unit.map(ToString::to_string);
     status.current_activity.detail = detail.map(ToString::to_string);
-    status.updated_at = now_rfc3339();
+    status.current_activity.cycle_id = cycle_id.map(ToString::to_string);
+    status.current_activity.updated_at = now.clone();
+    status.updated_at = now;
     bump_runtime_revision();
     emit_status_event_for_account(runtime_map, profile_id);
 }

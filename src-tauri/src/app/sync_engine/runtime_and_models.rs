@@ -466,6 +466,7 @@ fn runtime_set_local_scan_progress(
     scanned_count: usize,
     estimated_total: Option<usize>,
     current_path: Option<&str>,
+    cycle_id: Option<&str>,
 ) {
     if let Ok(mut runtime_map) = runtime.lock() {
         sync_runtime::set_local_scan_progress(
@@ -474,6 +475,7 @@ fn runtime_set_local_scan_progress(
             scanned_count,
             estimated_total,
             current_path,
+            cycle_id,
         );
     }
     if let Err(error) = persist_sync_lifecycle_activity(
@@ -488,6 +490,7 @@ fn runtime_set_local_scan_progress(
         estimated_total,
         Some("files"),
         current_path,
+        cycle_id,
     ) {
         log::warn!(
             "{} SYNC_LIFECYCLE_ACTIVITY_PERSIST_FAILED stage=scanning_local error={}",
@@ -506,6 +509,7 @@ fn runtime_set_current_activity(
     total: Option<usize>,
     unit: Option<&str>,
     detail: Option<&str>,
+    cycle_id: Option<&str>,
 ) {
     if let Ok(mut runtime_map) = runtime.lock() {
         sync_runtime::set_current_activity(
@@ -517,6 +521,7 @@ fn runtime_set_current_activity(
             total,
             unit,
             detail,
+            cycle_id,
         );
     }
     if let Err(error) = persist_sync_lifecycle_activity(
@@ -527,6 +532,7 @@ fn runtime_set_current_activity(
         total,
         unit,
         detail,
+        cycle_id,
     ) {
         log::warn!(
             "{} SYNC_LIFECYCLE_ACTIVITY_PERSIST_FAILED stage={} error={}",

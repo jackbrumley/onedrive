@@ -35,6 +35,7 @@ async fn apply_local_changes(
         Some(total_local_paths),
         Some("paths"),
         Some("Evaluating local changes"),
+        Some(&graph.cycle_id),
     );
     for path in local_paths {
         ensure_not_cancelled(cancel_flag)?;
@@ -50,6 +51,7 @@ async fn apply_local_changes(
                 Some(total_local_paths),
                 Some("paths"),
                 Some("Evaluating local changes"),
+                Some(&graph.cycle_id),
             );
             last_activity_emit_at = std::time::Instant::now();
         }
@@ -353,6 +355,7 @@ async fn apply_local_changes(
         Some(total_deleted_paths),
         Some("paths"),
         Some("Reconciling remote deletions"),
+        Some(&graph.cycle_id),
     );
 
     for deleted_path in deleted_paths {
@@ -369,6 +372,7 @@ async fn apply_local_changes(
                 Some(total_deleted_paths),
                 Some("paths"),
                 Some("Reconciling remote deletions"),
+                Some(&graph.cycle_id),
             );
             last_activity_emit_at = std::time::Instant::now();
         }
@@ -430,6 +434,7 @@ async fn reconcile_bootstrap_local_snapshot(
         Some(total_remote_items),
         Some("items"),
         Some("Preparing two-way sync baseline"),
+        Some(&graph.cycle_id),
     );
 
     for remote_item in remote_items {
@@ -445,6 +450,7 @@ async fn reconcile_bootstrap_local_snapshot(
                 Some(total_remote_items),
                 Some("items"),
                 Some("Preparing two-way sync baseline"),
+                Some(&graph.cycle_id),
             );
             last_activity_emit_at = std::time::Instant::now();
         }

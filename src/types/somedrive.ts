@@ -104,6 +104,8 @@ export interface SyncRuntimeCurrentActivity {
   total?: number | null;
   unit?: string | null;
   detail?: string | null;
+  cycleId?: string | null;
+  updatedAt?: string;
 }
 
 export interface SyncRuntimeAccountStatus {
