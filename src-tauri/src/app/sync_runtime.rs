@@ -1,4 +1,5 @@
 use chrono::Local;
+use crate::app::sync_engine::build_authoritative_runtime_status;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -707,9 +708,33 @@ fn emit_status_event_for_account(
         last_emit_map.insert(profile_id.to_string(), chrono::Utc::now().timestamp_millis());
     }
     if let Some(status) = runtime_map.get(profile_id) {
-        let mut normalized = status.clone();
-        recompute_authority_fields(&mut normalized);
-        emit_upsert_status_event(profile_id, &normalized);
+        match build_authoritative_runtime_status(profile_id, status.auth_ready) {
+            Ok(authoritative) => emit_upsert_status_event(profile_id, &authoritative),
+            Err(error) => {
+                log::warn!(
+                    "{} SYNC_STATUS_CANONICAL_PROJECTION_FAILED error={}",
+                    profile_id,
+                    error
+                );
+                let mut degraded = status.clone();
+                recompute_authority_fields(&mut degraded);
+                if degraded.consistency.ok {
+                    degraded.consistency.ok = false;
+                }
+                if !degraded
+                    .consistency
+                    .violations
+                    .iter()
+                    .any(|entry| entry == "canonical_projection_failed")
+                {
+                    degraded
+                        .consistency
+                        .violations
+                        .push("canonical_projection_failed".to_string());
+                }
+                emit_upsert_status_event(profile_id, &degraded);
+            }
+        }
     }
 }
 
