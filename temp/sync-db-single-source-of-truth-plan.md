@@ -117,7 +117,7 @@ Legend:
    - `[ ]` Validate bounded backpressure behavior after full materializer rollout.
    - `[ ]` Ensure watchdog uses durable counters correctly.
    - `[ ]` Verify deterministic lease recovery on both lanes.
-   - `[ ]` Verify pause drain/resume leaves no orphan running jobs.
+   - `[~]` Verify pause drain/resume leaves no orphan running jobs.
    - `[ ]` Audit retry lifecycle (`retry_wait`, terminal fail, retry-all) for both lanes.
 
 6. Determinism invariants and diagnostics
@@ -129,7 +129,7 @@ Legend:
    - `[x]` Planner transition tests (remote-only/local-only/overlap/conflict/shared refs/delete lanes covered).
    - `[~]` Materializer tests (idempotent planner materialization path coverage added; durable enqueue/update path tests pending).
    - `[~]` Lifecycle writer invariant tests.
-   - `[ ]` Pause/resume/restart determinism tests.
+   - `[~]` Pause/resume/restart determinism tests.
    - `[ ]` Bootstrap gate tests (blocked -> retried -> two-way ready).
    - `[ ]` Integration scenarios for large-delete guard and conflict backup paths.
 

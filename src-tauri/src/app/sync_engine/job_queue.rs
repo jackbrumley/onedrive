@@ -2336,3 +2336,132 @@ fn unix_seconds_to_rfc3339(value: i64) -> String {
         .map(|instant| instant.to_rfc3339())
         .unwrap_or_else(|| Local::now().to_rfc3339())
 }
+
+#[cfg(test)]
+mod job_queue_tests {
+    use super::*;
+
+    fn test_profile_id(label: &str) -> String {
+        format!(
+            "job-queue-test-{label}-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        )
+    }
+
+    fn clear_profile_rows(profile_id: &str) {
+        let connection = open_sync_jobs_connection(profile_id).expect("open sync jobs db");
+        connection
+            .execute("DELETE FROM sync_jobs WHERE profile_id = ?1", params![profile_id])
+            .expect("clear sync_jobs");
+        connection
+            .execute("DELETE FROM sync_files WHERE profile_id = ?1", params![profile_id])
+            .expect("clear sync_files");
+        connection
+            .execute(
+                "DELETE FROM sync_lifecycle_state WHERE profile_id = ?1",
+                params![profile_id],
+            )
+            .expect("clear sync_lifecycle_state");
+    }
+
+    fn insert_running_job(profile_id: &str, direction: &str, item_id: &str, path: &str) {
+        let connection = open_sync_jobs_connection(profile_id).expect("open sync jobs db");
+        let now = current_unix_seconds();
+        connection
+            .execute(
+                "INSERT INTO sync_jobs (
+                    profile_id, direction, item_id, path, remote_size, remote_modified_ts,
+                    state, run_state, attempt_count, last_error, next_retry_at,
+                    lease_owner, lease_until, bytes_done, bytes_total, progress_updated_at,
+                    created_at, updated_at, started_at, finished_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, 1, 1,
+                    'in_progress', 'running', 1, NULL, NULL,
+                    'test-lease', ?5, 0, 1, ?5,
+                    ?5, ?5, ?5, NULL
+                )",
+                params![profile_id, direction, item_id, path, now],
+            )
+            .expect("insert running sync job");
+    }
+
+    #[test]
+    fn reset_running_jobs_for_pause_requeues_all_directions() {
+        let profile_id = test_profile_id("pause-reset");
+        clear_profile_rows(&profile_id);
+        insert_running_job(&profile_id, DOWNLOAD_JOB_DIRECTION, "dl-1", "download.txt");
+        insert_running_job(&profile_id, UPLOAD_JOB_DIRECTION, "up-1", "upload.txt");
+
+        let reset_count = reset_running_sync_jobs_for_pause(&profile_id).expect("reset running jobs");
+        assert_eq!(reset_count, 2);
+
+        let connection = open_sync_jobs_connection(&profile_id).expect("open sync jobs db");
+        let mut statement = connection
+            .prepare(
+                "SELECT direction, state, run_state
+                 FROM sync_jobs
+                 WHERE profile_id = ?1
+                 ORDER BY direction ASC",
+            )
+            .expect("prepare job state query");
+        let rows = statement
+            .query_map(params![&profile_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .expect("query job state rows");
+
+        let collected: Vec<(String, String, String)> = rows
+            .map(|row| row.expect("read job state row"))
+            .collect();
+        assert_eq!(collected.len(), 2);
+        for (_direction, state, run_state) in collected {
+            assert_eq!(state, DOWNLOAD_JOB_STATE_QUEUED);
+            assert_eq!(run_state, JOB_RUN_STATE_IDLE);
+        }
+    }
+
+    #[test]
+    fn read_sync_authority_row_counts_reports_table_counts() {
+        let profile_id = test_profile_id("row-counts");
+        clear_profile_rows(&profile_id);
+
+        let connection = open_sync_jobs_connection(&profile_id).expect("open sync jobs db");
+        let now = current_unix_seconds();
+        connection
+            .execute(
+                "INSERT INTO sync_files (
+                    profile_id, path, is_dir, is_shared_reference,
+                    remote_item_id, remote_present, local_present,
+                    remote_size, local_size, remote_modified_ts, local_modified_ts,
+                    desired_action, conflict_state, updated_at
+                ) VALUES (
+                    ?1, 'file.txt', 0, 0,
+                    'remote-id', 1, 1,
+                    10, 10, 10, 10,
+                    'none', NULL, ?2
+                )",
+                params![&profile_id, now],
+            )
+            .expect("insert sync_files row");
+        connection
+            .execute(
+                "INSERT INTO sync_jobs (
+                    profile_id, direction, item_id, path, remote_size, remote_modified_ts,
+                    state, run_state, attempt_count, created_at, updated_at
+                ) VALUES (?1, 'download', 'job-id', 'file.txt', 10, 10, 'queued', 'idle', 0, ?2, ?2)",
+                params![&profile_id, now],
+            )
+            .expect("insert sync_jobs row");
+        persist_sync_lifecycle_phase(&profile_id, "idle", "Idle").expect("persist lifecycle row");
+
+        let (lifecycle_rows, planner_rows, job_rows) =
+            read_sync_authority_row_counts(&profile_id).expect("read authority row counts");
+        assert_eq!(lifecycle_rows, 1);
+        assert_eq!(planner_rows, 1);
+        assert_eq!(job_rows, 1);
+    }
+}
