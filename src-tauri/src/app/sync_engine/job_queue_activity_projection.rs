@@ -225,8 +225,11 @@ fn read_sync_job_activity_projection(
 pub fn hydrate_runtime_status_from_db(
     status: &mut sync_runtime::SyncRuntimeAccountStatus,
 ) -> Result<(), String> {
+    const ACTIVE_ACTIVITY_LIMIT: usize = 512;
+    const RECENT_ACTIVITY_LIMIT: usize = 120;
     let profile_id = status.profile_id.clone();
-    let projection = read_sync_job_activity_projection(&profile_id, 64, 120)?;
+    let projection =
+        read_sync_job_activity_projection(&profile_id, ACTIVE_ACTIVITY_LIMIT, RECENT_ACTIVITY_LIMIT)?;
     let planner_counters = read_sync_file_planner_counters(&profile_id)?;
     let download_counters = read_download_job_counters(&profile_id)?;
     let upload_counters = read_upload_job_counters(&profile_id)?;

@@ -720,6 +720,19 @@
   gap: 0;
 }
 
+.account-sync-preview-list-terminal {
+  gap: 2px;
+}
+
+.account-sync-preview-list-terminal .account-sync-preview-item-button {
+  padding: 4px 6px;
+}
+
+.account-sync-preview-list-terminal .account-sync-preview-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: flex-start;
+}
+
 .account-sync-preview-activity-scroll {
   margin-top: 8px;
 }
@@ -834,6 +847,47 @@
   gap: 8px;
   font-size: 0.7rem;
   color: #5d728b;
+}
+
+.account-sync-terminal-line {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.71rem;
+  line-height: 1.2;
+}
+
+.account-sync-terminal-time {
+  flex: 0 0 auto;
+  color: #5f748c;
+  font-variant-numeric: tabular-nums;
+}
+
+.account-sync-terminal-state {
+  flex: 0 0 auto;
+  width: 8.2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.account-sync-terminal-state.is-downloading {
+  color: #2f6fab;
+}
+
+.account-sync-terminal-state.is-queued {
+  color: #9a6f36;
+}
+
+.account-sync-terminal-state.is-completed {
+  color: #1d9d57;
+}
+
+.account-sync-terminal-path {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sync-runtime-progress-track-compact {

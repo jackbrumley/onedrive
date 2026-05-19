@@ -156,6 +156,7 @@ function extensionFromPath(path: string): string {
 
 const FILE_TYPE_ICON_SIZE = 34;
 const ACTIVITY_ICON_SIZE = 24;
+const LARGE_FILE_PROGRESS_THRESHOLD_BYTES = 1_048_576;
 
 function iconForFilePath(path: string) {
   const extension = extensionFromPath(path);
@@ -292,38 +293,28 @@ export function AccountSyncActivityPanel({
 
   const metricText = (value: number | string): string => (runtimeUnavailable ? "null" : String(value));
 
-  const items = [
-    ...visibleInProgress.map((transfer) => ({
+  const activeItems = [...visibleInProgress]
+    .map((transfer) => ({
       id: transfer.id,
-      kind: "active" as const,
       direction: transfer.direction,
       path: transfer.path,
       transferState: transfer.state ?? "in_progress",
       when: transfer.updatedAt,
       bytesDone: transfer.bytesDone,
       bytesTotal: transfer.bytesTotal,
-      error: null,
-    })),
-    ...recentCompleted.map((item) => ({
+    }))
+    .sort((left, right) => new Date(right.when).getTime() - new Date(left.when).getTime());
+
+  const visibleCompletedItems = [...recentCompleted]
+    .sort((left, right) => new Date(right.finishedAt).getTime() - new Date(left.finishedAt).getTime())
+    .slice(0, 64)
+    .map((item) => ({
       id: item.id,
-      kind: "completed" as const,
       direction: item.direction,
       path: item.path,
-      transferState: null,
       when: item.finishedAt,
-      bytesDone: item.bytesTotal,
       bytesTotal: item.bytesTotal,
-      error: null,
-    })),
-  ].sort((left, right) => {
-    if (left.kind === "active" && right.kind !== "active") {
-      return -1;
-    }
-    if (right.kind === "active" && left.kind !== "active") {
-      return 1;
-    }
-    return new Date(right.when).getTime() - new Date(left.when).getTime();
-  });
+    }));
 
   const iconForDirection = (direction: string, className = "") => {
     const normalized = direction.toLowerCase();
@@ -767,84 +758,118 @@ export function AccountSyncActivityPanel({
         </section>
       )}
       <div class="account-sync-preview-activity-scroll">
-        {items.length > 0 && <p class="account-sync-preview-section-label">Activity</p>}
-        {items.length === 0 ? (
+        {(activeItems.length > 0 || visibleCompletedItems.length > 0) && (
+          <p class="account-sync-preview-section-label">Activity</p>
+        )}
+        {activeItems.length === 0 && visibleCompletedItems.length === 0 ? (
           <p class="account-sync-preview-empty">No sync activity yet.</p>
         ) : (
-          <div class="account-sync-preview-list">
-            {items.map((item) => {
-              const isActive = item.kind === "active";
-              const isQueued = isActive && item.transferState === "queued";
-              const showActiveAnimation = isActive && !runtimeTelemetryStale;
-              const progressPercent =
-                isActive && !isQueued ? transferProgressPercent(item.bytesDone ?? 0, item.bytesTotal) : null;
-              return (
-                <article key={item.id} class="account-sync-preview-item">
-                  <button
-                    type="button"
-                    class="account-sync-preview-item-button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void onOpenItemFolder(item.path);
-                    }}
-                  >
-                    <div class="account-sync-preview-row">
-                      <span class="account-sync-preview-file-icon">
-                        {iconForFilePath(item.path)}
-                      </span>
-                      <div class="account-sync-preview-content">
-                        <p class="account-sync-preview-path">{item.path}</p>
-                        <p class="account-sync-preview-meta">
-                          {item.kind === "active" ? (
-                            isQueued ? (
-                              <span>Queued for retry</span>
-                            ) : shouldShowTransferBytes(item.bytesDone ?? 0, item.bytesTotal) ? (
-                              <span>
-                                {formatBytes(item.bytesDone ?? 0)}
-                                {item.bytesTotal ? ` / ${formatBytes(item.bytesTotal)}` : ""}
-                              </span>
-                            ) : (
-                              <span />
-                            )
-                          ) : (
-                            <span>{formatBytes(item.bytesTotal)}</span>
-                          )}
-                          <span>{new Date(item.when).toLocaleTimeString()}</span>
-                        </p>
-                        {showActiveAnimation && (
-                          <div class="sync-runtime-progress-track-compact">
-                            <div
-                              class={
-                                progressPercent === null
-                                  ? "sync-runtime-progress-fill-compact sync-runtime-progress-fill-compact-indeterminate"
-                                  : "sync-runtime-progress-fill-compact"
-                              }
-                              style={progressPercent === null ? { width: "34%" } : { width: `${progressPercent.toFixed(1)}%` }}
-                            />
+          <>
+            {activeItems.length > 0 && (
+              <>
+                <p class="account-sync-preview-section-label">Active now ({activeItems.length})</p>
+                <div class="account-sync-preview-list account-sync-preview-list-terminal">
+                  {activeItems.map((item) => {
+                    const isQueued = item.transferState === "queued";
+                    const progressPercent =
+                      !isQueued ? transferProgressPercent(item.bytesDone ?? 0, item.bytesTotal) : null;
+                    const isLargeTransfer =
+                      (item.bytesTotal ?? 0) >= LARGE_FILE_PROGRESS_THRESHOLD_BYTES ||
+                      (item.bytesDone ?? 0) >= LARGE_FILE_PROGRESS_THRESHOLD_BYTES;
+                    const showLargeProgressBar =
+                      isLargeTransfer && !isQueued && !runtimeTelemetryStale && progressPercent !== null;
+                    return (
+                      <article key={item.id} class="account-sync-preview-item">
+                        <button
+                          type="button"
+                          class="account-sync-preview-item-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void onOpenItemFolder(item.path);
+                          }}
+                        >
+                          <div class="account-sync-preview-row">
+                            <div class="account-sync-preview-content">
+                              <p class="account-sync-terminal-line">
+                                <span class="account-sync-terminal-time">{new Date(item.when).toLocaleTimeString()}</span>
+                                <span class={`account-sync-terminal-state ${isQueued ? "is-queued" : "is-downloading"}`}>
+                                  {isQueued ? "... queued" : "v downloading"}
+                                </span>
+                                <span class="account-sync-terminal-path">{item.path}</span>
+                              </p>
+                              <p class="account-sync-preview-meta">
+                                {isQueued ? (
+                                  <span>Queued for retry</span>
+                                ) : shouldShowTransferBytes(item.bytesDone ?? 0, item.bytesTotal) ? (
+                                  <span>
+                                    {formatBytes(item.bytesDone ?? 0)}
+                                    {item.bytesTotal ? ` / ${formatBytes(item.bytesTotal)}` : ""}
+                                  </span>
+                                ) : (
+                                  <span />
+                                )}
+                                <span>{item.bytesTotal ? formatBytes(item.bytesTotal) : "size unknown"}</span>
+                              </p>
+                              {showLargeProgressBar && (
+                                <div class="sync-runtime-progress-track-compact">
+                                  <div
+                                    class="sync-runtime-progress-fill-compact"
+                                    style={{ width: `${progressPercent.toFixed(1)}%` }}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                            <span class="account-sync-preview-right-icons">
+                              <span class="account-sync-preview-status-icon">{iconForDirection(item.direction)}</span>
+                            </span>
                           </div>
-                        )}
-                      </div>
-                      <span class="account-sync-preview-right-icons">
-                        <span class="account-sync-preview-direction-icon">
-                          {iconForDirection(item.direction)}
-                        </span>
-                        <span class="account-sync-preview-status-icon">
-                          {item.kind === "active" ? (
-                            <IconRefresh
-                              size={ACTIVITY_ICON_SIZE}
-                              class={showActiveAnimation ? "sync-preview-icon-active" : ""}
-                            />
-                          ) : (
-                            <IconCircleCheckFilled size={ACTIVITY_ICON_SIZE} class="sync-preview-icon-success" />
-                          )}
-                        </span>
-                      </span>
-                    </div>
-                  </button>
-                </article>
-              );
-            })}
-          </div>
+                        </button>
+                      </article>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+            {visibleCompletedItems.length > 0 && (
+              <>
+                <p class="account-sync-preview-section-label">Recently completed ({visibleCompletedItems.length})</p>
+                <div class="account-sync-preview-list account-sync-preview-list-terminal">
+                  {visibleCompletedItems.map((item) => (
+                    <article key={item.id} class="account-sync-preview-item">
+                      <button
+                        type="button"
+                        class="account-sync-preview-item-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void onOpenItemFolder(item.path);
+                        }}
+                      >
+                        <div class="account-sync-preview-row">
+                          <div class="account-sync-preview-content">
+                            <p class="account-sync-terminal-line">
+                              <span class="account-sync-terminal-time">{new Date(item.when).toLocaleTimeString()}</span>
+                              <span class="account-sync-terminal-state is-completed">✓ completed</span>
+                              <span class="account-sync-terminal-path">{item.path}</span>
+                            </p>
+                            <p class="account-sync-preview-meta">
+                              <span>{formatBytes(item.bytesTotal)}</span>
+                              <span>done</span>
+                            </p>
+                          </div>
+                          <span class="account-sync-preview-right-icons">
+                            <span class="account-sync-preview-direction-icon">{iconForDirection(item.direction)}</span>
+                            <span class="account-sync-preview-status-icon">
+                              <IconCircleCheckFilled size={ACTIVITY_ICON_SIZE} class="sync-preview-icon-success" />
+                            </span>
+                          </span>
+                        </div>
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
         )}
       </div>
     </div>
