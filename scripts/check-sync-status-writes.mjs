@@ -22,11 +22,8 @@ const lifecycleAllowedFiles = new Set([
 const forbiddenLifecycleWritePattern = /(persist_sync_lifecycle_(?:phase|activity|remote_scan_complete)\(|persist_sync_issue\(|clear_persisted_sync_issue\()/g;
 
 const operationalLifecycleAllowedFiles = new Set([
+  path.join(appRoot, "sync_engine", "lifecycle_writer.rs"),
   path.join(appRoot, "sync_engine", "job_queue_lifecycle_store.rs"),
-  path.join(appRoot, "sync_engine", "preamble.rs"),
-  path.join(appRoot, "sync_engine", "remote_changes.rs"),
-  path.join(appRoot, "sync_engine", "remote_pipeline_loop.rs"),
-  path.join(appRoot, "sync_engine", "cycle_orchestrator.rs"),
 ]);
 
 const forbiddenOperationalLifecycleWritePattern = /persist_sync_lifecycle_operational_state\(/g;

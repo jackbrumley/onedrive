@@ -525,3 +525,19 @@ async fn create_upload_session(
         return Ok(session.upload_url);
     }
 }
+
+#[cfg(test)]
+mod upload_lane_tests {
+    use super::*;
+
+    #[test]
+    fn resolve_upload_retry_delay_is_exponential_and_capped() {
+        assert_eq!(resolve_upload_retry_delay(1), Duration::from_secs(1));
+        assert_eq!(resolve_upload_retry_delay(2), Duration::from_secs(2));
+        assert_eq!(resolve_upload_retry_delay(3), Duration::from_secs(4));
+        assert_eq!(resolve_upload_retry_delay(4), Duration::from_secs(8));
+
+        let capped = resolve_upload_retry_delay(32);
+        assert_eq!(capped, Duration::from_secs(MAX_RETRY_DELAY_SECONDS));
+    }
+}

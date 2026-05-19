@@ -43,7 +43,7 @@ async fn fetch_and_apply_delta_changes(
                 );
             }
             lifecycle_state.bootstrap_scan_initialized = true;
-            persist_sync_lifecycle_operational_state(&graph.profile_id, &lifecycle_state)?;
+            persist_lifecycle_operational_state(&graph.profile_id, &lifecycle_state)?;
             format!("{GRAPH_ROOT}/me/drive/root/delta")
         }
     } else {
@@ -149,7 +149,7 @@ async fn fetch_and_apply_delta_changes(
         lifecycle_state.bootstrap_full_scan_completed = true;
         lifecycle_state.bootstrap_scan_initialized = true;
     }
-    persist_sync_lifecycle_operational_state(&graph.profile_id, &lifecycle_state)?;
+    persist_lifecycle_operational_state(&graph.profile_id, &lifecycle_state)?;
     save_sync_state(&graph.profile_id, sync_state)?;
     let _ = sync_download_counters_from_db(graph)?;
     runtime_set_remote_scan_complete(&graph.sync_runtime, &graph.profile_id, true);

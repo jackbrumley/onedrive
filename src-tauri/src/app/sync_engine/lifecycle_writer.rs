@@ -213,6 +213,13 @@ fn runtime_set_remote_scan_complete(
     }
 }
 
+fn persist_lifecycle_operational_state(
+    profile_id: &str,
+    state: &SyncLifecycleOperationalState,
+) -> Result<(), String> {
+    persist_sync_lifecycle_operational_state(profile_id, state)
+}
+
 fn runtime_record_remote_discovered(
     runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>,
     profile_id: &str,

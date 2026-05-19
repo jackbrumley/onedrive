@@ -242,7 +242,7 @@ async fn run_remote_pipeline_loop(
 
                 if let Some(next_link) = page_payload.next_link {
                     lifecycle_state.active_delta_next_link = Some(next_link);
-                    persist_sync_lifecycle_operational_state(&graph.profile_id, lifecycle_state)?;
+                    persist_lifecycle_operational_state(&graph.profile_id, lifecycle_state)?;
                 } else {
                     deferred_delta_link = page_payload.delta_link;
                     producer_done = true;

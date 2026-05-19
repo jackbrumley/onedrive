@@ -271,7 +271,7 @@ async fn tick_sync_cycle(
             )
             .await?;
             lifecycle_state.two_way_ready = true;
-            persist_sync_lifecycle_operational_state(profile_id, &lifecycle_state)?;
+            persist_lifecycle_operational_state(profile_id, &lifecycle_state)?;
         } else {
             let blocked_message = if download_counters.failed_terminal > 0 {
                 format!(
@@ -318,7 +318,7 @@ async fn tick_sync_cycle(
         sync_state.local_snapshot = collect_local_snapshot(&sync_root)?;
     }
     lifecycle_state.last_cycle_at = Some(chrono::Local::now().to_rfc3339());
-    persist_sync_lifecycle_operational_state(profile_id, &lifecycle_state)?;
+    persist_lifecycle_operational_state(profile_id, &lifecycle_state)?;
     save_sync_state(profile_id, &sync_state)?;
 
     update_profile_last_sync(profiles_lock, profile_id)?;

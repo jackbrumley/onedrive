@@ -72,7 +72,7 @@ Legend:
 
 1. `[~]` Single-writer lifecycle contract closure
    - Owner modules: `src-tauri/src/app/sync_engine/lifecycle_writer.rs`, `src-tauri/src/app/sync_engine/job_queue_activity_projection.rs`, `src-tauri/src/app/sync_engine/job_queue_lifecycle_store.rs`, `src-tauri/src/app/sync_engine/job_queue_issue_throttle_store.rs`.
-   - Verify all phase/activity/issue writes route through canonical writer APIs only.
+   - Verify all phase/activity/issue writes route through canonical writer APIs only (operational lifecycle state writes now routed through `lifecycle_writer` wrapper and guard-enforced).
    - Ensure activity payload writes always include deterministic contract fields (`stage`, `progress_mode`, `updated_at`, `cycle_id`, current/total/unit/detail when applicable) and reject invalid write combinations at persist time.
    - Verification: `cargo test -- sync_engine::tests::lifecycle*` and targeted grep/guard checks.
 
@@ -103,14 +103,14 @@ Legend:
     - Keep `PersistedSyncState` as transport/cache only where unavoidable during final cutover.
     - Verification: guard script + targeted sync restart tests.
 
-3. `[ ]` Module/structure closeout
+3. `[x]` Module/structure closeout
    - Owner modules: `src-tauri/src/app/sync_engine/remote_changes.rs`, `src-tauri/src/app/sync_engine/remote_pipeline_loop.rs`.
-   - Finish remaining decomposition trims to keep one-owner responsibilities crisp.
+   - Remaining decomposition trims reviewed complete: remote pipeline files stay below file-size limits and retain focused owner boundaries (orchestration vs loop processing).
    - Verification: file-size/ownership review + `cargo check`.
 
-4. `[ ]` Final acceptance and documentation closeout
+4. `[x]` Final acceptance and documentation closeout
    - Run full validation: `cargo check`, `cargo test`, `npm run typecheck`, sync guard scripts.
-   - Update architecture docs and this tracker with final ownership model and completion markers.
+   - Update architecture docs and this tracker with final ownership model and completion markers (tracker now reflects lifecycle writer ownership, DB guard-state authority, and durable retry scheduling authority).
 
 ### Done (Completed)
 
@@ -135,12 +135,15 @@ Legend:
 - `[x]` Planned upload execution no longer depends on cache-derived remote timestamps; planner-selected upload paths execute directly after claim/cooldown checks.
 - `[x]` Large-delete guard pending/approval state migrated from JSON cache to lifecycle DB authority (`large_delete_guard_approved`, `large_delete_pending_paths_json`) with commands and runtime flow using lifecycle store accessors.
 - `[x]` Upload retry cooldown behavior migrated off JSON maps to durable upload job retry scheduling (`retry_wait` + `next_retry_at`) with attempt-based backoff and terminal failure thresholding.
+- `[x]` Remote module structure closeout verified (`remote_changes.rs` and `remote_pipeline_loop.rs` remain responsibility-scoped and within file size constraints).
+- `[x]` Operational lifecycle state writes now route through lifecycle writer wrapper (`persist_lifecycle_operational_state`) with guard script ownership tightened.
+- `[x]` Upload retry delay policy now has dedicated deterministic unit coverage (`upload_lane_tests::resolve_upload_retry_delay_is_exponential_and_capped`).
 
 ### Definition of Fully Done (Close Criteria)
 
 - `[x]` No flow-critical sync decision depends on JSON/in-memory mirrors (delete gating, upload retry gating, and large-delete approval now DB-authoritative).
 - `[x]` Planner actions materialize to jobs for all relevant action types.
-- `[~]` One lifecycle writer path is fully enforced by guardrails and invariants (phase/activity/scan-complete/issue persist entry points guarded; continue auditing operational-state writes and remaining legacy call sites).
+- `[x]` One lifecycle writer path is fully enforced by guardrails and invariants (phase/activity/scan-complete/issue + operational-state persist entry points guarded).
 - `[~]` Restart/pause/resume/retry deterministic from DB state (broad coverage added; remaining matrix gaps tracked above).
 - `[x]` `cargo check`, `cargo test`, `npm run typecheck`, and sync guard scripts all pass (current branch snapshot).
 

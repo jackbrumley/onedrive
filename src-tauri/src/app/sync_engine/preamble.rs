@@ -136,7 +136,7 @@ pub fn keep_cloud_files_after_large_delete(
     lifecycle_state.bootstrap_full_scan_completed = false;
     lifecycle_state.delta_link = None;
     lifecycle_state.active_delta_next_link = None;
-    persist_sync_lifecycle_operational_state(profile_id, &lifecycle_state)?;
+    persist_lifecycle_operational_state(profile_id, &lifecycle_state)?;
 
     runtime_clear_issue(&state.sync_runtime, profile_id);
     runtime_set_phase(
