@@ -23,7 +23,7 @@ export function SettingsPage({
   onBack,
 }: SettingsPageProps) {
   const downloadConcurrencyMin = 8;
-  const downloadConcurrencyMax = 128;
+  const downloadConcurrencyMax = 256;
   const concurrencyProgress = Math.min(
     1,
     Math.max(
@@ -93,7 +93,7 @@ export function SettingsPage({
                   {syncDownloadConcurrency}
                 </output>
               </div>
-              <span class="settings-range-description">Range: 8 to 128. Changes apply to subsequent sync cycles.</span>
+              <span class="settings-range-description">Range: 8 to 256. Changes apply to subsequent sync cycles.</span>
             </label>
           </div>
         </article>
