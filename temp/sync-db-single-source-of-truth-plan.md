@@ -91,7 +91,7 @@ Legend:
 2. Make planner the only action authority
    - `[ ]` Finalize explicit planner action set (`download`, `upload`, `delete_remote`, `delete_local`, `conflict`, `none`).
    - `[ ]` Centralize all transition rules in one planner transitions owner.
-   - `[ ]` Implement full job materialization from planner output to `sync_jobs`.
+   - `[~]` Implement full job materialization from planner output to `sync_jobs` (summary materializer added; download/upload enqueue full convergence still pending).
    - `[ ]` Ensure materialization is idempotent across repeated cycles.
    - `[ ]` Remove remaining direct apply-path decision branches that bypass planner.
    - `[ ]` Route delete and conflict execution through planner/materializer flow.
@@ -100,7 +100,7 @@ Legend:
    - `[x]` Extract lifecycle writer into `lifecycle_writer.rs`.
    - `[x]` Extract sync_files DB primitives into `planner_index.rs`.
    - `[x]` Extract transition rules into `planner_transitions.rs`.
-   - `[ ]` Extract action enqueue/update to `job_materializer.rs`.
+   - `[~]` Extract action enqueue/update to `job_materializer.rs`.
    - `[ ]` Extract remote lane mechanics to `download_lane.rs`.
    - `[ ]` Extract upload lane mechanics to `upload_lane.rs`.
    - `[ ]` Keep cycle orchestration thin in `cycle_orchestrator.rs`.

@@ -143,7 +143,7 @@ async fn tick_sync_cycle(
             sync_state.two_way_ready
         );
         let planner_counters = recompute_sync_file_actions(profile_id, sync_state.two_way_ready)?;
-        let materialized_jobs = read_materialized_job_counts(profile_id).unwrap_or((0, 0));
+        let materialized = materialize_planner_actions(profile_id, &account_prefix, &cycle_id)?;
         log::info!(
             "{} [cycle:{}] STAGE_COMPLETE stage=planner duration_ms={} need_download={} need_upload={} conflicts={}",
             account_prefix,
@@ -170,16 +170,25 @@ async fn tick_sync_cycle(
             planner_counters.need_delete_local_total,
             planner_counters.conflict_total,
             planner_counters.shared_reference_total,
-            materialized_jobs.0,
-            materialized_jobs.1,
+            materialized.active_download_jobs,
+            materialized.active_upload_jobs,
         );
-        if planner_counters.need_download_total > 0 && materialized_jobs.0 == 0 {
+        if planner_counters.need_download_total > 0 && materialized.active_download_jobs == 0 {
             log::warn!(
                 "{} [cycle:{}] PLANNER_DOWNLOAD_MATERIALIZATION_GAP need_download={} active_download_jobs={}",
                 account_prefix,
                 cycle_id,
                 planner_counters.need_download_total,
-                materialized_jobs.0,
+                materialized.active_download_jobs,
+            );
+        }
+        if planner_counters.need_upload_total != materialized.upload_paths.len() {
+            log::warn!(
+                "{} [cycle:{}] PLANNER_UPLOAD_MATERIALIZATION_GAP need_upload={} upload_paths={}",
+                account_prefix,
+                cycle_id,
+                planner_counters.need_upload_total,
+                materialized.upload_paths.len(),
             );
         }
         stats.local_items_seen = local_snapshot.len();
@@ -201,7 +210,7 @@ async fn tick_sync_cycle(
             &sync_root,
             &local_snapshot,
             &remote_applied_paths,
-            planner_counters.need_upload_total,
+            &materialized.upload_paths,
             &mut sync_state,
             &mut stats,
             cancel_flag,

@@ -3,7 +3,7 @@ async fn apply_local_changes(
     sync_root: &Path,
     current_local_snapshot: &HashMap<String, LocalSnapshotEntry>,
     remote_applied_paths: &std::collections::HashSet<String>,
-    expected_planned_upload_total: usize,
+    planned_upload_paths: &std::collections::HashSet<String>,
     sync_state: &mut PersistedSyncState,
     stats: &mut SyncCycleStats,
     cancel_flag: &Arc<AtomicBool>,
@@ -17,19 +17,6 @@ async fn apply_local_changes(
         "applying_local",
         "Applying local changes",
     );
-    let planned_upload_paths: std::collections::HashSet<String> =
-        list_sync_file_paths_by_desired_action(&graph.profile_id, "upload")?
-            .into_iter()
-            .collect();
-    if planned_upload_paths.len() != expected_planned_upload_total {
-        log::warn!(
-            "{} [cycle:{}] PLANNER_UPLOAD_INVARIANT_MISMATCH planner_need_upload={} materialized_upload_paths={}",
-            graph.account_prefix,
-            graph.cycle_id,
-            expected_planned_upload_total,
-            planned_upload_paths.len()
-        );
-    }
     let mut local_paths: Vec<String> = current_local_snapshot.keys().cloned().collect();
     local_paths.sort_by_key(|path| path.matches('/').count());
     let total_local_paths = local_paths.len();
