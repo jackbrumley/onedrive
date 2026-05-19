@@ -16,6 +16,10 @@ async fn apply_local_changes(
         "applying_local",
         "Applying local changes",
     );
+    let planned_upload_paths: std::collections::HashSet<String> =
+        list_sync_file_paths_by_desired_action(&graph.profile_id, "upload")?
+            .into_iter()
+            .collect();
     let mut local_paths: Vec<String> = current_local_snapshot.keys().cloned().collect();
     local_paths.sort_by_key(|path| path.matches('/').count());
     let total_local_paths = local_paths.len();
@@ -69,8 +73,6 @@ async fn apply_local_changes(
         let Some(local_entry) = current_local_snapshot.get(&path) else {
             continue;
         };
-        let previous_local = sync_state.local_snapshot.get(&path);
-        let local_changed = has_local_changed(local_entry, previous_local);
         let remote_id = sync_state.remote_path_to_id.get(&path).cloned();
 
         if local_entry.is_dir {
@@ -89,7 +91,7 @@ async fn apply_local_changes(
             continue;
         }
 
-        if !local_changed {
+        if !planned_upload_paths.contains(&path) {
             continue;
         }
 

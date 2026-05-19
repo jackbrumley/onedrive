@@ -2398,3 +2398,32 @@ fn read_sync_file_planner_counters(profile_id: &str) -> Result<SyncFilePlannerCo
 
     Ok(counters)
 }
+
+fn list_sync_file_paths_by_desired_action(
+    profile_id: &str,
+    desired_action: &str,
+) -> Result<Vec<String>, String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let mut statement = connection
+        .prepare(
+            "SELECT path
+             FROM sync_files
+             WHERE profile_id = ?1
+               AND desired_action = ?2
+               AND is_dir = 0
+               AND is_shared_reference = 0
+               AND local_present = 1
+             ORDER BY path ASC",
+        )
+        .map_err(|error| format!("Failed preparing sync file action path query: {error}"))?;
+
+    let rows = statement
+        .query_map(params![profile_id, desired_action], |row| row.get::<_, String>(0))
+        .map_err(|error| format!("Failed querying sync file action paths: {error}"))?;
+
+    let mut paths: Vec<String> = Vec::new();
+    for row in rows {
+        paths.push(row.map_err(|error| format!("Failed reading sync file action path: {error}"))?);
+    }
+    Ok(paths)
+}
