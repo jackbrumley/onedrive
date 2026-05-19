@@ -76,8 +76,8 @@ Legend:
 - `[~]` Initial planner/execution invariant logging added (planner vs active job inventory now logged).
 - `[~]` Planner delete action derivation now uses retained index presence (`delete_remote`, `delete_local` states derived).
 - `[x]` Legacy file fallback for sync state load removed (DB-backed state store only).
-- `[~]` Module decomposition advanced (`lifecycle_writer.rs` extracted; major queue/lane splits still pending).
-- `[~]` Module decomposition advanced (`lifecycle_writer.rs`, `planner_index.rs`, and `planner_transitions.rs` extracted).
+- `[~]` Module decomposition advanced (`lifecycle_writer.rs`, `planner_index.rs`, `planner_transitions.rs`, `download_lane.rs`, `upload_lane.rs`, and `cycle_orchestrator.rs` extracted).
+- `[~]` Queue persistence decomposition advanced (`job_queue.rs` split into focused DB/lifecycle/download/upload/activity/issue-throttle store modules).
 - `[~]` Initial planner tests added (`planner_*` transition coverage).
 - `[x]` Roadmap document created in `temp/`.
 
@@ -87,7 +87,7 @@ Legend:
    - `[x]` Move `delta_link` and `active_delta_next_link` to DB-only authority.
    - `[x]` Move two-way/bootstrap gate authority to DB-only paths.
    - `[x]` Remove flow-critical planning reads from `PersistedSyncState`.
-   - `[~]` Ensure restart reconstruction reads lifecycle/planner/jobs only.
+- `[x]` Ensure restart reconstruction reads lifecycle/planner/jobs only (startup now rebuilds persisted cache maps from `sync_files` authority).
 
 2. Make planner the only action authority
    - `[x]` Finalize explicit planner action set (`download`, `upload`, `delete_remote`, `delete_local`, `conflict`, `none`).
@@ -102,13 +102,13 @@ Legend:
    - `[x]` Extract sync_files DB primitives into `planner_index.rs`.
    - `[x]` Extract transition rules into `planner_transitions.rs`.
    - `[~]` Extract action enqueue/update to `job_materializer.rs`.
-   - `[ ]` Extract remote lane mechanics to `download_lane.rs`.
-   - `[ ]` Extract upload lane mechanics to `upload_lane.rs`.
-   - `[ ]` Keep cycle orchestration thin in `cycle_orchestrator.rs`.
-   - `[ ]` Reduce oversized files (`job_queue.rs`, `remote_changes.rs`) below target scope.
+    - `[x]` Extract remote lane mechanics to `download_lane.rs`.
+    - `[x]` Extract upload lane mechanics to `upload_lane.rs`.
+    - `[x]` Keep cycle orchestration thin in `cycle_orchestrator.rs`.
+    - `[~]` Reduce oversized files (`job_queue.rs`, `remote_changes.rs`) below target scope (`job_queue.rs` split into focused stores; continue reducing `remote_changes.rs` as follow-up).
 
 4. Enforce single writer contract
-   - `[ ]` Extend guard scripts to block unauthorized lifecycle/planner side writes.
+    - `[~]` Extend guard scripts to block unauthorized lifecycle/planner side writes (lifecycle direct-write guard added for phase/activity/scan-complete entry points).
    - `[ ]` Verify all phase/activity/issue writes route through one writer API.
    - `[~]` Add hard invariant checks for illegal lifecycle combinations.
    - `[ ]` Ensure all activity writes carry deterministic contract fields.
@@ -121,7 +121,7 @@ Legend:
    - `[ ]` Audit retry lifecycle (`retry_wait`, terminal fail, retry-all) for both lanes.
 
 6. Determinism invariants and diagnostics
-   - `[~]` Add planner-vs-jobs reconciliation checks by action/direction.
+    - `[~]` Add planner-vs-jobs reconciliation checks by action/direction.
    - `[ ]` Add lifecycle-vs-runtime payload consistency checks.
    - `[x]` Add startup DB consistency summary logs for lifecycle/planner/jobs.
 
@@ -144,7 +144,7 @@ Legend:
 - `[ ]` No flow-critical sync decision depends on JSON/in-memory mirrors.
 - `[x]` Planner actions materialize to jobs for all relevant action types.
 - `[ ]` One lifecycle writer path is enforced by guardrails.
-- `[ ]` Restart/pause/resume/retry deterministic from DB state.
+- `[~]` Restart/pause/resume/retry deterministic from DB state (startup cache reconstruction now rebuilt from DB authorities; full retry matrix still pending).
 - `[ ]` `cargo check`, `cargo test`, `npm run typecheck`, and sync guard scripts all pass.
 
 ## Phase 0: Guardrails and Instrumentation Baseline

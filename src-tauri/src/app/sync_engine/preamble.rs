@@ -89,6 +89,7 @@ pub fn on_agent_state_changed(
 
 pub fn prepare_startup_sync_resume(profile_id: &str) -> Result<usize, String> {
     let cleared_jobs = reset_running_sync_jobs_for_pause(profile_id)?;
+    rebuild_sync_state_from_db(profile_id)?;
     if cleared_jobs > 0 {
         log::info!(
             "{} STARTUP_SYNC_PREP_DRAINED running_jobs_cleared={}",

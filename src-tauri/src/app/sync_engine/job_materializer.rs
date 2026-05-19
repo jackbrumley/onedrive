@@ -348,6 +348,26 @@ mod job_materializer_tests {
             .expect("insert conflict candidate");
     }
 
+    fn insert_delete_local_candidate(profile_id: &str, path: &str, remote_item_id: &str) {
+        let connection = open_sync_jobs_connection(profile_id).expect("open sync jobs db");
+        connection
+            .execute(
+                "INSERT INTO sync_files (
+                    profile_id, path, is_dir, is_shared_reference,
+                    remote_item_id, remote_present, local_present,
+                    remote_size, local_size, remote_modified_ts, local_modified_ts,
+                    desired_action, conflict_state, updated_at
+                ) VALUES (
+                    ?1, ?2, 0, 0,
+                    ?3, 0, 1,
+                    0, 1, 0, 100,
+                    'none', NULL, ?4
+                )",
+                params![profile_id, path, remote_item_id, current_unix_seconds()],
+            )
+            .expect("insert delete local candidate");
+    }
+
     #[test]
     fn materialize_planner_actions_is_idempotent_for_upload_paths() {
         let profile_id = test_profile_id("idempotent");
@@ -512,5 +532,53 @@ mod job_materializer_tests {
         assert_eq!(stale_upload, 0);
         assert_eq!(stale_delete_remote, 0);
         assert_eq!(stale_conflict, 0);
+    }
+
+    #[test]
+    fn materialize_planner_actions_is_idempotent_for_all_action_lanes() {
+        let profile_id = test_profile_id("idempotent-all-actions");
+        clear_profile_rows(&profile_id);
+        insert_upload_candidate(&profile_id, "docs/upload-idempotent.txt");
+        insert_download_candidate(&profile_id, "remote-download-idempotent", "docs/download-idempotent.txt");
+        insert_delete_remote_candidate(
+            &profile_id,
+            "docs/delete-remote-idempotent.txt",
+            "remote-delete-idempotent",
+        );
+        insert_delete_local_candidate(
+            &profile_id,
+            "docs/delete-local-idempotent.txt",
+            "remote-delete-local-idempotent",
+        );
+        insert_conflict_candidate(
+            &profile_id,
+            "docs/conflict-idempotent.txt",
+            "remote-conflict-idempotent",
+        );
+
+        recompute_sync_file_actions(&profile_id, true).expect("recompute planner actions");
+        let first = materialize_planner_actions(&profile_id, "[test]", "cycle-idempotent-a")
+            .expect("first materialize");
+        let second = materialize_planner_actions(&profile_id, "[test]", "cycle-idempotent-b")
+            .expect("second materialize");
+
+        assert_eq!(first.desired_download_paths, second.desired_download_paths);
+        assert_eq!(first.desired_upload_paths, second.desired_upload_paths);
+        assert_eq!(first.desired_delete_remote_paths, second.desired_delete_remote_paths);
+        assert_eq!(first.desired_delete_local_paths, second.desired_delete_local_paths);
+        assert_eq!(first.desired_conflict_paths, second.desired_conflict_paths);
+
+        let connection = open_sync_jobs_connection(&profile_id).expect("open sync jobs db");
+        let active_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(1)
+                 FROM sync_jobs
+                 WHERE profile_id = ?1
+                   AND state IN ('queued', 'in_progress', 'retry_wait')",
+                params![&profile_id],
+                |row| row.get(0),
+            )
+            .expect("count active jobs");
+        assert_eq!(active_count, 5);
     }
 }
