@@ -125,7 +125,7 @@ Legend:
    - `[x]` Add startup DB consistency summary logs for lifecycle/planner/jobs.
 
 7. Test matrix completion
-   - `[~]` Planner transition tests (remote-only/local-only/overlap/conflict covered; shared refs pending).
+   - `[~]` Planner transition tests (remote-only/local-only/overlap/conflict/shared refs covered; additional delete lanes still pending).
    - `[ ]` Materializer tests (idempotent enqueue/update behavior).
    - `[ ]` Lifecycle writer invariant tests.
    - `[ ]` Pause/resume/restart determinism tests.

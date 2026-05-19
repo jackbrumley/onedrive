@@ -60,6 +60,18 @@ mod tests {
             .expect("insert sync_files row");
     }
 
+    fn set_shared_reference(profile_id: &str, path: &str) {
+        let connection = open_sync_jobs_connection(profile_id).expect("open sync jobs db");
+        connection
+            .execute(
+                "UPDATE sync_files
+                 SET is_shared_reference = 1
+                 WHERE profile_id = ?1 AND path = ?2",
+                params![profile_id, path],
+            )
+            .expect("mark shared reference");
+    }
+
     #[test]
     fn planner_derives_download_upload_and_conflict_actions() {
         let profile_id = test_profile_id("actions");
@@ -204,5 +216,39 @@ mod tests {
         let (downloads, uploads) = read_materialized_job_counts(&profile_id).expect("read job counts");
         assert_eq!(downloads, 1);
         assert_eq!(uploads, 1);
+    }
+
+    #[test]
+    fn planner_excludes_shared_references_from_actions() {
+        let profile_id = test_profile_id("shared-ref");
+        clear_profile_rows(&profile_id);
+
+        insert_sync_file_row(
+            &profile_id,
+            "shared-item.txt",
+            true,
+            true,
+            200,
+            100,
+            10,
+            10,
+            Some("shared-id"),
+        );
+        set_shared_reference(&profile_id, "shared-item.txt");
+
+        let counters = recompute_sync_file_actions(&profile_id, true).expect("recompute planner actions");
+        assert_eq!(counters.need_download_total, 0);
+        assert_eq!(counters.need_upload_total, 0);
+        assert_eq!(counters.shared_reference_total, 1);
+
+        let connection = open_sync_jobs_connection(&profile_id).expect("open sync jobs db");
+        let action: String = connection
+            .query_row(
+                "SELECT desired_action FROM sync_files WHERE profile_id = ?1 AND path = ?2",
+                params![&profile_id, "shared-item.txt"],
+                |row| row.get(0),
+            )
+            .expect("read desired action");
+        assert_eq!(action, "none");
     }
 }
