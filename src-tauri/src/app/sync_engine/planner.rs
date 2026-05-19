@@ -251,4 +251,51 @@ mod tests {
             .expect("read desired action");
         assert_eq!(action, "none");
     }
+
+    #[test]
+    fn planner_derives_delete_actions_from_previous_presence() {
+        let profile_id = test_profile_id("delete-actions");
+        clear_profile_rows(&profile_id);
+
+        insert_sync_file_row(
+            &profile_id,
+            "local-deleted.txt",
+            true,
+            false,
+            200,
+            150,
+            10,
+            10,
+            Some("local-deleted-id"),
+        );
+        insert_sync_file_row(
+            &profile_id,
+            "remote-deleted.txt",
+            false,
+            true,
+            150,
+            200,
+            10,
+            10,
+            Some("remote-deleted-id"),
+        );
+
+        let counters = recompute_sync_file_actions(&profile_id, true).expect("recompute planner actions");
+        assert_eq!(counters.need_delete_remote_total, 1);
+        assert_eq!(counters.need_delete_local_total, 1);
+
+        let connection = open_sync_jobs_connection(&profile_id).expect("open sync jobs db");
+        let action_for_path = |path: &str| -> String {
+            connection
+                .query_row(
+                    "SELECT desired_action FROM sync_files WHERE profile_id = ?1 AND path = ?2",
+                    params![&profile_id, path],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("read desired action")
+        };
+
+        assert_eq!(action_for_path("local-deleted.txt"), "delete_remote");
+        assert_eq!(action_for_path("remote-deleted.txt"), "delete_local");
+    }
 }

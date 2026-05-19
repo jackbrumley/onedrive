@@ -232,12 +232,8 @@ async fn apply_local_changes(
         }
     }
 
-    let mut deleted_paths: Vec<String> = sync_state
-        .local_snapshot
-        .keys()
-        .filter(|path| !current_local_snapshot.contains_key(*path))
-        .cloned()
-        .collect();
+    let mut deleted_paths: Vec<String> =
+        list_sync_file_paths_by_desired_action(&graph.profile_id, PLANNER_ACTION_DELETE_REMOTE)?;
 
     if sync_state.large_delete_guard_approved && !sync_state.large_delete_pending_paths.is_empty() {
         deleted_paths = sync_state.large_delete_pending_paths.clone();

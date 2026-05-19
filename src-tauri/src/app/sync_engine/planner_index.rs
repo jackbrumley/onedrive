@@ -101,7 +101,6 @@ fn list_sync_file_paths_by_desired_action(
                AND desired_action = ?2
                AND is_dir = 0
                AND is_shared_reference = 0
-               AND local_present = 1
              ORDER BY path ASC",
         )
         .map_err(|error| format!("Failed preparing sync file action path query: {error}"))?;

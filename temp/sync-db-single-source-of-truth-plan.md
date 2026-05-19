@@ -89,12 +89,12 @@ Legend:
    - `[ ]` Ensure restart reconstruction reads lifecycle/planner/jobs only.
 
 2. Make planner the only action authority
-   - `[ ]` Finalize explicit planner action set (`download`, `upload`, `delete_remote`, `delete_local`, `conflict`, `none`).
-   - `[ ]` Centralize all transition rules in one planner transitions owner.
+   - `[x]` Finalize explicit planner action set (`download`, `upload`, `delete_remote`, `delete_local`, `conflict`, `none`).
+   - `[x]` Centralize all transition rules in one planner transitions owner.
    - `[~]` Implement full job materialization from planner output to `sync_jobs` (summary materializer added; download/upload enqueue full convergence still pending).
-   - `[ ]` Ensure materialization is idempotent across repeated cycles.
+   - `[~]` Ensure materialization is idempotent across repeated cycles.
    - `[ ]` Remove remaining direct apply-path decision branches that bypass planner.
-   - `[ ]` Route delete and conflict execution through planner/materializer flow.
+   - `[~]` Route delete and conflict execution through planner/materializer flow.
 
 3. Complete module ownership decomposition
    - `[x]` Extract lifecycle writer into `lifecycle_writer.rs`.
@@ -125,7 +125,7 @@ Legend:
    - `[x]` Add startup DB consistency summary logs for lifecycle/planner/jobs.
 
 7. Test matrix completion
-   - `[~]` Planner transition tests (remote-only/local-only/overlap/conflict/shared refs covered; additional delete lanes still pending).
+   - `[x]` Planner transition tests (remote-only/local-only/overlap/conflict/shared refs/delete lanes covered).
    - `[ ]` Materializer tests (idempotent enqueue/update behavior).
    - `[ ]` Lifecycle writer invariant tests.
    - `[ ]` Pause/resume/restart determinism tests.

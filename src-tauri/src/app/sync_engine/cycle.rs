@@ -460,14 +460,17 @@ fn rebuild_sync_file_index(
         .unchecked_transaction()
         .map_err(|error| format!("Failed opening sync index transaction: {error}"))?;
 
+    let now = current_unix_seconds();
     transaction
         .execute(
-            "DELETE FROM sync_files WHERE profile_id = ?1",
-            params![profile_id],
+            "UPDATE sync_files
+             SET remote_present = 0,
+                 local_present = 0,
+                 updated_at = ?2
+             WHERE profile_id = ?1",
+            params![profile_id, now],
         )
-        .map_err(|error| format!("Failed resetting sync file index: {error}"))?;
-
-    let now = current_unix_seconds();
+        .map_err(|error| format!("Failed preparing sync file index refresh: {error}"))?;
     let mut remote_statement = transaction
         .prepare(
             "INSERT INTO sync_files (
@@ -631,6 +634,16 @@ fn rebuild_sync_file_index(
 
     drop(remote_statement);
     drop(local_statement);
+
+    transaction
+        .execute(
+            "DELETE FROM sync_files
+             WHERE profile_id = ?1
+               AND remote_present = 0
+               AND local_present = 0",
+            params![profile_id],
+        )
+        .map_err(|error| format!("Failed cleaning stale sync file rows: {error}"))?;
 
     transaction
         .commit()
