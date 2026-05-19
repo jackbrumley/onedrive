@@ -57,8 +57,7 @@ pub fn runtime_set_engine_state(
 
 fn runtime_reset_transfer_activity(runtime: &Arc<std::sync::Mutex<SyncRuntimeMap>>, profile_id: &str) {
     if let Ok(mut runtime_map) = runtime.lock() {
-        sync_runtime::clear_in_progress(&mut runtime_map, profile_id);
-        sync_runtime::set_remote_transfer_progress(&mut runtime_map, profile_id, 0, 0, 0);
+        sync_runtime::reset_transfer_activity(&mut runtime_map, profile_id);
     }
 }
 

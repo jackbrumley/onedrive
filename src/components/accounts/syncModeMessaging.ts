@@ -12,16 +12,10 @@ function isDeletionGuardIssue(runtimeStatus: SyncRuntimeAccountStatus | null): b
   if (!runtimeStatus) {
     return false;
   }
-  const issueCode = (runtimeStatus.issueCode ?? "").toLowerCase();
-  const issueMessage = (runtimeStatus.issueMessage ?? "").toLowerCase();
-  return (
-    issueCode.includes("large_delete") ||
-    issueCode.includes("delete_guard") ||
-    issueCode.includes("mass_delete") ||
-    issueCode.includes("bulk_delete") ||
-    issueMessage.includes("large deletion") ||
-    issueMessage.includes("mass deletion")
-  );
+  if (runtimeStatus.issueCode === "large_delete_guard") {
+    return true;
+  }
+  return runtimeStatus.issueActions.includes("confirm_large_delete") || runtimeStatus.issueActions.includes("keep_cloud_files");
 }
 
 export function syncModeMessage(

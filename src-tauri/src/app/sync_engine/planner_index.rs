@@ -50,6 +50,7 @@ fn read_sync_file_planner_counters(profile_id: &str) -> Result<SyncFilePlannerCo
         let (action, count) =
             row.map_err(|error| format!("Failed reading sync file action counters: {error}"))?;
         match action.as_str() {
+            PLANNER_ACTION_NONE => counters.none_total = count,
             PLANNER_ACTION_DOWNLOAD => counters.need_download_total = count,
             PLANNER_ACTION_UPLOAD => counters.need_upload_total = count,
             PLANNER_ACTION_DELETE_REMOTE => counters.need_delete_remote_total = count,

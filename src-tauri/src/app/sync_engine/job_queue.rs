@@ -67,6 +67,7 @@ struct SyncJobActivityProjection {
 struct SyncFilePlannerCounters {
     cloud_discovered_total: usize,
     local_discovered_total: usize,
+    none_total: usize,
     need_download_total: usize,
     need_upload_total: usize,
     need_delete_remote_total: usize,

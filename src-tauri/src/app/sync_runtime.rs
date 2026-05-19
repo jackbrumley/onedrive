@@ -64,6 +64,13 @@ pub struct SyncRuntimeCurrentActivity {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SyncRuntimeConsistency {
+    pub ok: bool,
+    pub violations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SyncRuntimeAccountStatus {
     pub profile_id: String,
     pub engine_state: String,
@@ -81,9 +88,14 @@ pub struct SyncRuntimeAccountStatus {
     pub recent_completed: Vec<SyncRuntimeRecentItem>,
     pub recent_retry_waiting: Vec<SyncRuntimeRecentItem>,
     pub recent_failed: Vec<SyncRuntimeRecentItem>,
-    pub remote_discovered_count: usize,
-    pub remote_download_queue_count: usize,
-    pub remote_downloaded_count: usize,
+    pub planner_cloud_discovered_total: usize,
+    pub planner_local_discovered_total: usize,
+    pub planner_none_total: usize,
+    pub planner_need_download_total: usize,
+    pub planner_need_upload_total: usize,
+    pub planner_need_delete_remote_total: usize,
+    pub planner_need_delete_local_total: usize,
+    pub planner_conflict_total: usize,
     pub remote_discovered_total: usize,
     pub remote_download_planned_total: usize,
     pub remote_download_completed_total: usize,
@@ -113,6 +125,7 @@ pub struct SyncRuntimeAccountStatus {
     pub local_scan_estimated_total: Option<usize>,
     pub local_scan_current_path: Option<String>,
     pub current_activity: SyncRuntimeCurrentActivity,
+    pub consistency: SyncRuntimeConsistency,
     pub updated_at: String,
     #[serde(skip_serializing)]
     remote_session_discovered_ids: HashSet<String>,
@@ -144,9 +157,14 @@ impl SyncRuntimeAccountStatus {
             recent_completed: Vec::new(),
             recent_retry_waiting: Vec::new(),
             recent_failed: Vec::new(),
-            remote_discovered_count: 0,
-            remote_download_queue_count: 0,
-            remote_downloaded_count: 0,
+            planner_cloud_discovered_total: 0,
+            planner_local_discovered_total: 0,
+            planner_none_total: 0,
+            planner_need_download_total: 0,
+            planner_need_upload_total: 0,
+            planner_need_delete_remote_total: 0,
+            planner_need_delete_local_total: 0,
+            planner_conflict_total: 0,
             remote_discovered_total: 0,
             remote_download_planned_total: 0,
             remote_download_completed_total: 0,
@@ -184,6 +202,10 @@ impl SyncRuntimeAccountStatus {
                 detail: Some("Idle".to_string()),
                 cycle_id: None,
                 updated_at: now.clone(),
+            },
+            consistency: SyncRuntimeConsistency {
+                ok: true,
+                violations: Vec::new(),
             },
             updated_at: now,
             remote_session_discovered_ids: HashSet::new(),
@@ -394,21 +416,11 @@ pub fn clear_issue(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
     emit_status_event_for_account(runtime_map, profile_id);
 }
 
-pub fn set_remote_transfer_progress(
-    runtime_map: &mut SyncRuntimeMap,
-    profile_id: &str,
-    discovered_count: usize,
-    download_queue_count: usize,
-    downloaded_count: usize,
-) {
+pub fn reset_transfer_activity(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
     let status = ensure_account_status(runtime_map, profile_id);
-    if discovered_count == 0 && download_queue_count == 0 && downloaded_count == 0 {
-        reset_remote_session_progress(status);
-        reset_upload_session_progress(status);
-    }
-    status.remote_discovered_count = discovered_count;
-    status.remote_download_queue_count = download_queue_count;
-    status.remote_downloaded_count = downloaded_count;
+    status.in_progress.clear();
+    reset_remote_session_progress(status);
+    reset_upload_session_progress(status);
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
     emit_status_event_for_account(runtime_map, profile_id);
@@ -433,7 +445,6 @@ pub fn record_remote_discovered(runtime_map: &mut SyncRuntimeMap, profile_id: &s
         .insert(item_id.to_string())
     {
         status.remote_discovered_total += 1;
-        sync_legacy_remote_progress_fields(status);
         status.updated_at = now_rfc3339();
         bump_runtime_revision();
         emit_status_event_for_account(runtime_map, profile_id);
@@ -455,7 +466,6 @@ pub fn record_remote_download_completed(
     if status.remote_session_failed_ids.remove(item_id) {
         status.remote_download_failed_total = status.remote_download_failed_total.saturating_sub(1);
     }
-    sync_legacy_remote_progress_fields(status);
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
     emit_status_event_for_account(runtime_map, profile_id);
@@ -469,7 +479,6 @@ pub fn record_remote_download_failed(
     let status = ensure_account_status(runtime_map, profile_id);
     if status.remote_session_failed_ids.insert(item_id.to_string()) {
         status.remote_download_failed_total += 1;
-        sync_legacy_remote_progress_fields(status);
         status.updated_at = now_rfc3339();
         bump_runtime_revision();
         emit_status_event_for_account(runtime_map, profile_id);
@@ -491,7 +500,6 @@ pub fn set_remote_download_counters(
     status.remote_download_failed_total = failed_total;
     status.remote_download_in_flight = in_flight;
     status.remote_download_retry_waiting = retry_waiting;
-    sync_legacy_remote_progress_fields(status);
     status.updated_at = now_rfc3339();
     bump_runtime_revision();
     emit_status_event_for_account(runtime_map, profile_id);
@@ -646,15 +654,6 @@ pub fn finish_transfer_error(
     }
 }
 
-pub fn clear_in_progress(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
-    let status = ensure_account_status(runtime_map, profile_id);
-    status.in_progress.clear();
-    sync_upload_in_flight(status);
-    status.updated_at = now_rfc3339();
-    bump_runtime_revision();
-    emit_status_event_for_account(runtime_map, profile_id);
-}
-
 pub fn remove_account(runtime_map: &mut SyncRuntimeMap, profile_id: &str) {
     runtime_map.remove(profile_id);
     bump_runtime_revision();
@@ -719,6 +718,70 @@ pub fn recompute_authority_fields(status: &mut SyncRuntimeAccountStatus) {
     status.issue_severity = issue_severity_from_code(status.issue_code.as_deref()).to_string();
     status.can_sync =
         status.auth_ready && status.issue_severity != "blocking" && status.phase != "error";
+    let violations = collect_consistency_violations(status);
+    status.consistency = SyncRuntimeConsistency {
+        ok: violations.is_empty(),
+        violations,
+    };
+}
+
+fn collect_consistency_violations(status: &SyncRuntimeAccountStatus) -> Vec<String> {
+    let mut violations = Vec::new();
+    let expected_download_settled = status
+        .remote_download_completed_total
+        .saturating_add(status.remote_download_failed_total)
+        .saturating_add(status.remote_download_in_flight)
+        .saturating_add(status.remote_download_retry_waiting);
+    if expected_download_settled > status.remote_download_planned_total {
+        violations.push("download_lane_overcommitted".to_string());
+    }
+
+    let expected_upload_settled = status
+        .upload_completed_total
+        .saturating_add(status.upload_failed_total)
+        .saturating_add(status.upload_in_flight)
+        .saturating_add(status.upload_retry_waiting);
+    if expected_upload_settled > status.upload_planned_total {
+        violations.push("upload_lane_overcommitted".to_string());
+    }
+
+    if matches!(status.phase.as_str(), "paused" | "idle" | "error")
+        && status.current_activity.progress_mode != "hidden"
+    {
+        violations.push("lifecycle_progress_mode_invalid_for_phase".to_string());
+    }
+
+    if status.current_activity.stage.trim().is_empty() {
+        violations.push("lifecycle_stage_missing".to_string());
+    }
+
+    let active_transfer_rows = status
+        .in_progress
+        .iter()
+        .filter(|entry| entry.state == "in_progress")
+        .count();
+    let in_flight_counters = status
+        .remote_download_in_flight
+        .saturating_add(status.upload_in_flight);
+    if active_transfer_rows == 0 && in_flight_counters > 0 {
+        violations.push("in_flight_counter_without_active_rows".to_string());
+    }
+
+    if status.phase == "applying_remote"
+        && status.planner_need_download_total > 0
+        && status.remote_download_planned_total == 0
+    {
+        violations.push("planner_download_actions_without_materialized_jobs".to_string());
+    }
+
+    if status.phase == "applying_local"
+        && status.planner_need_upload_total > 0
+        && status.upload_planned_total == 0
+    {
+        violations.push("planner_upload_actions_without_materialized_jobs".to_string());
+    }
+
+    violations
 }
 
 fn ensure_auth_required_issue_contract(status: &mut SyncRuntimeAccountStatus) {
@@ -830,12 +893,6 @@ fn sync_upload_in_flight(status: &mut SyncRuntimeAccountStatus) {
         .count();
 }
 
-fn sync_legacy_remote_progress_fields(status: &mut SyncRuntimeAccountStatus) {
-    status.remote_discovered_count = status.remote_discovered_total;
-    status.remote_download_queue_count = status.remote_download_in_flight;
-    status.remote_downloaded_count = status.remote_download_completed_total;
-}
-
 fn now_rfc3339() -> String {
     Local::now().to_rfc3339()
 }
@@ -851,4 +908,65 @@ fn bump_runtime_revision() {
 
 fn current_runtime_revision() -> u64 {
     SYNC_RUNTIME_REVISION.load(Ordering::Relaxed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn has_violation(status: &SyncRuntimeAccountStatus, violation: &str) -> bool {
+        status
+            .consistency
+            .violations
+            .iter()
+            .any(|value| value == violation)
+    }
+
+    #[test]
+    fn marks_download_materialization_gap_as_consistency_violation() {
+        let mut status = SyncRuntimeAccountStatus::new("sync-runtime-test-download-gap");
+        status.phase = "applying_remote".to_string();
+        status.planner_need_download_total = 5;
+        status.remote_download_planned_total = 0;
+
+        recompute_authority_fields(&mut status);
+
+        assert!(has_violation(
+            &status,
+            "planner_download_actions_without_materialized_jobs"
+        ));
+        assert!(!status.consistency.ok);
+    }
+
+    #[test]
+    fn marks_upload_materialization_gap_as_consistency_violation() {
+        let mut status = SyncRuntimeAccountStatus::new("sync-runtime-test-upload-gap");
+        status.phase = "applying_local".to_string();
+        status.planner_need_upload_total = 3;
+        status.upload_planned_total = 0;
+
+        recompute_authority_fields(&mut status);
+
+        assert!(has_violation(
+            &status,
+            "planner_upload_actions_without_materialized_jobs"
+        ));
+        assert!(!status.consistency.ok);
+    }
+
+    #[test]
+    fn materialized_planner_actions_keep_consistency_ok() {
+        let mut status = SyncRuntimeAccountStatus::new("sync-runtime-test-consistent");
+        status.phase = "applying_remote".to_string();
+        status.planner_need_download_total = 4;
+        status.remote_download_planned_total = 4;
+
+        recompute_authority_fields(&mut status);
+
+        assert!(!has_violation(
+            &status,
+            "planner_download_actions_without_materialized_jobs"
+        ));
+        assert!(status.consistency.ok);
+    }
 }

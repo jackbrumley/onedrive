@@ -227,6 +227,7 @@ pub fn hydrate_runtime_status_from_db(
 ) -> Result<(), String> {
     let profile_id = status.profile_id.clone();
     let projection = read_sync_job_activity_projection(&profile_id, 64, 120)?;
+    let planner_counters = read_sync_file_planner_counters(&profile_id)?;
     let download_counters = read_download_job_counters(&profile_id)?;
     let upload_counters = read_upload_job_counters(&profile_id)?;
 
@@ -252,6 +253,15 @@ pub fn hydrate_runtime_status_from_db(
     status.recent_retry_waiting = projection.recent_retry_waiting;
     status.recent_failed = projection.recent_failed;
 
+    status.planner_cloud_discovered_total = planner_counters.cloud_discovered_total;
+    status.planner_local_discovered_total = planner_counters.local_discovered_total;
+    status.planner_none_total = planner_counters.none_total;
+    status.planner_need_download_total = planner_counters.need_download_total;
+    status.planner_need_upload_total = planner_counters.need_upload_total;
+    status.planner_need_delete_remote_total = planner_counters.need_delete_remote_total;
+    status.planner_need_delete_local_total = planner_counters.need_delete_local_total;
+    status.planner_conflict_total = planner_counters.conflict_total;
+
     status.remote_download_planned_total = download_counters.planned_total;
     status.remote_download_completed_total = download_counters.completed;
     status.remote_download_failed_total = download_counters.failed_terminal;
@@ -261,8 +271,6 @@ pub fn hydrate_runtime_status_from_db(
     status.remote_download_completed_bytes_total = download_counters.completed_bytes;
     status.remote_download_remaining_bytes_total = download_counters.remaining_bytes;
     status.remote_download_in_flight_bytes_done = download_counters.in_flight_bytes_done;
-    status.remote_download_queue_count = status.remote_download_in_flight;
-    status.remote_downloaded_count = status.remote_download_completed_total;
 
     status.upload_planned_total = upload_counters.planned_total;
     status.upload_completed_total = upload_counters.completed;

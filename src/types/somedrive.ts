@@ -108,6 +108,11 @@ export interface SyncRuntimeCurrentActivity {
   updatedAt?: string;
 }
 
+export interface SyncRuntimeConsistency {
+  ok: boolean;
+  violations: string[];
+}
+
 export interface SyncRuntimeAccountStatus {
   profileId: string;
   engineState?: "running" | "paused" | "blocked" | string;
@@ -125,9 +130,14 @@ export interface SyncRuntimeAccountStatus {
   recentCompleted: SyncRuntimeRecentItem[];
   recentRetryWaiting: SyncRuntimeRecentItem[];
   recentFailed: SyncRuntimeRecentItem[];
-  remoteDiscoveredCount?: number;
-  remoteDownloadQueueCount?: number;
-  remoteDownloadedCount?: number;
+  plannerCloudDiscoveredTotal?: number;
+  plannerLocalDiscoveredTotal?: number;
+  plannerNoneTotal?: number;
+  plannerNeedDownloadTotal?: number;
+  plannerNeedUploadTotal?: number;
+  plannerNeedDeleteRemoteTotal?: number;
+  plannerNeedDeleteLocalTotal?: number;
+  plannerConflictTotal?: number;
   remoteDiscoveredTotal?: number;
   remoteDownloadPlannedTotal?: number;
   remoteDownloadCompletedTotal?: number;
@@ -157,6 +167,7 @@ export interface SyncRuntimeAccountStatus {
   localScanEstimatedTotal?: number | null;
   localScanCurrentPath?: string | null;
   currentActivity?: SyncRuntimeCurrentActivity;
+  consistency?: SyncRuntimeConsistency;
   updatedAt: string;
 }
 

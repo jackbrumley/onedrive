@@ -358,6 +358,12 @@
   font-size: 0.76rem;
 }
 
+.account-sync-lane-meta {
+  margin: 2px 0 0;
+  color: #5e7690;
+  font-size: 0.68rem;
+}
+
 .account-sync-mode-banner {
   border: 1px solid var(--sync-tone-info-border);
   border-radius: 10px;
@@ -600,6 +606,11 @@
 .account-sync-preview-issues-warning {
   border-color: #e6c88d;
   background: #fff8ed;
+}
+
+.account-sync-preview-issues-integrity {
+  border-color: #e7b27a;
+  background: #fff6ec;
 }
 
 .account-sync-preview-issues-warning .account-sync-preview-section-label {

@@ -134,6 +134,17 @@ function isRuntimeTelemetryStale(runtimeStatus: SyncRuntimeAccountStatus | null)
   return Date.now() - updatedAtMs > 8000;
 }
 
+function formatTelemetryTimestamp(value: string | undefined): string {
+  if (!value) {
+    return "null";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "null";
+  }
+  return parsed.toLocaleTimeString();
+}
+
 function extensionFromPath(path: string): string {
   const filename = path.split("/").pop() ?? "";
   const dotIndex = filename.lastIndexOf(".");
@@ -221,25 +232,26 @@ export function AccountSyncActivityPanel({
   const recentRetryWaiting = runtimeStatus?.recentRetryWaiting ?? [];
   const recentFailed = runtimeStatus?.recentFailed ?? [];
   const remoteDiscoveredCount = runtimeStatus?.remoteDiscoveredTotal ?? 0;
+  const plannerCloudDiscoveredCount = runtimeStatus?.plannerCloudDiscoveredTotal ?? remoteDiscoveredCount;
+  const plannerLocalDiscoveredCount = runtimeStatus?.plannerLocalDiscoveredTotal ?? 0;
+  const plannerNoActionCount = runtimeStatus?.plannerNoneTotal ?? 0;
+  const plannerNeedDeleteRemoteCount = runtimeStatus?.plannerNeedDeleteRemoteTotal ?? 0;
+  const plannerNeedDeleteLocalCount = runtimeStatus?.plannerNeedDeleteLocalTotal ?? 0;
+  const plannerConflictCount = runtimeStatus?.plannerConflictTotal ?? 0;
   const remoteDownloadPlannedCount = runtimeStatus?.remoteDownloadPlannedTotal ?? 0;
+  const plannerNeedDownloadCount = runtimeStatus?.plannerNeedDownloadTotal ?? remoteDownloadPlannedCount;
   const remoteDownloadedCount = runtimeStatus?.remoteDownloadCompletedTotal ?? 0;
   const remoteDownloadFailedCount = runtimeStatus?.remoteDownloadFailedTotal ?? 0;
-  const remoteDownloadInFlightRaw = runtimeStatus?.remoteDownloadInFlight ?? 0;
-  const remoteDownloadInFlight = isPausedPhase ? 0 : remoteDownloadInFlightRaw;
+  const remoteDownloadInFlight = isPausedPhase ? 0 : (runtimeStatus?.remoteDownloadInFlight ?? 0);
   const remoteDownloadRetryWaiting = runtimeStatus?.remoteDownloadRetryWaiting ?? 0;
   const remoteDownloadCompletedBytesTotal = runtimeStatus?.remoteDownloadCompletedBytesTotal ?? 0;
   const remoteDownloadRemainingBytesTotal = runtimeStatus?.remoteDownloadRemainingBytesTotal ?? 0;
   const remoteDownloadInFlightBytesDone = runtimeStatus?.remoteDownloadInFlightBytesDone ?? 0;
   const remoteDownloadThrottleTotal = runtimeStatus?.remoteDownloadThrottleTotal ?? 0;
   const remoteDownloadThrottleLastMinute = runtimeStatus?.remoteDownloadThrottleLastMinute ?? 0;
-  const remoteScanComplete = runtimeStatus?.remoteScanComplete ?? false;
-  const remoteDownloadRemainingCount = Math.max(
-    remoteDownloadPlannedCount - remoteDownloadedCount - remoteDownloadFailedCount - remoteDownloadInFlight - remoteDownloadRetryWaiting,
-    0
-  );
   const uploadPlannedCount = runtimeStatus?.uploadPlannedTotal ?? 0;
-  const activeUploadCountRaw = runtimeStatus?.uploadInFlight ?? visibleInProgress.filter((item) => item.direction.toLowerCase() === "upload").length;
-  const activeUploadCount = isPausedPhase ? 0 : activeUploadCountRaw;
+  const plannerNeedUploadCount = runtimeStatus?.plannerNeedUploadTotal ?? uploadPlannedCount;
+  const activeUploadCount = isPausedPhase ? 0 : (runtimeStatus?.uploadInFlight ?? 0);
   const uploadedCount = runtimeStatus?.uploadCompletedTotal ?? 0;
   const uploadFailedCount = runtimeStatus?.uploadFailedTotal ?? 0;
   const uploadRetryWaitingCount = runtimeStatus?.uploadRetryWaiting ?? 0;
@@ -248,12 +260,9 @@ export function AccountSyncActivityPanel({
   const uploadInFlightBytesDone = runtimeStatus?.uploadInFlightBytesDone ?? 0;
   const uploadThrottleTotal = runtimeStatus?.uploadThrottleTotal ?? 0;
   const uploadThrottleLastMinute = runtimeStatus?.uploadThrottleLastMinute ?? 0;
-  const uploadRemainingCount = Math.max(
-    uploadPlannedCount - uploadedCount - uploadFailedCount - activeUploadCount - uploadRetryWaitingCount,
-    0
-  );
   const showTransferStats =
-    remoteDiscoveredCount > 0 ||
+    plannerCloudDiscoveredCount > 0 ||
+    plannerLocalDiscoveredCount > 0 ||
     remoteDownloadPlannedCount > 0 ||
     remoteDownloadedCount > 0 ||
     remoteDownloadRetryWaiting > 0 ||
@@ -276,6 +285,11 @@ export function AccountSyncActivityPanel({
   const hasErrorSection = hasErrorItems || issueActions.length > 0;
   const runtimeTelemetryStale = isRuntimeTelemetryStale(runtimeStatus);
   const currentActivity = buildCurrentActivityState(runtimeStatus);
+  const consistency = runtimeStatus?.consistency;
+  const consistencyViolations = consistency?.violations ?? [];
+  const hasConsistencyViolation = consistency?.ok === false;
+  const plannerUpdatedAtLabel = formatTelemetryTimestamp(runtimeStatus?.updatedAt);
+  const activityUpdatedAtLabel = formatTelemetryTimestamp(runtimeStatus?.currentActivity?.updatedAt);
 
   const metricText = (value: number | string): string => (runtimeUnavailable ? "null" : String(value));
 
@@ -364,10 +378,33 @@ export function AccountSyncActivityPanel({
         <p class="account-sync-mode-banner-title">{modeMessage.title}</p>
         <p class="account-sync-mode-banner-detail">{modeMessage.detail}</p>
       </section>
+      {hasConsistencyViolation && (
+        <section class="account-sync-preview-issues account-sync-preview-issues-integrity">
+          <p class="account-sync-preview-section-label">Consistency alerts</p>
+          <p class="account-sync-preview-issue-warning-note">
+            Runtime counters are inconsistent. Showing raw authoritative values.
+          </p>
+          <div class="account-sync-preview-list">
+            {consistencyViolations.map((violation) => (
+              <article key={violation} class="account-sync-preview-item">
+                <div class="account-sync-preview-row">
+                  <span class="account-sync-preview-status-icon">
+                    <IconAlertCircle size={ACTIVITY_ICON_SIZE} class="sync-preview-icon-error" />
+                  </span>
+                  <div class="account-sync-preview-content">
+                    <p class="account-sync-preview-path">{violation}</p>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
       <section class="account-sync-current-activity" aria-live="polite">
-        <p class="account-sync-current-activity-label">Current activity</p>
+        <p class="account-sync-current-activity-label">Lifecycle lane</p>
         <p class="account-sync-current-activity-title">{currentActivity.title}</p>
         <p class="account-sync-current-activity-detail">{runtimeTelemetryStale ? "null" : currentActivity.detail}</p>
+        <p class="account-sync-lane-meta">activity update {activityUpdatedAtLabel}</p>
         {currentActivity.progressLabel && (
           <p class="account-sync-current-activity-progress">{currentActivity.progressLabel}</p>
         )}
@@ -414,21 +451,43 @@ export function AccountSyncActivityPanel({
             </section>
           )}
           <section class="account-sync-preview-stats-group">
-            <p class="account-sync-preview-stats-section">Discovery</p>
+            <p class="account-sync-preview-stats-section">Discovery lane</p>
+            <p class="account-sync-lane-meta">snapshot update {plannerUpdatedAtLabel}</p>
             <div class="account-sync-preview-metrics-grid">
               <div class="account-sync-preview-metric">
-                <span class="account-sync-preview-metric-label">Files discovered in cloud (count)</span>
-                  <span class="account-sync-preview-metric-value">{metricText(remoteDiscoveredCount)}</span>
+                <span class="account-sync-preview-metric-label">Cloud files discovered (count)</span>
+                  <span class="account-sync-preview-metric-value">{metricText(plannerCloudDiscoveredCount)}</span>
+                </div>
+               <div class="account-sync-preview-metric">
+                <span class="account-sync-preview-metric-label">Local files discovered (count)</span>
+                  <span class="account-sync-preview-metric-value">{metricText(plannerLocalDiscoveredCount)}</span>
                 </div>
               </div>
             </section>
 
           <section class="account-sync-preview-stats-group">
-            <p class="account-sync-preview-stats-section">Downloads</p>
+            <p class="account-sync-preview-stats-section">Planner lane</p>
+            <p class="account-sync-lane-meta">snapshot update {plannerUpdatedAtLabel}</p>
             <div class="account-sync-preview-metrics-grid">
-               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Downloads remaining (count)</span><span class="account-sync-preview-metric-value">{runtimeUnavailable ? "null" : `${remoteDownloadRemainingCount}${!remoteScanComplete ? "+" : ""}`}</span></div>
-               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Downloads remaining (size)</span><span class="account-sync-preview-metric-value">{runtimeUnavailable ? "null" : `${formatBytes(remoteDownloadRemainingBytesTotal)}${!remoteScanComplete ? "+" : ""}`}</span></div>
+               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Need download (count)</span><span class="account-sync-preview-metric-value">{metricText(plannerNeedDownloadCount)}</span></div>
+               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Need upload (count)</span><span class="account-sync-preview-metric-value">{metricText(plannerNeedUploadCount)}</span></div>
+               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Need delete remote (count)</span><span class="account-sync-preview-metric-value">{metricText(plannerNeedDeleteRemoteCount)}</span></div>
+               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Need delete local (count)</span><span class="account-sync-preview-metric-value">{metricText(plannerNeedDeleteLocalCount)}</span></div>
+               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Need conflict handling (count)</span><span class="account-sync-preview-metric-value">{metricText(plannerConflictCount)}</span></div>
+               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">No action (count)</span><span class="account-sync-preview-metric-value">{metricText(plannerNoActionCount)}</span></div>
+               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Remote scan complete</span><span class="account-sync-preview-metric-value">{runtimeUnavailable ? "null" : String(runtimeStatus?.remoteScanComplete ?? false)}</span></div>
+               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Two-way ready</span><span class="account-sync-preview-metric-value">{runtimeUnavailable ? "null" : String(runtimeStatus?.twoWayReady ?? false)}</span></div>
+            </div>
+          </section>
+
+          <section class="account-sync-preview-stats-group">
+            <p class="account-sync-preview-stats-section">Executor lane - Downloads</p>
+            <p class="account-sync-lane-meta">snapshot update {plannerUpdatedAtLabel}</p>
+            <div class="account-sync-preview-metrics-grid">
+               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Planned downloads (count)</span><span class="account-sync-preview-metric-value">{metricText(remoteDownloadPlannedCount)}</span></div>
+               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Remaining downloads (size)</span><span class="account-sync-preview-metric-value">{runtimeUnavailable ? "null" : formatBytes(remoteDownloadRemainingBytesTotal)}</span></div>
                <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Download speed</span><span class="account-sync-preview-metric-value">{runtimeUnavailable ? "null" : formatTransferRate(downloadBytesPerSecond)}</span></div>
+               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Downloads in flight (count)</span><span class="account-sync-preview-metric-value">{metricText(remoteDownloadInFlight)}</span></div>
                <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Downloaded files (count)</span><span class="account-sync-preview-metric-value">{metricText(remoteDownloadedCount)}</span></div>
                <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Downloaded (size)</span><span class="account-sync-preview-metric-value">{runtimeUnavailable ? "null" : formatBytes(remoteDownloadCompletedBytesTotal)}</span></div>
                <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Downloads retry waiting (count)</span><span class="account-sync-preview-metric-value">{metricText(remoteDownloadRetryWaiting)}</span></div>
@@ -439,11 +498,13 @@ export function AccountSyncActivityPanel({
           </section>
 
           <section class="account-sync-preview-stats-group">
-            <p class="account-sync-preview-stats-section">Uploads</p>
+            <p class="account-sync-preview-stats-section">Executor lane - Uploads</p>
+            <p class="account-sync-lane-meta">snapshot update {plannerUpdatedAtLabel}</p>
             <div class="account-sync-preview-metrics-grid">
-               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Uploads remaining (count)</span><span class="account-sync-preview-metric-value">{metricText(uploadRemainingCount)}</span></div>
-               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Uploads remaining (size)</span><span class="account-sync-preview-metric-value">{runtimeUnavailable ? "null" : formatBytes(uploadRemainingBytesTotal)}</span></div>
+               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Planned uploads (count)</span><span class="account-sync-preview-metric-value">{metricText(uploadPlannedCount)}</span></div>
+               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Remaining uploads (size)</span><span class="account-sync-preview-metric-value">{runtimeUnavailable ? "null" : formatBytes(uploadRemainingBytesTotal)}</span></div>
                <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Upload speed</span><span class="account-sync-preview-metric-value">{runtimeUnavailable ? "null" : formatTransferRate(uploadBytesPerSecond)}</span></div>
+               <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Uploads in flight (count)</span><span class="account-sync-preview-metric-value">{metricText(activeUploadCount)}</span></div>
                <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Uploaded files (count)</span><span class="account-sync-preview-metric-value">{metricText(uploadedCount)}</span></div>
                <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Uploaded (size)</span><span class="account-sync-preview-metric-value">{runtimeUnavailable ? "null" : formatBytes(uploadCompletedBytesTotal)}</span></div>
                <div class="account-sync-preview-metric"><span class="account-sync-preview-metric-label">Uploads retry waiting (count)</span><span class="account-sync-preview-metric-value">{metricText(uploadRetryWaitingCount)}</span></div>
