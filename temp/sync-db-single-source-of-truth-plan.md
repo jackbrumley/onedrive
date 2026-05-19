@@ -74,6 +74,7 @@ Legend:
 - `[~]` Planner-driven upload execution adopted (selection is planner-based; delete/conflict materialization still pending).
 - `[~]` Structured lifecycle activity contract improved with `cycle_id` and `updated_at` propagation.
 - `[~]` Initial planner/execution invariant logging added (planner vs active job inventory now logged).
+- `[~]` Planner delete action derivation now uses retained index presence (`delete_remote`, `delete_local` states derived).
 - `[x]` Legacy file fallback for sync state load removed (DB-backed state store only).
 - `[~]` Module decomposition advanced (`lifecycle_writer.rs` extracted; major queue/lane splits still pending).
 - `[~]` Module decomposition advanced (`lifecycle_writer.rs`, `planner_index.rs`, and `planner_transitions.rs` extracted).
@@ -109,7 +110,7 @@ Legend:
 4. Enforce single writer contract
    - `[ ]` Extend guard scripts to block unauthorized lifecycle/planner side writes.
    - `[ ]` Verify all phase/activity/issue writes route through one writer API.
-   - `[ ]` Add hard invariant checks for illegal lifecycle combinations.
+   - `[~]` Add hard invariant checks for illegal lifecycle combinations.
    - `[ ]` Ensure all activity writes carry deterministic contract fields.
 
 5. Reliability hardening
@@ -127,7 +128,7 @@ Legend:
 7. Test matrix completion
    - `[x]` Planner transition tests (remote-only/local-only/overlap/conflict/shared refs/delete lanes covered).
    - `[ ]` Materializer tests (idempotent enqueue/update behavior).
-   - `[ ]` Lifecycle writer invariant tests.
+   - `[~]` Lifecycle writer invariant tests.
    - `[ ]` Pause/resume/restart determinism tests.
    - `[ ]` Bootstrap gate tests (blocked -> retried -> two-way ready).
    - `[ ]` Integration scenarios for large-delete guard and conflict backup paths.

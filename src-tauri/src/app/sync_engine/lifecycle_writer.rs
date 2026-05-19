@@ -359,3 +359,48 @@ fn relative_path_for_issue(sync_root: &Path, candidate: &Path) -> Option<String>
         Some(output)
     }
 }
+
+#[cfg(test)]
+mod lifecycle_writer_tests {
+    use super::*;
+
+    fn test_profile_id(label: &str) -> String {
+        format!(
+            "lifecycle-writer-test-{label}-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        )
+    }
+
+    #[test]
+    fn hydrate_runtime_rejects_non_hidden_progress_for_paused_phase() {
+        let profile_id = test_profile_id("lifecycle-invariant");
+        persist_sync_lifecycle_phase(&profile_id, "paused", "Synchronization paused")
+            .expect("persist paused phase");
+        persist_sync_lifecycle_activity(
+            &profile_id,
+            "paused",
+            "determinate",
+            Some(1),
+            Some(2),
+            Some("items"),
+            Some("invalid paused progress"),
+            None,
+        )
+        .expect("persist invalid lifecycle activity");
+
+        let mut runtime_map = SyncRuntimeMap::new();
+        sync_runtime::set_phase(
+            &mut runtime_map,
+            &profile_id,
+            "paused",
+            "Synchronization paused",
+        );
+        let mut status = runtime_map
+            .remove(&profile_id)
+            .expect("runtime account status exists");
+
+        let error = hydrate_runtime_status_from_db(&mut status)
+            .expect_err("paused phase with determinate progress must fail");
+        assert!(error.contains("requires hidden progress mode"));
+    }
+}

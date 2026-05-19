@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod planner_tests {
     use super::*;
 
     fn test_profile_id(label: &str) -> String {

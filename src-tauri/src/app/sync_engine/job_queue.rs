@@ -2125,6 +2125,20 @@ pub fn hydrate_runtime_status_from_db(
     status.current_activity.detail = lifecycle.activity_detail;
     status.current_activity.cycle_id = lifecycle.activity_cycle_id;
     status.current_activity.updated_at = unix_seconds_to_rfc3339(lifecycle.activity_updated_at);
+    if matches!(status.phase.as_str(), "paused" | "idle" | "error")
+        && status.current_activity.progress_mode != "hidden"
+    {
+        return Err(format!(
+            "Invalid lifecycle activity state for profile '{}': phase='{}' requires hidden progress mode, found '{}'.",
+            profile_id, status.phase, status.current_activity.progress_mode
+        ));
+    }
+    if status.current_activity.stage.trim().is_empty() {
+        return Err(format!(
+            "Invalid lifecycle activity state for profile '{}': stage cannot be empty.",
+            profile_id
+        ));
+    }
     if status.current_activity.stage == "scanning_local" {
         let scanned_count = status.current_activity.current.ok_or_else(|| {
             format!(
