@@ -143,6 +143,7 @@ async fn tick_sync_cycle(
             sync_state.two_way_ready
         );
         let planner_counters = recompute_sync_file_actions(profile_id, sync_state.two_way_ready)?;
+        let materialized_jobs = read_materialized_job_counts(profile_id).unwrap_or((0, 0));
         log::info!(
             "{} [cycle:{}] STAGE_COMPLETE stage=planner duration_ms={} need_download={} need_upload={} conflicts={}",
             account_prefix,
@@ -158,16 +159,29 @@ async fn tick_sync_cycle(
             planner_counters.need_upload_total,
         );
         log::info!(
-            "{} [cycle:{}] SYNC_PLANNER_SUMMARY cloud_discovered={} local_discovered={} need_download={} need_upload={} conflicts={} shared_references_excluded={}",
+            "{} [cycle:{}] SYNC_PLANNER_SUMMARY cloud_discovered={} local_discovered={} need_download={} need_upload={} need_delete_remote={} need_delete_local={} conflicts={} shared_references_excluded={} active_download_jobs={} active_upload_jobs={}",
             account_prefix,
             cycle_id,
             planner_counters.cloud_discovered_total,
             planner_counters.local_discovered_total,
             planner_counters.need_download_total,
             planner_counters.need_upload_total,
+            planner_counters.need_delete_remote_total,
+            planner_counters.need_delete_local_total,
             planner_counters.conflict_total,
             planner_counters.shared_reference_total,
+            materialized_jobs.0,
+            materialized_jobs.1,
         );
+        if planner_counters.need_download_total > 0 && materialized_jobs.0 == 0 {
+            log::warn!(
+                "{} [cycle:{}] PLANNER_DOWNLOAD_MATERIALIZATION_GAP need_download={} active_download_jobs={}",
+                account_prefix,
+                cycle_id,
+                planner_counters.need_download_total,
+                materialized_jobs.0,
+            );
+        }
         stats.local_items_seen = local_snapshot.len();
         log::info!(
             "{} [cycle:{}] LOCAL_SCAN_SUMMARY items={}",

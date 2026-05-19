@@ -67,6 +67,8 @@ struct SyncFilePlannerCounters {
     local_discovered_total: usize,
     need_download_total: usize,
     need_upload_total: usize,
+    need_delete_remote_total: usize,
+    need_delete_local_total: usize,
     conflict_total: usize,
     shared_reference_total: usize,
 }
@@ -2280,6 +2282,37 @@ fn read_throttle_counters(profile_id: &str) -> Result<ThrottleCounters, String> 
             },
         )
         .map_err(|error| format!("Failed reading throttle counters: {error}"))
+}
+
+pub(crate) fn read_sync_authority_row_counts(
+    profile_id: &str,
+) -> Result<(usize, usize, usize), String> {
+    let connection = open_sync_jobs_connection(profile_id)?;
+    let lifecycle_rows = connection
+        .query_row(
+            "SELECT COUNT(1) FROM sync_lifecycle_state WHERE profile_id = ?1",
+            params![profile_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| format!("Failed reading lifecycle row count: {error}"))?
+        .max(0) as usize;
+    let planner_rows = connection
+        .query_row(
+            "SELECT COUNT(1) FROM sync_files WHERE profile_id = ?1",
+            params![profile_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| format!("Failed reading planner row count: {error}"))?
+        .max(0) as usize;
+    let job_rows = connection
+        .query_row(
+            "SELECT COUNT(1) FROM sync_jobs WHERE profile_id = ?1",
+            params![profile_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| format!("Failed reading job row count: {error}"))?
+        .max(0) as usize;
+    Ok((lifecycle_rows, planner_rows, job_rows))
 }
 
 fn unix_seconds_to_rfc3339(value: i64) -> String {

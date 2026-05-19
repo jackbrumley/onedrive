@@ -6,6 +6,7 @@ const appRoot = path.join(repoRoot, "src-tauri", "src", "app");
 
 const allowedFiles = new Set([
   path.join(appRoot, "sync_runtime.rs"),
+  path.join(appRoot, "sync_engine", "lifecycle_writer.rs"),
   path.join(appRoot, "sync_engine", "runtime_and_models.rs"),
   path.join(appRoot, "commands", "accounts", "profile_commands.rs"),
 ]);

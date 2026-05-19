@@ -60,6 +60,91 @@ This plan is intentionally implementation-focused and aligned with current code 
 
 ## Work Plan
 
+## Progress Tracker
+
+Legend:
+
+- `[x]` done
+- `[~]` partially done
+- `[ ]` not started
+
+### Current Completion Snapshot
+
+- `[x]` Planner ownership extracted to dedicated module (`planner.rs`).
+- `[~]` Planner-driven upload execution adopted (selection is planner-based; delete/conflict materialization still pending).
+- `[~]` Structured lifecycle activity contract improved with `cycle_id` and `updated_at` propagation.
+- `[~]` Initial planner/execution invariant logging added (planner vs active job inventory now logged).
+- `[x]` Legacy file fallback for sync state load removed (DB-backed state store only).
+- `[~]` Module decomposition advanced (`lifecycle_writer.rs` extracted; major queue/lane splits still pending).
+- `[~]` Initial planner tests added (`planner_*` transition coverage).
+- `[x]` Roadmap document created in `temp/`.
+
+### Remaining Work (Strict Close List)
+
+1. Finish DB authority for operational state
+   - `[ ]` Move `delta_link` and `active_delta_next_link` to DB-only authority.
+   - `[ ]` Move two-way/bootstrap gate authority to DB-only paths.
+   - `[ ]` Remove flow-critical planning reads from `PersistedSyncState`.
+   - `[ ]` Ensure restart reconstruction reads lifecycle/planner/jobs only.
+
+2. Make planner the only action authority
+   - `[ ]` Finalize explicit planner action set (`download`, `upload`, `delete_remote`, `delete_local`, `conflict`, `none`).
+   - `[ ]` Centralize all transition rules in one planner transitions owner.
+   - `[ ]` Implement full job materialization from planner output to `sync_jobs`.
+   - `[ ]` Ensure materialization is idempotent across repeated cycles.
+   - `[ ]` Remove remaining direct apply-path decision branches that bypass planner.
+   - `[ ]` Route delete and conflict execution through planner/materializer flow.
+
+3. Complete module ownership decomposition
+   - `[x]` Extract lifecycle writer into `lifecycle_writer.rs`.
+   - `[ ]` Extract sync_files DB primitives into `planner_index.rs`.
+   - `[ ]` Extract transition rules into `planner_transitions.rs`.
+   - `[ ]` Extract action enqueue/update to `job_materializer.rs`.
+   - `[ ]` Extract remote lane mechanics to `download_lane.rs`.
+   - `[ ]` Extract upload lane mechanics to `upload_lane.rs`.
+   - `[ ]` Keep cycle orchestration thin in `cycle_orchestrator.rs`.
+   - `[ ]` Reduce oversized files (`job_queue.rs`, `remote_changes.rs`) below target scope.
+
+4. Enforce single writer contract
+   - `[ ]` Extend guard scripts to block unauthorized lifecycle/planner side writes.
+   - `[ ]` Verify all phase/activity/issue writes route through one writer API.
+   - `[ ]` Add hard invariant checks for illegal lifecycle combinations.
+   - `[ ]` Ensure all activity writes carry deterministic contract fields.
+
+5. Reliability hardening
+   - `[ ]` Validate bounded backpressure behavior after full materializer rollout.
+   - `[ ]` Ensure watchdog uses durable counters correctly.
+   - `[ ]` Verify deterministic lease recovery on both lanes.
+   - `[ ]` Verify pause drain/resume leaves no orphan running jobs.
+   - `[ ]` Audit retry lifecycle (`retry_wait`, terminal fail, retry-all) for both lanes.
+
+6. Determinism invariants and diagnostics
+   - `[~]` Add planner-vs-jobs reconciliation checks by action/direction.
+   - `[ ]` Add lifecycle-vs-runtime payload consistency checks.
+   - `[x]` Add startup DB consistency summary logs for lifecycle/planner/jobs.
+
+7. Test matrix completion
+   - `[~]` Planner transition tests (remote-only/local-only/overlap/conflict covered; shared refs pending).
+   - `[ ]` Materializer tests (idempotent enqueue/update behavior).
+   - `[ ]` Lifecycle writer invariant tests.
+   - `[ ]` Pause/resume/restart determinism tests.
+   - `[ ]` Bootstrap gate tests (blocked -> retried -> two-way ready).
+   - `[ ]` Integration scenarios for large-delete guard and conflict backup paths.
+
+8. Final cleanup and closeout
+   - `[ ]` Remove dead hybrid-authority code paths.
+   - `[ ]` Remove obsolete state fields/struct usage after DB parity.
+   - `[ ]` Update architecture docs to match final ownership model.
+   - `[ ]` Re-run full acceptance checklist and mark completion.
+
+### Definition of Fully Done (Close Criteria)
+
+- `[ ]` No flow-critical sync decision depends on JSON/in-memory mirrors.
+- `[ ]` Planner actions materialize to jobs for all relevant action types.
+- `[ ]` One lifecycle writer path is enforced by guardrails.
+- `[ ]` Restart/pause/resume/retry deterministic from DB state.
+- `[ ]` `cargo check`, `cargo test`, `npm run typecheck`, and sync guard scripts all pass.
+
 ## Phase 0: Guardrails and Instrumentation Baseline
 
 ### Goals

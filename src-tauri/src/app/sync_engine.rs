@@ -1,6 +1,7 @@
 include!("sync_engine/preamble.rs");
 include!("sync_engine/worker_lifecycle.rs");
 include!("sync_engine/runtime_and_models.rs");
+include!("sync_engine/lifecycle_writer.rs");
 include!("sync_engine/job_queue.rs");
 include!("sync_engine/planner.rs");
 include!("sync_engine/cycle.rs");

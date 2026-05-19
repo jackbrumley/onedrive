@@ -76,6 +76,17 @@ pub fn configure_shell(app: &mut tauri::App<tauri::Wry>) -> Result<(), Box<dyn s
                     &account.id,
                     engine_state,
                 );
+                if let Ok((lifecycle_rows, planner_rows, job_rows)) =
+                    sync_engine::read_sync_authority_row_counts(&account.id)
+                {
+                    log::info!(
+                        "{} STARTUP_AUTHORITY_ROW_COUNTS lifecycle_rows={} planner_rows={} job_rows={}",
+                        prefix,
+                        lifecycle_rows,
+                        planner_rows,
+                        job_rows,
+                    );
+                }
 
                 if account.agent_state == "syncing" {
                     if account.auth_configured {

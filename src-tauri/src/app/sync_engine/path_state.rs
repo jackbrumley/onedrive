@@ -179,30 +179,10 @@ fn read_local_entry(path: &Path) -> Result<Option<LocalSnapshotEntry>, String> {
     }))
 }
 
-fn sync_state_path(profile_id: &str) -> Result<PathBuf, String> {
-    let config_dir =
-        dirs::config_dir().ok_or_else(|| "Could not resolve config directory".to_string())?;
-    Ok(config_dir
-        .join("somedrive")
-        .join("accounts")
-        .join(profile_id)
-        .join("sync_state.json"))
-}
-
 fn load_sync_state(profile_id: &str) -> Result<PersistedSyncState, String> {
-    if let Some(state_json) = read_sync_state_store(profile_id)? {
-        let mut state = serde_json::from_str::<PersistedSyncState>(&state_json)
-            .map_err(|error| format!("Failed decoding persisted sync state: {error}"))?;
-        let _ = hydrate_sync_state_from_lifecycle(profile_id, &mut state)?;
-        return Ok(state);
-    }
-
-    let path = sync_state_path(profile_id)?;
-    let mut state = if path.exists() {
-        let text = std::fs::read_to_string(&path)
-            .map_err(|error| format!("Failed reading sync state '{}': {}", path.display(), error))?;
-        serde_json::from_str::<PersistedSyncState>(&text)
-            .map_err(|error| format!("Failed decoding sync state JSON: {error}"))?
+    let mut state = if let Some(state_json) = read_sync_state_store(profile_id)? {
+        serde_json::from_str::<PersistedSyncState>(&state_json)
+            .map_err(|error| format!("Failed decoding persisted sync state: {error}"))?
     } else {
         PersistedSyncState::default()
     };
