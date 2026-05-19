@@ -251,10 +251,8 @@ async fn tick_sync_cycle(
     } else {
         let download_counters = read_download_job_counters(profile_id)?;
         runtime_set_upload_planned_total(&graph.sync_runtime, profile_id, 0);
-        let bootstrap_ready_for_two_way = lifecycle_state.active_delta_next_link.is_none()
-            && lifecycle_state.bootstrap_full_scan_completed
-            && download_counters.remaining == 0
-            && download_counters.failed_terminal == 0;
+        let bootstrap_ready_for_two_way =
+            bootstrap_ready_for_two_way(&lifecycle_state, &download_counters);
 
         if bootstrap_ready_for_two_way {
             runtime_set_phase(
@@ -351,4 +349,55 @@ async fn tick_sync_cycle(
         "Idle - waiting for next sync cycle",
     );
     Ok(stats)
+}
+
+fn bootstrap_ready_for_two_way(
+    lifecycle_state: &SyncLifecycleOperationalState,
+    download_counters: &DownloadJobCounters,
+) -> bool {
+    lifecycle_state.active_delta_next_link.is_none()
+        && lifecycle_state.bootstrap_full_scan_completed
+        && download_counters.remaining == 0
+        && download_counters.failed_terminal == 0
+}
+
+#[cfg(test)]
+mod cycle_orchestrator_tests {
+    use super::*;
+
+    #[test]
+    fn bootstrap_gate_blocks_when_cursor_or_queue_or_failures_exist() {
+        let base_lifecycle = SyncLifecycleOperationalState {
+            bootstrap_full_scan_completed: true,
+            ..SyncLifecycleOperationalState::default()
+        };
+        let base_downloads = DownloadJobCounters::default();
+
+        let mut cursor_active = base_lifecycle.clone();
+        cursor_active.active_delta_next_link = Some("https://example.test/next".to_string());
+        assert!(!bootstrap_ready_for_two_way(&cursor_active, &base_downloads));
+
+        let mut queue_remaining = base_downloads.clone();
+        queue_remaining.remaining = 1;
+        assert!(!bootstrap_ready_for_two_way(&base_lifecycle, &queue_remaining));
+
+        let mut failed_terminal = base_downloads;
+        failed_terminal.failed_terminal = 1;
+        assert!(!bootstrap_ready_for_two_way(&base_lifecycle, &failed_terminal));
+    }
+
+    #[test]
+    fn bootstrap_gate_allows_transition_when_requirements_clear() {
+        let lifecycle = SyncLifecycleOperationalState {
+            bootstrap_full_scan_completed: true,
+            active_delta_next_link: None,
+            ..SyncLifecycleOperationalState::default()
+        };
+        let downloads = DownloadJobCounters {
+            remaining: 0,
+            failed_terminal: 0,
+            ..DownloadJobCounters::default()
+        };
+        assert!(bootstrap_ready_for_two_way(&lifecycle, &downloads));
+    }
 }

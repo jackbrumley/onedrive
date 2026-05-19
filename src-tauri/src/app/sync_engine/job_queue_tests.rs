@@ -46,6 +46,27 @@ mod job_queue_tests {
             .expect("insert running sync job");
     }
 
+    fn insert_failed_download_job(profile_id: &str, item_id: &str, path: &str) {
+        let connection = open_sync_jobs_connection(profile_id).expect("open sync jobs db");
+        let now = current_unix_seconds();
+        connection
+            .execute(
+                "INSERT INTO sync_jobs (
+                    profile_id, direction, item_id, path, remote_size, remote_modified_ts,
+                    state, run_state, attempt_count, last_error, next_retry_at,
+                    lease_owner, lease_until, bytes_done, bytes_total, progress_updated_at,
+                    created_at, updated_at, started_at, finished_at
+                ) VALUES (
+                    ?1, 'download', ?2, ?3, 10, 10,
+                    'failed_terminal', 'idle', 2, 'network', NULL,
+                    NULL, NULL, 3, 10, ?4,
+                    ?4, ?4, ?4, ?4
+                )",
+                params![profile_id, item_id, path, now],
+            )
+            .expect("insert failed download job");
+    }
+
     #[test]
     fn reset_running_jobs_for_pause_requeues_all_directions() {
         let profile_id = test_profile_id("pause-reset");
@@ -239,5 +260,33 @@ mod job_queue_tests {
             expected.active_delta_next_link
         );
         assert_eq!(actual.last_cycle_at, expected.last_cycle_at);
+    }
+
+    #[test]
+    fn retry_all_failed_download_jobs_requeues_terminal_failures() {
+        let profile_id = test_profile_id("retry-all-failed");
+        clear_profile_rows(&profile_id);
+        insert_failed_download_job(&profile_id, "failed-1", "docs/failed-1.txt");
+        insert_failed_download_job(&profile_id, "failed-2", "docs/failed-2.txt");
+
+        let report =
+            retry_all_failed_download_jobs(&profile_id).expect("retry all failed download jobs");
+        assert_eq!(report.retried, 2);
+        assert_eq!(report.already_retrying, 0);
+
+        let connection = open_sync_jobs_connection(&profile_id).expect("open sync jobs db");
+        let queued_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(1)
+                 FROM sync_jobs
+                 WHERE profile_id = ?1
+                   AND direction = 'download'
+                   AND state = 'queued'
+                   AND run_state = 'idle'",
+                params![&profile_id],
+                |row| row.get(0),
+            )
+            .expect("count retried queued jobs");
+        assert_eq!(queued_count, 2);
     }
 }

@@ -87,98 +87,14 @@ async fn fetch_and_apply_delta_changes(
 
     let (page_tx, mut page_rx) =
         mpsc::channel::<Result<DeltaPageWorkItem, String>>(delta_page_queue_capacity);
-    let mut producer_graph = graph.clone();
-    let producer_cancel = Arc::clone(&cycle_cancel_flag);
     let producer_alive_flag = Arc::clone(&producer_alive);
-    tauri::async_runtime::spawn(async move {
-        producer_alive_flag.store(true, Ordering::Relaxed);
-        log::info!(
-            "{} [cycle:{}] DELTA_PRODUCER_STARTED",
-            producer_graph.account_prefix,
-            producer_graph.cycle_id
-        );
-        let mut current_url = start_url;
-        loop {
-            if let Err(error) = ensure_not_cancelled(&producer_cancel) {
-                producer_alive_flag.store(false, Ordering::Relaxed);
-                log::info!(
-                    "{} [cycle:{}] DELTA_PRODUCER_STOP reason=cancelled",
-                    producer_graph.account_prefix,
-                    producer_graph.cycle_id
-                );
-                let _ = page_tx.send(Err(error)).await;
-                return;
-            }
-
-            log::info!(
-                "{} [cycle:{}] DELTA_PAGE_REQUEST url={}",
-                producer_graph.account_prefix,
-                producer_graph.cycle_id,
-                current_url
-            );
-            let response_text = match graph_get_text(&mut producer_graph, &current_url, &producer_cancel).await {
-                Ok(text) => text,
-                Err(error) => {
-                    producer_alive_flag.store(false, Ordering::Relaxed);
-                    log::warn!(
-                        "{} [cycle:{}] DELTA_PRODUCER_STOP reason=graph_get_error error={}",
-                        producer_graph.account_prefix,
-                        producer_graph.cycle_id,
-                        error
-                    );
-                    let _ = page_tx.send(Err(error)).await;
-                    return;
-                }
-            };
-
-            let response: DeltaResponse = match serde_json::from_str(&response_text)
-                .map_err(|error| format!("Failed to decode delta response: {error}"))
-            {
-                Ok(value) => value,
-                Err(error) => {
-                    producer_alive_flag.store(false, Ordering::Relaxed);
-                    log::warn!(
-                        "{} [cycle:{}] DELTA_PRODUCER_STOP reason=decode_error error={}",
-                        producer_graph.account_prefix,
-                        producer_graph.cycle_id,
-                        error
-                    );
-                    let _ = page_tx.send(Err(error)).await;
-                    return;
-                }
-            };
-
-            let next_link = response.next_link.clone();
-            let payload = DeltaPageWorkItem {
-                items: response.value,
-                next_link: response.next_link,
-                delta_link: response.delta_link,
-            };
-
-            if page_tx.send(Ok(payload)).await.is_err() {
-                producer_alive_flag.store(false, Ordering::Relaxed);
-                log::info!(
-                    "{} [cycle:{}] DELTA_PRODUCER_STOP reason=page_channel_closed",
-                    producer_graph.account_prefix,
-                    producer_graph.cycle_id
-                );
-                return;
-            }
-
-            if let Some(next) = next_link {
-                current_url = next;
-                continue;
-            }
-
-            producer_alive_flag.store(false, Ordering::Relaxed);
-            log::info!(
-                "{} [cycle:{}] DELTA_PRODUCER_STOP reason=scan_complete",
-                producer_graph.account_prefix,
-                producer_graph.cycle_id
-            );
-            return;
-        }
-    });
+    spawn_delta_page_producer(
+        graph,
+        start_url,
+        Arc::clone(&cycle_cancel_flag),
+        page_tx,
+        producer_alive_flag,
+    );
 
     let (download_tx_raw, download_rx) = mpsc::channel::<RemoteDownloadJob>(download_queue_capacity);
     let mut download_tx = Some(download_tx_raw);
@@ -187,200 +103,31 @@ async fn fetch_and_apply_delta_changes(
     let download_rx = Arc::new(tokio::sync::Mutex::new(download_rx));
     let pending_download_count = Arc::new(AtomicUsize::new(0));
 
-    for worker_index in 0..download_concurrency {
-        let worker_graph = graph.clone();
-        let worker_cancel = Arc::clone(&cycle_cancel_flag);
-        let worker_download_rx = Arc::clone(&download_rx);
-        let worker_result_tx = download_result_tx.clone();
-        let active_worker_count = Arc::clone(&active_download_workers);
-        let worker_pending_download_count = Arc::clone(&pending_download_count);
-        tauri::async_runtime::spawn(async move {
-            active_worker_count.fetch_add(1, Ordering::Relaxed);
-            log::info!(
-                "{} [cycle:{}] DOWNLOAD_WORKER_STARTED worker_index={} active_workers={}",
-                worker_graph.account_prefix,
-                worker_graph.cycle_id,
-                worker_index,
-                active_worker_count.load(Ordering::Relaxed)
-            );
-            loop {
-                let maybe_job = {
-                    let mut receiver = worker_download_rx.lock().await;
-                    receiver.recv().await
-                };
-
-                let Some(job) = maybe_job else {
-                    log::info!(
-                        "{} [cycle:{}] DOWNLOAD_WORKER_STOP worker_index={} reason=queue_closed",
-                        worker_graph.account_prefix,
-                        worker_graph.cycle_id,
-                        worker_index
-                    );
-                    break;
-                };
-
-                let result = match download_remote_item_content(
-                    &worker_graph,
-                    Some(job.job_id),
-                    &job.item_id,
-                    &job.path,
-                    Some(job.remote_entry.size),
-                    &job.local_abs,
-                    &worker_cancel,
-                )
-                .await
-                {
-                    Ok(outcome) => RemoteDownloadResult {
-                        job_id: job.job_id,
-                        remote_entry: job.remote_entry,
-                        status: RemoteDownloadResultStatus::Success(outcome),
-                    },
-                    Err(error) => {
-                        if error == DOWNLOAD_RETRY_DEFERRED_ERROR {
-                            RemoteDownloadResult {
-                                job_id: job.job_id,
-                                remote_entry: job.remote_entry,
-                                status: RemoteDownloadResultStatus::DeferredRetry,
-                            }
-                        } else if is_sync_cancelled_error(&error) {
-                            RemoteDownloadResult {
-                                job_id: job.job_id,
-                                remote_entry: job.remote_entry,
-                                status: RemoteDownloadResultStatus::Cancelled,
-                            }
-                        } else {
-                            RemoteDownloadResult {
-                                job_id: job.job_id,
-                                remote_entry: job.remote_entry,
-                                status: RemoteDownloadResultStatus::Failed(format!(
-                                    "Remote download failed item_id={} path={}: {}",
-                                    job.item_id, job.path, error
-                                )),
-                            }
-                        }
-                    }
-                };
-                let _ = worker_pending_download_count.fetch_update(
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                    |current| Some(current.saturating_sub(1)),
-                );
-
-                if let Err(send_error) = worker_result_tx.send(result).await {
-                    let dropped_result = send_error.0;
-                    if let Err(error) = mark_download_job_retry_wait(
-                        &worker_graph.profile_id,
-                        dropped_result.job_id,
-                        "Download worker result channel closed; retry scheduled",
-                        Duration::from_secs(1),
-                    ) {
-                        log::warn!(
-                            "{} [cycle:{}] DOWNLOAD_WORKER_RESULT_REQUEUE_FAILED worker_index={} job_id={} error={}",
-                            worker_graph.account_prefix,
-                            worker_graph.cycle_id,
-                            worker_index,
-                            dropped_result.job_id,
-                            error
-                        );
-                    }
-                    log::info!(
-                        "{} [cycle:{}] DOWNLOAD_WORKER_STOP worker_index={} reason=result_channel_closed",
-                        worker_graph.account_prefix,
-                        worker_graph.cycle_id,
-                        worker_index
-                    );
-                    break;
-                }
-            }
-            let remaining = active_worker_count
-                .fetch_sub(1, Ordering::Relaxed)
-                .saturating_sub(1);
-            log::info!(
-                "{} [cycle:{}] DOWNLOAD_WORKER_EXITED worker_index={} active_workers={}",
-                worker_graph.account_prefix,
-                worker_graph.cycle_id,
-                worker_index,
-                remaining
-            );
-        });
-    }
+    spawn_remote_download_workers(
+        graph,
+        download_concurrency,
+        &cycle_cancel_flag,
+        Arc::clone(&download_rx),
+        download_result_tx.clone(),
+        Arc::clone(&active_download_workers),
+        Arc::clone(&pending_download_count),
+    );
     drop(download_result_tx);
 
     let dispatcher_stop = Arc::new(AtomicBool::new(false));
-    let dispatcher_graph = graph.clone();
-    let dispatcher_sync_root = sync_root.to_path_buf();
-    let dispatcher_pending_download_count = Arc::clone(&pending_download_count);
     let dispatcher_stop_flag = Arc::clone(&dispatcher_stop);
     let dispatcher_download_tx = download_tx
         .as_ref()
         .ok_or_else(|| "Remote download queue unavailable".to_string())?
         .clone();
-    tauri::async_runtime::spawn(async move {
-        let mut dispatch_ticker = tokio::time::interval(Duration::from_millis(50));
-        dispatch_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            dispatch_ticker.tick().await;
-            if dispatcher_stop_flag.load(Ordering::Relaxed) {
-                break;
-            }
-
-            let pending = dispatcher_pending_download_count.load(Ordering::Relaxed);
-            let available_slots = download_concurrency.saturating_sub(pending);
-            if available_slots == 0 {
-                continue;
-            }
-
-            let counters = match read_download_job_counters(&dispatcher_graph.profile_id) {
-                Ok(value) => value,
-                Err(error) => {
-                    log::warn!(
-                        "{} [cycle:{}] DOWNLOAD_DISPATCHER_COUNTER_READ_FAILED error={}",
-                        dispatcher_graph.account_prefix,
-                        dispatcher_graph.cycle_id,
-                        error
-                    );
-                    continue;
-                }
-            };
-            if counters.remaining == 0 {
-                continue;
-            }
-
-            match dispatch_claimed_download_jobs(
-                &dispatcher_graph,
-                &dispatcher_sync_root,
-                &dispatcher_download_tx,
-                available_slots,
-                pending,
-                counters.remaining,
-            )
-            .await
-            {
-                Ok(dispatched) => {
-                    if dispatched > 0 {
-                        dispatcher_pending_download_count
-                            .fetch_add(dispatched, Ordering::Relaxed);
-                    }
-                }
-                Err(error) => {
-                    if error.contains("queue closed unexpectedly") {
-                        log::info!(
-                            "{} [cycle:{}] DOWNLOAD_DISPATCHER_STOP reason=queue_closed",
-                            dispatcher_graph.account_prefix,
-                            dispatcher_graph.cycle_id
-                        );
-                        break;
-                    }
-                    log::warn!(
-                        "{} [cycle:{}] DOWNLOAD_DISPATCHER_FAILED error={}",
-                        dispatcher_graph.account_prefix,
-                        dispatcher_graph.cycle_id,
-                        error
-                    );
-                }
-            }
-        }
-    });
+    spawn_remote_download_dispatcher(
+        graph,
+        sync_root,
+        download_concurrency,
+        Arc::clone(&pending_download_count),
+        dispatcher_stop_flag,
+        dispatcher_download_tx,
+    );
 
     let mut download_results_since_flush: usize = 0;
     let mut producer_done = false;
@@ -658,109 +405,4 @@ async fn fetch_and_apply_delta_changes(
     );
 
     Ok(remote_applied_paths)
-}
-
-async fn process_remote_page_items(
-    graph: &mut GraphContext,
-    sync_root: &Path,
-    sync_state: &mut PersistedSyncState,
-    bootstrap_cloud_first: bool,
-    cancel_flag: &Arc<AtomicBool>,
-    items: Vec<DeltaItem>,
-) -> Result<(), String> {
-    for item in items {
-        ensure_not_cancelled(cancel_flag)?;
-        runtime_record_remote_discovered(&graph.sync_runtime, &graph.profile_id, &item.id);
-        if item.deleted.is_some() {
-            let _ = remove_download_job_by_item_id(&graph.profile_id, &item.id);
-            if bootstrap_cloud_first {
-                if let Some(existing) = sync_state.remote_by_id.get(&item.id).cloned() {
-                    sync_state.remote_by_id.remove(&item.id);
-                    sync_state.remote_path_to_id.remove(&existing.path);
-                    sync_state.local_snapshot.remove(&existing.path);
-                }
-                continue;
-            }
-            if let Some(existing) = sync_state.remote_by_id.get(&item.id).cloned() {
-                log::info!(
-                    "{} [cycle:{}] REMOTE_DELETE_ITEM id={} path={} is_dir={}",
-                    graph.account_prefix,
-                    graph.cycle_id,
-                    item.id,
-                    existing.path,
-                    existing.is_dir
-                );
-                sync_state.remote_by_id.remove(&item.id);
-                sync_state.remote_path_to_id.remove(&existing.path);
-                log::info!(
-                    "{} [cycle:{}] REMOTE_DELETE_DEFERRED_TO_PLANNER path={} remote_id={}",
-                    graph.account_prefix,
-                    graph.cycle_id,
-                    existing.path,
-                    item.id
-                );
-            }
-            continue;
-        }
-
-        let Some(path) = resolve_delta_item_path(&item) else {
-            log::warn!(
-                "{} [cycle:{}] DELTA_ITEM_SKIPPED id={} reason=missing_path",
-                graph.account_prefix,
-                graph.cycle_id,
-                item.id
-            );
-            continue;
-        };
-
-        let shared_drive_id = shared_drive_id_from_delta_item(&item);
-        let shared_item_id = shared_item_id_from_delta_item(&item);
-        let shared_kind = shared_kind_from_delta_item(&item);
-        let is_shared_reference = item.remote_item.is_some();
-
-        let remote_entry = RemoteKnownItem {
-            id: item.id.clone(),
-            path: path.clone(),
-            is_dir: item.folder.is_some(),
-            size: item.size.unwrap_or(0),
-            modified_ts: parse_rfc3339_seconds(item.last_modified_date_time.as_deref()),
-            is_shared_reference,
-            shared_drive_id,
-            shared_item_id,
-            shared_kind,
-        };
-        let local_abs = sync_root.join(path_to_local(&path));
-
-        if remote_entry.is_dir {
-            if !bootstrap_cloud_first {
-                log::info!(
-                    "{} [cycle:{}] LOCAL_DIR_ENSURE path={}",
-                    graph.account_prefix,
-                    graph.cycle_id,
-                    path
-                );
-                std::fs::create_dir_all(&local_abs).map_err(|error| {
-                    format!(
-                        "Failed creating local directory '{}': {}",
-                        local_abs.display(),
-                        error
-                    )
-                })?;
-            }
-            upsert_remote_known_item(sync_state, remote_entry.clone());
-            upsert_sync_file_remote_presence(&graph.profile_id, &remote_entry)?;
-            continue;
-        }
-
-        if bootstrap_cloud_first {
-            upsert_remote_known_item(sync_state, remote_entry.clone());
-            upsert_sync_file_remote_presence(&graph.profile_id, &remote_entry)?;
-            continue;
-        }
-
-        upsert_remote_known_item(sync_state, remote_entry.clone());
-        upsert_sync_file_remote_presence(&graph.profile_id, &remote_entry)?;
-    }
-
-    Ok(())
 }

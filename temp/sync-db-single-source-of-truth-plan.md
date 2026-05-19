@@ -78,6 +78,7 @@ Legend:
 - `[x]` Legacy file fallback for sync state load removed (DB-backed state store only).
 - `[~]` Module decomposition advanced (`lifecycle_writer.rs`, `planner_index.rs`, `planner_transitions.rs`, `download_lane.rs`, `upload_lane.rs`, and `cycle_orchestrator.rs` extracted).
 - `[~]` Queue persistence decomposition advanced (`job_queue.rs` split into focused DB/lifecycle/download/upload/activity/issue-throttle store modules).
+- `[~]` Remote pipeline decomposition advanced (`remote_changes.rs` now delegates to extracted producer/worker/dispatcher/page-processor modules).
 - `[~]` Initial planner tests added (`planner_*` transition coverage).
 - `[x]` Roadmap document created in `temp/`.
 
@@ -105,7 +106,7 @@ Legend:
     - `[x]` Extract remote lane mechanics to `download_lane.rs`.
     - `[x]` Extract upload lane mechanics to `upload_lane.rs`.
     - `[x]` Keep cycle orchestration thin in `cycle_orchestrator.rs`.
-    - `[~]` Reduce oversized files (`job_queue.rs`, `remote_changes.rs`) below target scope (`job_queue.rs` split into focused stores; continue reducing `remote_changes.rs` as follow-up).
+    - `[~]` Reduce oversized files (`job_queue.rs`, `remote_changes.rs`) below target scope (`job_queue.rs` split; `remote_changes.rs` orchestration thinned with producer/worker/dispatcher/page-processor extraction, continue trimming loop owner). 
 
 4. Enforce single writer contract
     - `[~]` Extend guard scripts to block unauthorized lifecycle/planner side writes (lifecycle direct-write guard added for phase/activity/scan-complete entry points).
