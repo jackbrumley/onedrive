@@ -311,6 +311,8 @@ export function AccountSyncActivityPanel({
       }
       return left.id.localeCompare(right.id);
     });
+  const downloadingItems = activeItems.filter((item) => item.transferState !== "queued");
+  const queuedItems = activeItems.filter((item) => item.transferState === "queued");
 
   const visibleCompletedItems = [...recentCompleted]
     .sort((left, right) => new Date(right.finishedAt).getTime() - new Date(left.finishedAt).getTime())
@@ -809,12 +811,12 @@ export function AccountSyncActivityPanel({
           <p class="account-sync-preview-empty">No sync activity yet.</p>
         ) : (
           <>
-            {activeItems.length > 0 && (
+            {downloadingItems.length > 0 && (
               <>
-                <p class="account-sync-preview-section-label">Active now ({activeItems.length})</p>
+                <p class="account-sync-preview-section-label">Downloading now ({downloadingItems.length})</p>
                 <div class="account-sync-preview-list account-sync-preview-list-terminal">
-                  {activeItems.map((item) => {
-                    const isQueued = item.transferState === "queued";
+                  {downloadingItems.map((item) => {
+                    const isQueued = false;
                     const progressPercent =
                       !isQueued ? transferProgressPercent(item.bytesDone ?? 0, item.bytesTotal) : null;
                     const isLargeTransfer =
@@ -851,6 +853,40 @@ export function AccountSyncActivityPanel({
                               )}
                             </div>
                             {activityStatusChip(item.direction, isQueued ? "queued" : "active")}
+                          </div>
+                        </button>
+                      </article>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+            {queuedItems.length > 0 && (
+              <>
+                <p class="account-sync-preview-section-label">Queued ({queuedItems.length})</p>
+                <div class="account-sync-preview-list account-sync-preview-list-terminal">
+                  {queuedItems.map((item) => {
+                    return (
+                      <article key={item.id} class="account-sync-preview-item">
+                        <button
+                          type="button"
+                          class="account-sync-preview-item-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void onOpenItemFolder(item.path);
+                          }}
+                        >
+                          <div class="account-sync-preview-row">
+                            <div class="account-sync-preview-content">
+                              <p class="account-sync-terminal-line">
+                                <span class="account-sync-terminal-time">{new Date(item.when).toLocaleTimeString()}</span>
+                                <span class="account-sync-terminal-path">{item.path}</span>
+                                <span class="account-sync-terminal-size">
+                                  {item.bytesTotal ? formatBytes(item.bytesTotal) : "size unknown"}
+                                </span>
+                              </p>
+                            </div>
+                            {activityStatusChip(item.direction, "queued")}
                           </div>
                         </button>
                       </article>
