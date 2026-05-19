@@ -327,6 +327,43 @@ export function AccountSyncActivityPanel({
   const conflictTargetPath = issueSecondaryPath ?? issuePath;
   const hasConflictAction = issueActions.includes("open_conflict") && Boolean(conflictTargetPath);
 
+  const activityStatusChip = (
+    direction: string,
+    state: "active" | "queued" | "completed"
+  ) => {
+    const normalized = direction.toLowerCase();
+    if (state === "queued") {
+      return (
+        <span class="account-sync-status-chip is-queued">
+          <IconRefresh size={14} />
+          <span>Queued</span>
+        </span>
+      );
+    }
+    if (state === "completed") {
+      return (
+        <span class="account-sync-status-chip is-completed">
+          <IconCircleCheckFilled size={14} />
+          <span>{normalized === "upload" ? "Uploaded" : "Downloaded"}</span>
+        </span>
+      );
+    }
+    if (normalized === "upload") {
+      return (
+        <span class="account-sync-status-chip is-active">
+          <IconUpload size={14} />
+          <span>Uploading</span>
+        </span>
+      );
+    }
+    return (
+      <span class="account-sync-status-chip is-active">
+        <IconDownload size={14} />
+        <span>Downloading</span>
+      </span>
+    );
+  };
+
   useEffect(() => {
     if (!runtimeStatus) {
       throughputSampleRef.current = null;
@@ -792,9 +829,6 @@ export function AccountSyncActivityPanel({
                             <div class="account-sync-preview-content">
                               <p class="account-sync-terminal-line">
                                 <span class="account-sync-terminal-time">{new Date(item.when).toLocaleTimeString()}</span>
-                                <span class={`account-sync-terminal-state ${isQueued ? "is-queued" : "is-downloading"}`}>
-                                  {isQueued ? "... queued" : "v downloading"}
-                                </span>
                                 <span class="account-sync-terminal-path">{item.path}</span>
                               </p>
                               <p class="account-sync-preview-meta">
@@ -819,9 +853,7 @@ export function AccountSyncActivityPanel({
                                 </div>
                               )}
                             </div>
-                            <span class="account-sync-preview-right-icons">
-                              <span class="account-sync-preview-status-icon">{iconForDirection(item.direction)}</span>
-                            </span>
+                            {activityStatusChip(item.direction, isQueued ? "queued" : "active")}
                           </div>
                         </button>
                       </article>
@@ -848,7 +880,6 @@ export function AccountSyncActivityPanel({
                           <div class="account-sync-preview-content">
                             <p class="account-sync-terminal-line">
                               <span class="account-sync-terminal-time">{new Date(item.when).toLocaleTimeString()}</span>
-                              <span class="account-sync-terminal-state is-completed">✓ completed</span>
                               <span class="account-sync-terminal-path">{item.path}</span>
                             </p>
                             <p class="account-sync-preview-meta">
@@ -856,12 +887,7 @@ export function AccountSyncActivityPanel({
                               <span>done</span>
                             </p>
                           </div>
-                          <span class="account-sync-preview-right-icons">
-                            <span class="account-sync-preview-direction-icon">{iconForDirection(item.direction)}</span>
-                            <span class="account-sync-preview-status-icon">
-                              <IconCircleCheckFilled size={ACTIVITY_ICON_SIZE} class="sync-preview-icon-success" />
-                            </span>
-                          </span>
+                          {activityStatusChip(item.direction, "completed")}
                         </div>
                       </button>
                     </article>

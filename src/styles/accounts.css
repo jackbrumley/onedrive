@@ -864,30 +864,33 @@
   font-variant-numeric: tabular-nums;
 }
 
-.account-sync-terminal-state {
-  flex: 0 0 auto;
-  width: 8.2rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.account-sync-terminal-state.is-downloading {
-  color: #2f6fab;
-}
-
-.account-sync-terminal-state.is-queued {
-  color: #9a6f36;
-}
-
-.account-sync-terminal-state.is-completed {
-  color: #1d9d57;
-}
-
 .account-sync-terminal-path {
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.account-sync-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.account-sync-status-chip.is-active {
+  color: #2f6fab;
+}
+
+.account-sync-status-chip.is-queued {
+  color: #9a6f36;
+}
+
+.account-sync-status-chip.is-completed {
+  color: #1d9d57;
 }
 
 .sync-runtime-progress-track-compact {
