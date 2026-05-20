@@ -16,6 +16,7 @@ import {
   IconVideo,
 } from "@tabler/icons-preact";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { VirtualizedList } from "../ui/VirtualizedList";
 import type { SyncRuntimeAccountStatus } from "../../types/somedrive";
 import { syncModeMessage } from "./syncModeMessaging";
 
@@ -153,6 +154,8 @@ function extensionFromPath(path: string): string {
 const FILE_TYPE_ICON_SIZE = 34;
 const ACTIVITY_ICON_SIZE = 24;
 const LARGE_FILE_PROGRESS_THRESHOLD_BYTES = 1_048_576;
+const ACTIVITY_ROW_HEIGHT_PX = 36;
+const ACTIVITY_LIST_MAX_HEIGHT_PX = 420;
 
 function iconForFilePath(path: string) {
   const extension = extensionFromPath(path);
@@ -371,6 +374,23 @@ export function AccountSyncActivityPanel({
         <span>Downloading</span>
       </span>
     );
+  };
+
+  const activeRowSizeText = (item: {
+    transferState: string;
+    bytesDone: number;
+    bytesTotal: number | null;
+  }): string => {
+    if (item.transferState === "queued") {
+      return item.bytesTotal ? formatBytes(item.bytesTotal) : "size unknown";
+    }
+    if (item.bytesTotal && item.bytesTotal >= LARGE_FILE_PROGRESS_THRESHOLD_BYTES) {
+      const percent = transferProgressPercent(item.bytesDone, item.bytesTotal);
+      if (percent !== null) {
+        return `${formatBytes(item.bytesDone)} / ${formatBytes(item.bytesTotal)} (${percent.toFixed(0)}%)`;
+      }
+    }
+    return item.bytesTotal ? formatBytes(item.bytesTotal) : "size unknown";
   };
 
   useEffect(() => {
@@ -814,92 +834,83 @@ export function AccountSyncActivityPanel({
             {downloadingItems.length > 0 && (
               <>
                 <p class="account-sync-preview-section-label">Downloading now ({downloadingItems.length})</p>
-                <div class="account-sync-preview-list account-sync-preview-list-terminal">
-                  {downloadingItems.map((item) => {
-                    const isQueued = false;
-                    const progressPercent =
-                      !isQueued ? transferProgressPercent(item.bytesDone ?? 0, item.bytesTotal) : null;
-                    const isLargeTransfer =
-                      (item.bytesTotal ?? 0) >= LARGE_FILE_PROGRESS_THRESHOLD_BYTES ||
-                      (item.bytesDone ?? 0) >= LARGE_FILE_PROGRESS_THRESHOLD_BYTES;
-                    const showLargeProgressBar =
-                      isLargeTransfer && !isQueued && !runtimeTelemetryStale && progressPercent !== null;
-                    return (
-                      <article key={item.id} class="account-sync-preview-item">
-                        <button
-                          type="button"
-                          class="account-sync-preview-item-button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void onOpenItemFolder(item.path);
-                          }}
-                        >
-                          <div class="account-sync-preview-row">
-                            <div class="account-sync-preview-content">
-                              <p class="account-sync-terminal-line">
-                                <span class="account-sync-terminal-time">{new Date(item.when).toLocaleTimeString()}</span>
-                                <span class="account-sync-terminal-path">{item.path}</span>
-                                <span class="account-sync-terminal-size">
-                                  {item.bytesTotal ? formatBytes(item.bytesTotal) : "size unknown"}
-                                </span>
-                              </p>
-                              {showLargeProgressBar && (
-                                <div class="sync-runtime-progress-track-compact">
-                                  <div
-                                    class="sync-runtime-progress-fill-compact"
-                                    style={{ width: `${progressPercent.toFixed(1)}%` }}
-                                  />
-                                </div>
-                              )}
-                            </div>
-                            {activityStatusChip(item.direction, isQueued ? "queued" : "active")}
+                <VirtualizedList
+                  items={downloadingItems}
+                  rowHeight={ACTIVITY_ROW_HEIGHT_PX}
+                  maxHeight={ACTIVITY_LIST_MAX_HEIGHT_PX}
+                  className="account-sync-preview-list account-sync-preview-list-terminal"
+                  keyExtractor={(item) => item.id}
+                  renderItem={(item) => (
+                    <article key={item.id} class="account-sync-preview-item">
+                      <button
+                        type="button"
+                        class="account-sync-preview-item-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void onOpenItemFolder(item.path);
+                        }}
+                      >
+                        <div class="account-sync-preview-row">
+                          <div class="account-sync-preview-content">
+                            <p class="account-sync-terminal-line">
+                              <span class="account-sync-terminal-time">{new Date(item.when).toLocaleTimeString()}</span>
+                              <span class="account-sync-terminal-path">{item.path}</span>
+                              <span class="account-sync-terminal-size">{activeRowSizeText(item)}</span>
+                            </p>
                           </div>
-                        </button>
-                      </article>
-                    );
-                  })}
-                </div>
+                          {activityStatusChip(item.direction, "active")}
+                        </div>
+                      </button>
+                    </article>
+                  )}
+                />
               </>
             )}
             {queuedItems.length > 0 && (
               <>
                 <p class="account-sync-preview-section-label">Queued ({queuedItems.length})</p>
-                <div class="account-sync-preview-list account-sync-preview-list-terminal">
-                  {queuedItems.map((item) => {
-                    return (
-                      <article key={item.id} class="account-sync-preview-item">
-                        <button
-                          type="button"
-                          class="account-sync-preview-item-button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void onOpenItemFolder(item.path);
-                          }}
-                        >
-                          <div class="account-sync-preview-row">
-                            <div class="account-sync-preview-content">
-                              <p class="account-sync-terminal-line">
-                                <span class="account-sync-terminal-time">{new Date(item.when).toLocaleTimeString()}</span>
-                                <span class="account-sync-terminal-path">{item.path}</span>
-                                <span class="account-sync-terminal-size">
-                                  {item.bytesTotal ? formatBytes(item.bytesTotal) : "size unknown"}
-                                </span>
-                              </p>
-                            </div>
-                            {activityStatusChip(item.direction, "queued")}
+                <VirtualizedList
+                  items={queuedItems}
+                  rowHeight={ACTIVITY_ROW_HEIGHT_PX}
+                  maxHeight={Math.min(ACTIVITY_LIST_MAX_HEIGHT_PX, 240)}
+                  className="account-sync-preview-list account-sync-preview-list-terminal"
+                  keyExtractor={(item) => item.id}
+                  renderItem={(item) => (
+                    <article key={item.id} class="account-sync-preview-item">
+                      <button
+                        type="button"
+                        class="account-sync-preview-item-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void onOpenItemFolder(item.path);
+                        }}
+                      >
+                        <div class="account-sync-preview-row">
+                          <div class="account-sync-preview-content">
+                            <p class="account-sync-terminal-line">
+                              <span class="account-sync-terminal-time">{new Date(item.when).toLocaleTimeString()}</span>
+                              <span class="account-sync-terminal-path">{item.path}</span>
+                              <span class="account-sync-terminal-size">{activeRowSizeText(item)}</span>
+                            </p>
                           </div>
-                        </button>
-                      </article>
-                    );
-                  })}
-                </div>
+                          {activityStatusChip(item.direction, "queued")}
+                        </div>
+                      </button>
+                    </article>
+                  )}
+                />
               </>
             )}
             {visibleCompletedItems.length > 0 && (
               <>
                 <p class="account-sync-preview-section-label">Recently completed ({visibleCompletedItems.length})</p>
-                <div class="account-sync-preview-list account-sync-preview-list-terminal">
-                  {visibleCompletedItems.map((item) => (
+                <VirtualizedList
+                  items={visibleCompletedItems}
+                  rowHeight={ACTIVITY_ROW_HEIGHT_PX}
+                  maxHeight={Math.min(ACTIVITY_LIST_MAX_HEIGHT_PX, 260)}
+                  className="account-sync-preview-list account-sync-preview-list-terminal"
+                  keyExtractor={(item) => item.id}
+                  renderItem={(item) => (
                     <article key={item.id} class="account-sync-preview-item">
                       <button
                         type="button"
@@ -921,8 +932,8 @@ export function AccountSyncActivityPanel({
                         </div>
                       </button>
                     </article>
-                  ))}
-                </div>
+                  )}
+                />
               </>
             )}
           </>
